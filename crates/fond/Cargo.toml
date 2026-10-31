@@ -21,6 +21,7 @@ path = "src/main.rs"
 portable-pty = "0.9"
 nix = { version = "0.30", features = ["user", "signal", "process", "fs"] }
 pupitre-proto = { path = "../proto" }
+pupitre-ssh = { path = "../ssh" }
 
 [dev-dependencies]
 tempfile = "3"

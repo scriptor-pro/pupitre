@@ -1302,6 +1302,7 @@ dependencies = [
  "nix 0.30.1",
  "portable-pty",
  "pupitre-proto",
+ "pupitre-ssh",
  "tempfile",
 ]
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Recherche d'un agent SSH joignable, ou lancement d'un agent propre à Pupitre.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
@@ -102,6 +103,16 @@ impl AgentPupitre {
     /// Lance `ssh-agent -D -a <socket>` avec les variables `env` (l'agent ne
     /// lit `SSH_ASKPASS` qu'au démarrage) et attend au plus 2 s qu'il réponde.
     pub fn lancer(socket: &Path, env: &[(String, String)]) -> io::Result<AgentPupitre> {
+        Self::lancer_programme(OsStr::new("ssh-agent"), socket, env)
+    }
+
+    /// Comme [`AgentPupitre::lancer`], avec un programme d'agent choisi
+    /// (cherché dans le `PATH` s'il n'a pas de dossier).
+    pub fn lancer_programme(
+        programme: &OsStr,
+        socket: &Path,
+        env: &[(String, String)],
+    ) -> io::Result<AgentPupitre> {
         // Ne supprime qu'un socket à soi et périmé ; un agent vivant est respecté.
         match fs::symlink_metadata(socket) {
             Ok(m) => {
@@ -122,7 +133,7 @@ impl AgentPupitre {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
-        let mut cmd = Command::new("ssh-agent");
+        let mut cmd = Command::new(programme);
         cmd.arg("-D")
             .arg("-a")
             .arg(socket)

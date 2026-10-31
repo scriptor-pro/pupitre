@@ -11,6 +11,7 @@
 
 use crate::relecture::{ReplayBuffer, REPLAY_CAPACITY};
 use crate::session::{Session, SessionEvent};
+use crate::ssh::{EntreesSsh, EtatSsh};
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
 use pupitre_proto::{
@@ -87,6 +88,11 @@ pub fn preparer_dossier(socket: &Path) -> io::Result<()> {
 /// pendant `idle_exit`. Si un autre processus de fond tient déjà ce socket, retourne
 /// aussitôt `Ok(())`. Un socket abandonné (processus de fond disparu) est remplacé.
 pub fn run(socket: &Path, idle_exit: Duration) -> io::Result<()> {
+    run_avec(socket, idle_exit, EntreesSsh::depuis_env())
+}
+
+/// Comme [`run`], avec les entrées de la recherche d'agent SSH fournies (tests).
+pub fn run_avec(socket: &Path, idle_exit: Duration, entrees: EntreesSsh) -> io::Result<()> {
     preparer_dossier(socket)?;
     // Verrou de démarrage : un seul processus de fond par socket, même lancés ensemble.
     let fichier_verrou = OpenOptions::new()
@@ -122,6 +128,7 @@ pub fn run(socket: &Path, idle_exit: Duration) -> io::Result<()> {
         sessions: HashMap::new(),
         prochain_id: 1,
         evt_tx,
+        ssh: EtatSsh::avec_entrees(socket, entrees),
     };
     etat.boucle(&evt_rx, idle_exit);
     arret.store(true, Ordering::SeqCst);
@@ -221,6 +228,7 @@ struct Etat {
     sessions: HashMap<SessionId, SessionEtat>,
     prochain_id: SessionId,
     evt_tx: SyncSender<Evt>,
+    ssh: EtatSsh,
 }
 
 impl Etat {
@@ -368,7 +376,8 @@ impl Etat {
     }
 
     fn ouvrir(&mut self, cid: ClientId, argv: &[String], cwd: Option<&Path>, cols: u16, rows: u16) {
-        let (session, evenements) = match Session::open(argv, cwd, cols, rows, &[]) {
+        let env = self.ssh.variables(self.prochain_id);
+        let (session, evenements) = match Session::open(argv, cwd, cols, rows, &env) {
             Ok(r) => r,
             Err(e) => {
                 return self.envoyer(
@@ -423,6 +432,9 @@ impl Etat {
             },
         );
         self.envoyer(cid, ServerMsg::Opened { id });
+        if let Some(texte) = self.ssh.message_a_envoyer() {
+            self.envoyer(cid, ServerMsg::Message(texte));
+        }
     }
 
     fn controler_occupation(&mut self) {

@@ -13,6 +13,10 @@ workspace = true
 name = "pupitre_ssh"
 path = "src/lib.rs"
 
+[[bin]]
+name = "pupitre-askpass"
+path = "src/bin/pupitre-askpass.rs"
+
 [dependencies]
 nix = { version = "0.30", features = ["user"] }
 glob = "0.3"
