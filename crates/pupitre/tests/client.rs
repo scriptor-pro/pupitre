@@ -159,3 +159,64 @@ fn fond_introuvable_donne_une_erreur() {
     );
     assert!(r.is_err());
 }
+
+#[test]
+fn client_v2_negocie_2() {
+    let (_d, socket) = dossier();
+    let (c, rx) = connect_or_spawn_at(&socket).unwrap();
+    assert_eq!(c.version(), 2);
+    let v = attendre(&rx, |m| match m {
+        ServerMsg::Welcome { version } => Some(*version),
+        _ => None,
+    });
+    assert_eq!(v, 2);
+}
+
+/// Faux processus de fond de la version 1 : refuse `Hello { 2 }` avec le texte exact du
+/// vrai serveur puis ferme ; accepte `Hello { 1 }` à la connexion suivante.
+#[test]
+fn repli_v1_face_a_un_fond_ancien() {
+    use pupitre_proto::{read_frame, write_frame};
+    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::net::UnixListener;
+
+    let d = tempfile::tempdir().unwrap();
+    let dossier = d.path().join("pupitre");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&dossier)
+        .unwrap();
+    let socket = dossier.join("fond.sock");
+    let ecoute = UnixListener::bind(&socket).unwrap();
+    let serveur = std::thread::spawn(move || {
+        let mut vus = Vec::new();
+        for _ in 0..2 {
+            let (mut f, _) = ecoute.accept().unwrap();
+            let ClientMsg::Hello { version } = read_frame(&mut f).unwrap() else {
+                panic!("Hello attendu");
+            };
+            vus.push(version);
+            if version == 1 {
+                write_frame(&mut f, &ServerMsg::Welcome { version: 1 }).unwrap();
+                // Garde la connexion ouverte jusqu'à la fin du client.
+                let _ = read_frame::<_, ClientMsg>(&mut f);
+            } else {
+                write_frame(
+                    &mut f,
+                    &ServerMsg::Error(format!(
+                        "version du protocole incompatible : interface {version}, processus de fond 1"
+                    )),
+                )
+                .unwrap();
+            }
+        }
+        vus
+    });
+    let (c, rx) = pupitre::client::connect_or_spawn_with(&socket, None).unwrap();
+    assert_eq!(c.version(), 1);
+    attendre(&rx, |m| {
+        matches!(m, ServerMsg::Welcome { version: 1 }).then_some(())
+    });
+    drop(c);
+    assert_eq!(serveur.join().unwrap(), vec![2, 1]);
+}

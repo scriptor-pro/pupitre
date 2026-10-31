@@ -49,6 +49,7 @@ const CLE_THEME: &str = "theme";
 const CLE_CONTRASTE: &str = "contraste";
 const CLE_POLICE: &str = "police";
 const CLE_SURVEILLANCE: &str = "surveillance";
+const CLE_FOND_ANCIEN: &str = "fond-ancien";
 /// Police embarquée, utilisée si celle demandée est introuvable.
 const POLICE_DE_SECOURS: &str = "B612 Mono";
 const TAILLE_DE_SECOURS: i32 = 11;
@@ -479,6 +480,15 @@ impl Pupitre {
         let (client, recus) = connect_or_spawn_at(&self.socket).map_err(|e| e.to_string())?;
         let generation = self.generation.get() + 1;
         self.generation.set(generation);
+        // Même clé à chaque connexion : pas de doublon à la reconnexion.
+        self.poser_message(
+            CLE_FOND_ANCIEN,
+            (client.version() < 2).then(|| {
+                "Le processus de fond est d'une version plus ancienne : les fonctions SSH de \
+                 Pupitre seront actives quand tous les onglets auront été fermés."
+                    .to_string()
+            }),
+        );
         *self.client.borrow_mut() = Some(Rc::new(client));
         let faible = Rc::downgrade(self);
         glib::spawn_future_local(async move {
@@ -614,7 +624,13 @@ impl Pupitre {
             }
             ServerMsg::Error(e) if e == CONNEXION_PERDUE => self.connexion_perdue(),
             ServerMsg::Error(e) => eprintln!("pupitre: processus de fond : {e}"),
-            ServerMsg::Welcome { .. } | ServerMsg::Sessions(_) => {}
+            // Les demandes SSH de la version 2 sont traitées plus tard (Task 9).
+            ServerMsg::Welcome { .. }
+            | ServerMsg::Sessions(_)
+            | ServerMsg::Demande { .. }
+            | ServerMsg::DemandeClose { .. }
+            | ServerMsg::Reponse { .. }
+            | ServerMsg::Message(_) => {}
         }
     }
 

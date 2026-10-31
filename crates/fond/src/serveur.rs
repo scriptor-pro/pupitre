@@ -14,7 +14,7 @@ use crate::session::{Session, SessionEvent};
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
 use pupitre_proto::{
-    read_frame, write_frame, ClientMsg, ServerMsg, SessionId, SessionInfo, VERSION,
+    read_frame, write_frame, ClientMsg, ServerMsg, SessionId, SessionInfo, VERSION, VERSION_MIN,
 };
 use std::collections::HashMap;
 use std::fs::{self, DirBuilder, OpenOptions};
@@ -203,6 +203,8 @@ struct ClientEtat {
     file: SyncSender<ServerMsg>,
     flux: UnixStream,
     accueilli: bool,
+    /// Version négociée au `Hello` (1 tant que le client n'est pas accueilli).
+    version: u32,
 }
 
 struct SessionEtat {
@@ -254,6 +256,7 @@ impl Etat {
                         file,
                         flux,
                         accueilli: false,
+                        version: VERSION_MIN,
                     },
                 );
             }
@@ -284,11 +287,13 @@ impl Etat {
         };
         match m {
             ClientMsg::Hello { version } if !accueilli => {
-                if version == VERSION {
+                if (VERSION_MIN..=VERSION).contains(&version) {
+                    let negociee = version.min(VERSION);
                     if let Some(c) = self.clients.get_mut(&cid) {
                         c.accueilli = true;
+                        c.version = negociee;
                     }
-                    self.envoyer(cid, ServerMsg::Welcome { version: VERSION });
+                    self.envoyer(cid, ServerMsg::Welcome { version: negociee });
                 } else {
                     self.envoyer(
                         cid,
@@ -355,6 +360,10 @@ impl Etat {
                 }
                 None => self.inconnue(cid, id),
             },
+            // Traité à la Task 6/7. Le contenu (invite, réponse) n'est jamais journalisé.
+            ClientMsg::Demander { .. }
+            | ClientMsg::Repondre { .. }
+            | ClientMsg::ChargerCle { .. } => {}
         }
     }
 
@@ -435,10 +444,14 @@ impl Etat {
     }
 
     /// Met un message dans la file d'un client ; un client qui ne suit plus est coupé.
+    /// Un message de la version 2 n'est jamais envoyé à un client en version 1.
     fn envoyer(&mut self, cid: ClientId, m: ServerMsg) {
         let Some(c) = self.clients.get(&cid) else {
             return;
         };
+        if m.est_v2() && c.version < 2 {
+            return;
+        }
         match c.file.try_send(m) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => self.couper(cid),

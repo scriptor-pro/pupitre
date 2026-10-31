@@ -3,7 +3,9 @@
 //! bloquer GTK, réception sur un canal `async_channel` lu par la boucle GTK.
 
 use pupitre_fond::serveur::{preparer_dossier, socket_path};
-use pupitre_proto::{read_frame, write_frame, ClientMsg, FrameError, ServerMsg, VERSION};
+use pupitre_proto::{
+    read_frame, write_frame, ClientMsg, FrameError, ServerMsg, VERSION, VERSION_MIN,
+};
 use std::fmt;
 use std::io;
 use std::net::Shutdown;
@@ -18,6 +20,8 @@ use std::time::{Duration, Instant};
 /// Temps laissé au processus de fond pour démarrer et répondre.
 const DELAI_DEMARRAGE: Duration = Duration::from_secs(2);
 const PAS: Duration = Duration::from_millis(25);
+/// Début du texte d'erreur d'un processus de fond qui refuse la version proposée.
+const REFUS_VERSION: &str = "version du protocole incompatible";
 /// Message placé sur le canal quand la connexion est perdue.
 pub const CONNEXION_PERDUE: &str = "connexion perdue";
 
@@ -60,9 +64,16 @@ impl From<io::Error> for ClientError {
 pub struct Client {
     envoi: mpsc::Sender<ClientMsg>,
     flux: UnixStream,
+    /// Version du protocole négociée avec le processus de fond.
+    version: u32,
 }
 
 impl Client {
+    /// Version du protocole négociée (1 si le processus de fond est ancien).
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
     /// Met le message en file ; ne bloque jamais (un thread se charge de l'écriture).
     pub fn send(&self, msg: ClientMsg) -> Result<(), ClientError> {
         self.envoi.send(msg).map_err(|_| ClientError::Deconnecte)
@@ -101,7 +112,14 @@ pub fn connect_or_spawn_with(
             attendre_socket(socket)?
         }
     };
-    demarrer(flux)
+    match demarrer(flux, VERSION) {
+        // Processus de fond plus ancien (qui tourne encore avec des onglets) : il ferme la
+        // connexion refusée, on en ouvre une autre en proposant la version 1.
+        Err(ClientError::Refus(e)) if e.starts_with(REFUS_VERSION) && VERSION > VERSION_MIN => {
+            demarrer(UnixStream::connect(socket)?, VERSION_MIN)
+        }
+        autre => autre,
+    }
 }
 
 /// Lance `pupitre-fond` détaché : son propre groupe de processus (la fermeture du terminal
@@ -150,11 +168,14 @@ fn attendre_socket(socket: &Path) -> Result<UnixStream, ClientError> {
     }
 }
 
-/// Poignée de main, puis threads d'écriture et de lecture.
-fn demarrer(flux: UnixStream) -> Result<(Client, async_channel::Receiver<ServerMsg>), ClientError> {
+/// Poignée de main en proposant `version`, puis threads d'écriture et de lecture.
+fn demarrer(
+    flux: UnixStream,
+    version: u32,
+) -> Result<(Client, async_channel::Receiver<ServerMsg>), ClientError> {
     let mut ecriture = flux.try_clone()?;
     let mut lecture = flux.try_clone()?;
-    write_frame(&mut ecriture, &ClientMsg::Hello { version: VERSION })?;
+    write_frame(&mut ecriture, &ClientMsg::Hello { version })?;
     lecture.set_read_timeout(Some(DELAI_DEMARRAGE))?;
     let accueil = match read_frame::<_, ServerMsg>(&mut lecture) {
         Ok(m @ ServerMsg::Welcome { .. }) => m,
@@ -168,6 +189,10 @@ fn demarrer(flux: UnixStream) -> Result<(Client, async_channel::Receiver<ServerM
         Err(e) => return Err(ClientError::Refus(e.to_string())),
     };
     lecture.set_read_timeout(None)?;
+    let negociee = match accueil {
+        ServerMsg::Welcome { version: v } => v.min(version),
+        _ => version,
+    };
 
     let (recu_tx, recu_rx) = async_channel::unbounded();
     let _ = recu_tx.send_blocking(accueil);
@@ -199,6 +224,7 @@ fn demarrer(flux: UnixStream) -> Result<(Client, async_channel::Receiver<ServerM
         Client {
             envoi: envoi_tx,
             flux,
+            version: negociee,
         },
         recu_rx,
     ))

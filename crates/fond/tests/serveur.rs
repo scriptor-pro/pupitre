@@ -335,3 +335,54 @@ fn flux_massif_ne_bloque_pas() {
         debut.elapsed()
     );
 }
+
+#[test]
+fn client_v1_accueilli_sans_message_v2() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::brut(&s.socket);
+    c.envoyer(ClientMsg::Hello { version: 1 });
+    assert_eq!(c.recevoir(), ServerMsg::Welcome { version: 1 });
+    // Fonctionnement normal ; aucun message de la version 2 ne doit arriver.
+    let id = c.ouvrir(&["sh", "-c", "echo bonjour; sleep 1"]);
+    let mut tout = Vec::new();
+    c.attendre(|m| {
+        assert!(!m.est_v2(), "message v2 reçu par un client v1 : {m:?}");
+        match m {
+            ServerMsg::Output { id: i, data } if *i == id => {
+                tout.extend(data);
+                String::from_utf8_lossy(&tout)
+                    .contains("bonjour")
+                    .then_some(())
+            }
+            _ => None,
+        }
+    });
+    // Les demandes v2 d'un client v1 sont ignorées sans faire tomber la connexion.
+    c.envoyer(ClientMsg::ChargerCle {
+        cle: PathBuf::from("/nulle/part"),
+    });
+    c.envoyer(ClientMsg::List);
+    c.attendre(|m| {
+        assert!(!m.est_v2());
+        matches!(m, ServerMsg::Sessions(_)).then_some(())
+    });
+}
+
+#[test]
+fn client_v2_negocie_2() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::brut(&s.socket);
+    c.envoyer(ClientMsg::Hello { version: 2 });
+    assert_eq!(c.recevoir(), ServerMsg::Welcome { version: 2 });
+    // Hors de la plage acceptée (trop récent, ou nul) : refus.
+    let mut c = Client::brut(&s.socket);
+    c.envoyer(ClientMsg::Hello { version: 3 });
+    assert!(
+        matches!(c.recevoir(), ServerMsg::Error(e) if e.contains("version du protocole incompatible"))
+    );
+    let mut c = Client::brut(&s.socket);
+    c.envoyer(ClientMsg::Hello { version: 0 });
+    assert!(
+        matches!(c.recevoir(), ServerMsg::Error(e) if e.contains("version du protocole incompatible"))
+    );
+}
