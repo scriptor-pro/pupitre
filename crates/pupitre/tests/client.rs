@@ -128,6 +128,13 @@ fn perte_de_connexion_signalee() {
         .arg(&socket)
         .spawn()
         .unwrap();
+    // Attendre que CE processus de fond écoute ; sinon le client en lancerait un second
+    // et la mort du premier ne couperait pas la connexion.
+    let limite = Instant::now() + Duration::from_secs(10);
+    while std::os::unix::net::UnixStream::connect(&socket).is_err() {
+        assert!(Instant::now() < limite, "le processus de fond n'écoute pas");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     let (c, rx) = connect_or_spawn_at(&socket).unwrap();
     fond.kill().unwrap();
     fond.wait().unwrap();

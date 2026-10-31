@@ -291,7 +291,9 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
   - Thème `Systeme` : lit la préférence clair/sombre du bureau via le portail freedesktop (`org.freedesktop.portal.Settings`, `ReadOne("org.freedesktop.appearance", "color-scheme")`, D-Bus local) et suit le signal `SettingChanged` ; portail absent ou valeur « sans préférence » → thème sombre.
   - Texte atténué (SGR 2) : mesurer sur capture le contraste rendu par VTE pour `ESC[2m` avec chaque thème ; s'il passe sous 4,5:1, désactiver l'atténuation (rendu normal) et le noter dans `docs/verifications/etape-1.md`.
 
-- [ ] **Step 1 : Tests** :
+> **Précisions (2026-10-31)** : tests graphiques dans `crates/pupitre/tests/gui_fenetre.rs` (`harness = false`, exécutés seulement avec `--include-ignored`, c.-à-d. par les scripts) ; sonde `crates/pupitre/tests/sonde_terminal.py`. Modules ajoutés : `apparence.rs` (portail clair/sombre), `attenuation.rs` (retrait de SGR 2 quand l'atténuation est illisible : thème sombre, cf. `docs/verifications/etape-1.md`). Test en plus : `saisie_et_sortie_passent_par_le_fond`. `ThemeChoix::Fichier` → thème sombre + message tant que la Task 10 n'est pas faite. Scripts de test : `GIO_USE_VFS=local`.
+
+- [x] **Step 1 : Tests** :
 ```rust
 #[test] fn taille_nombre_d_or() { assert_eq!(taille_ouverture(1920), (960, 593)); assert_eq!(taille_ouverture(2560), (1280, 791)); }
 // tests/gui/fenetre.rs (harness = false, sous scripts/test-x11.sh et test-wayland.sh)
@@ -301,8 +303,8 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
 // theme_suit_le_systeme : portail simulé (service D-Bus de test) renvoyant color-scheme = 2 (clair) → fond #eff1f5 ; signal SettingChanged à 1 (sombre) → fond #1e1e2e.
 // texte_attenue_lisible : "printf '\e[2mattenue\e[0m'" puis capture → contraste mesuré des pixels du texte ≥ 4,5:1 avec chaque thème.
 ```
-- [ ] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** `./scripts/test-x11.sh` et `./scripts/test-wayland.sh` → PASS.
-- [ ] **Step 5 : Commit** — `feat(pupitre): fenêtre VTE reliée au processus de fond`
+- [x] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** `./scripts/test-x11.sh` et `./scripts/test-wayland.sh` → PASS.
+- [x] **Step 5 : Commit** — `feat(pupitre): fenêtre VTE reliée au processus de fond`
 
 ### Task 9 : Onglets, fenêtres multiples, fermeture et reprise après plantage
 

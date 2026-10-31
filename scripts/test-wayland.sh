@@ -3,6 +3,8 @@
 # Lance tous les tests sous un compositeur Wayland sans écran (Weston headless).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Pas de gvfs : il monterait un système de fichiers FUSE dans le dossier temporaire.
+export GIO_USE_VFS=local
 command -v weston >/dev/null || { echo "weston manquant : sudo apt install weston" >&2; exit 1; }
 RUNTIME="$(mktemp -d)"; chmod 700 "$RUNTIME"
 export XDG_RUNTIME_DIR="$RUNTIME"

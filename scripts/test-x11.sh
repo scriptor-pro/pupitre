@@ -3,6 +3,8 @@
 # Lance tous les tests sur un écran X11 virtuel (Xvfb), avec un bus D-Bus et AT-SPI propres.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Pas de gvfs : il monterait un système de fichiers FUSE dans le dossier temporaire.
+export GIO_USE_VFS=local
 command -v xvfb-run >/dev/null || { echo "xvfb-run manquant : sudo apt install xvfb" >&2; exit 1; }
 unset WAYLAND_DISPLAY
 export GDK_BACKEND=x11

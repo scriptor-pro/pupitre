@@ -5,3 +5,4 @@ essai-jetable/feed/sortie/
 *.png
 !maquettes/*.png
 !icone-st/png/*.png
+/.superpowers/
