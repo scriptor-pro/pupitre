@@ -12,9 +12,12 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use pupitre_config::{Config, Rgb, Theme};
 use pupitre_proto::{ClientMsg, SessionId};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use vte4::prelude::*;
+
+/// Propriété de terminal portant le titre envoyé par le programme.
+const TITRE: &str = "xterm.title";
 
 // Conteneur autour de `vte4::Terminal`. Deux raisons (cf. Task 0, essai-jetable/feed) :
 // VTE n'a pas de propriété « column-count » à surveiller, et dériver `vte4::Terminal`
@@ -119,7 +122,10 @@ impl CadreTerminal {
 /// Un onglet de terminal : un `CadreTerminal` relié à la session `id`.
 pub struct TerminalOnglet {
     cadre: CadreTerminal,
-    id: SessionId,
+    client: Rc<Client>,
+    id: Rc<Cell<SessionId>>,
+    /// Session terminée : frappes et tailles ne sont plus envoyées.
+    muet: Rc<Cell<bool>>,
     attenuation: RefCell<FiltreAttenue>,
 }
 
@@ -127,18 +133,29 @@ impl TerminalOnglet {
     pub fn new(client: Rc<Client>, id: SessionId, config: &Config, theme: &Theme) -> Self {
         let cadre = CadreTerminal::default();
         let terminal = cadre.terminal().clone();
+        let id = Rc::new(Cell::new(id));
+        let muet = Rc::new(Cell::new(false));
 
         // Frappes, collages, réponses aux requêtes et souris → session. Une erreur d'envoi
         // signifie connexion perdue : elle est déjà signalée sur le canal du client.
-        let c = client.clone();
+        let (c, i, m) = (client.clone(), id.clone(), muet.clone());
         terminal.connect_commit(move |_, texte, _| {
-            let _ = c.send(ClientMsg::Input {
-                id,
-                data: texte.as_bytes().to_vec(),
-            });
+            if !m.get() {
+                let _ = c.send(ClientMsg::Input {
+                    id: i.get(),
+                    data: texte.as_bytes().to_vec(),
+                });
+            }
         });
+        let (c, i, m) = (client.clone(), id.clone(), muet.clone());
         cadre.connecter_taille(move |cols, rows| {
-            let _ = client.send(ClientMsg::Resize { id, cols, rows });
+            if !m.get() {
+                let _ = c.send(ClientMsg::Resize {
+                    id: i.get(),
+                    cols,
+                    rows,
+                });
+            }
         });
 
         // Ctrl+Maj+V : VTE ne fournit pas de raccourci de collage lui-même.
@@ -157,7 +174,9 @@ impl TerminalOnglet {
 
         let onglet = TerminalOnglet {
             cadre,
+            client,
             id,
+            muet,
             attenuation: RefCell::new(FiltreAttenue::default()),
         };
         onglet.appliquer(config, theme);
@@ -165,7 +184,22 @@ impl TerminalOnglet {
     }
 
     pub fn id(&self) -> SessionId {
-        self.id
+        self.id.get()
+    }
+
+    /// Relie l'onglet à une autre session (shell rouvert dans le même onglet).
+    pub fn relier(&self, id: SessionId) {
+        self.id.set(id);
+        self.muet.set(false);
+    }
+
+    /// Coupe (ou rétablit) l'envoi des frappes et des tailles vers la session.
+    pub fn rendre_muet(&self, muet: bool) {
+        self.muet.set(muet);
+    }
+
+    pub fn est_muet(&self) -> bool {
+        self.muet.get()
     }
 
     pub fn widget(&self) -> &CadreTerminal {
@@ -174,6 +208,59 @@ impl TerminalOnglet {
 
     pub fn terminal(&self) -> &vte4::Terminal {
         self.cadre.terminal()
+    }
+
+    /// Grille actuelle `(colonnes, lignes)`, ou `None` avant la première allocation.
+    pub fn grille(&self) -> Option<(u16, u16)> {
+        let t = self.terminal();
+        let (c, r) = (t.column_count(), t.row_count());
+        (t.is_mapped() && c > 0 && r > 0).then(|| {
+            (
+                u16::try_from(c).unwrap_or(u16::MAX),
+                u16::try_from(r).unwrap_or(u16::MAX),
+            )
+        })
+    }
+
+    /// Provoque un SIGWINCH dans la session (deux tailles successives) pour que les
+    /// programmes plein écran se redessinent après une reprise.
+    pub fn forcer_redessin(&self) {
+        let Some((cols, rows)) = self.grille() else {
+            return;
+        };
+        if self.muet.get() {
+            return;
+        }
+        let id = self.id.get();
+        let autre = if rows > 1 { rows - 1 } else { rows + 1 };
+        let _ = self.client.send(ClientMsg::Resize {
+            id,
+            cols,
+            rows: autre,
+        });
+        let _ = self.client.send(ClientMsg::Resize { id, cols, rows });
+    }
+
+    /// Titre envoyé par le programme (OSC 0/2), sinon dernier élément du dossier courant
+    /// (OSC 7), sinon `None`.
+    pub fn titre(&self) -> Option<String> {
+        let t = self.terminal();
+        if let (Some(titre), _) = t.termprop_string(TITRE) {
+            let titre = titre.trim();
+            if !titre.is_empty() {
+                return Some(titre.to_string());
+            }
+        }
+        // Accesseur marqué obsolète depuis VTE 0.78 au profit des termprops de type URI,
+        // non exposées par vte4-rs ; il reste fonctionnel.
+        #[allow(deprecated)]
+        let uri = t.current_directory_uri()?;
+        let chemin = gtk::gio::File::for_uri(&uri).path()?;
+        let nom = chemin
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| chemin.to_string_lossy().into_owned());
+        (!nom.is_empty()).then_some(nom)
     }
 
     /// Affiche des octets reçus de la session (y compris invalides : VTE les remplace).

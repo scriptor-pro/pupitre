@@ -321,15 +321,17 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
   - **Au démarrage** : `List` ; s'il existe des sessions (reprise après plantage), recréer un onglet par session dans une fenêtre, `Attach` chacune et donner `Replay` à `feed()` ; sinon ouvrir une session.
   - **Connexion perdue** : message persistant « Le processus de fond s'est arrêté : les shells ouverts sont perdus. » + bouton « Ouvrir un nouveau terminal ».
 
-- [ ] **Step 1 : Tests GUI** :
+> **Précisions (2026-10-31)** : application **unique** par session de bureau (un second lancement ouvre une fenêtre dans l'interface en cours) : les sessions trouvées au démarrage sont donc orphelines (reprise). `Pupitre` (dans `fenetre.rs`) tient la connexion et route les messages ; `FenetrePupitre::nouvelle(app, &Rc<Pupitre>)` ; `ajouter_onglet` renvoie `Option<Rc<Onglet>>`. Ctrl+Maj+T/W/N posés dès cette tâche (contrôleur de touches en phase de capture ; la Task 11 les reprend dans `raccourcis.rs`). Menu principal (F10) à droite des onglets ; clic droit sur un onglet = menu de l'onglet. Après une relecture, redessin forcé par deux `Resize` successifs. Tests dans `crates/pupitre/tests/gui_onglets.rs` (application pilotée dans le processus de test, actions de fenêtre) ; la reprise utilise le vrai binaire tué par SIGKILL et un client témoin pour taper ; sonde `tests/sonde.py` (arbre AT-SPI complet). Tests en plus : titre/renommage, détachement, fermeture de fenêtre, connexion perdue.
+
+- [x] **Step 1 : Tests GUI** :
 ```text
 nouvel_onglet_ouvre_une_session      : Ctrl+Maj+T → 2 onglets, 2 sessions côté fond.
 fermeture_occupee_demande_confirmation : lancer "sleep 30" puis Ctrl+Maj+W → dialogue présent (AT-SPI rôle "dialog") ; Annuler → onglet conservé.
 onglet_shell_termine_affiche_message : taper "exit" → texte "Le shell s'est terminé (code 0)" présent dans l'arbre AT-SPI.
 reprise_apres_plantage               : taper "echo avant-plantage" ; kill -9 de l'interface ; relancer pupitre → 1 onglet dont le texte contient "avant-plantage" ; la session répond à "echo apres".
 ```
-- [ ] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** tests X11 et Wayland → PASS.
-- [ ] **Step 5 : Commit** — `feat(pupitre): onglets, fenêtres, reprise après plantage`
+- [x] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** tests X11 et Wayland → PASS.
+- [x] **Step 5 : Commit** — `feat(pupitre): onglets, fenêtres, reprise après plantage`
 
 ### Task 10 : Rechargement de la configuration, messages et `pupitre check`
 

@@ -451,7 +451,7 @@ fn fenetre_s_ouvre_et_affiche_le_shell(racine: &Path) -> Resultat {
         .unwrap_or_default()
         .trim()
         .to_string();
-    let sonde = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/sonde_terminal.py");
+    let sonde = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/sonde.py");
     let mut sortie = String::new();
     let limite = Instant::now() + Duration::from_secs(20);
     let mut trouve = false;

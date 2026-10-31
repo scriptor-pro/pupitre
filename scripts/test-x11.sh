@@ -5,6 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # Pas de gvfs : il monterait un système de fichiers FUSE dans le dossier temporaire.
 export GIO_USE_VFS=local
+# Pas de portails : le portail de documents tenterait un montage FUSE.
+export GDK_DEBUG=no-portals
 command -v xvfb-run >/dev/null || { echo "xvfb-run manquant : sudo apt install xvfb" >&2; exit 1; }
 unset WAYLAND_DISPLAY
 export GDK_BACKEND=x11

@@ -23,3 +23,7 @@ tempfile = "3"
 [[test]]
 name = "gui_fenetre"
 harness = false
+
+[[test]]
+name = "gui_onglets"
+harness = false
