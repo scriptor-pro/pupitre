@@ -209,7 +209,7 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
 - Environnement des shells : `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=Pupitre`.
 - Thread de lecture par session, enveloppé dans `catch_unwind` : une panique ferme la session concernée (`Exited(None)`) sans toucher aux autres.
 
-- [ ] **Step 1 : Tests** :
+- [x] **Step 1 : Tests** :
 ```rust
 #[test] fn sortie_du_shell_recue() { /* argv ["/bin/sh","-c","printf bonjour"] → un Output contenant "bonjour" puis Exited(Some(0)) */ }
 #[test] fn saisie_transmise() { /* /bin/sh interactif, write_input "echo $((6*7))\n" → sortie contient "42" */ }
@@ -219,10 +219,10 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
 #[test] fn ouvrir_shell_inexistant_renvoie_erreur() { /* argv ["/nexiste/pas"] → Err(OpenError::Spawn(_)) ou Exited(Some(code != 0)) rapidement, sans panique */ }
 #[test] fn relecture_contient_la_sortie() { /* après "printf trace", replay() contient "trace" */ }
 ```
-- [ ] **Step 2 :** `cargo test -p pupitre-fond session` → échec.
-- [ ] **Step 3 :** Implémenter avec `portable-pty`.
-- [ ] **Step 4 :** → PASS.
-- [ ] **Step 5 : Commit** — `feat(fond): sessions PTY isolées`
+- [x] **Step 2 :** `cargo test -p pupitre-fond session` → échec.
+- [x] **Step 3 :** Implémenter avec `portable-pty`.
+- [x] **Step 4 :** → PASS.
+- [x] **Step 5 : Commit** — `feat(fond): sessions PTY isolées`
 
 ### Task 6 : Serveur du processus de fond
 

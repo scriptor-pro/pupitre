@@ -16,3 +16,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "pupitre-fond"
 path = "src/main.rs"
+
+[dependencies]
+portable-pty = "0.9"
+nix = { version = "0.30", features = ["user", "signal", "process"] }
