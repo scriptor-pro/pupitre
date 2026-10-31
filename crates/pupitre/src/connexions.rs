@@ -600,6 +600,14 @@ fn ouvrir_formulaire(etat: &Rc<Etat>, indice: Option<usize>) {
     fenetre.connect_destroy(move |_| drop(garde.borrow_mut().take()));
 
     fenetre.present();
+    // Orca ignore l'activation de ce formulaire (celle de la liste vient juste de la
+    // précéder) : le titre est annoncé ici, avant le premier champ.
+    let faible_fenetre = fenetre.downgrade();
+    glib::timeout_add_local_once(std::time::Duration::from_millis(40), move || {
+        if let Some(f) = faible_fenetre.upgrade() {
+            annoncer(&f, titre);
+        }
+    });
     if let Some((_, premier, _)) = form.saisies.first() {
         premier.grab_focus();
         annoncer_focus_une_fois_affiche(premier);

@@ -23,6 +23,8 @@ import time
 
 ICI = os.path.dirname(os.path.abspath(__file__))
 INVITE = "invite$ "
+# Phrase de la clé SSH de test (jamais utilisée ailleurs ; clé créée dans le HOME temporaire).
+PHRASE_CLE = "phrase-de-test-orca-4821"
 # Une phrase d'Orca dans son journal : « SPEECH OUTPUT: 'texte' {'established': … } ».
 PHRASE = re.compile(r"SPEECH OUTPUT: '(.*?)' \{'established'", re.S)
 
@@ -48,6 +50,7 @@ class Session:
             "XDG_DATA_HOME": ".local/share",
             "XDG_CACHE_HOME": ".cache",
             "XDG_RUNTIME_DIR": "run",
+            "TMPDIR": "tmp",
         }
         for var, sous in dossiers.items():
             d = os.path.join(self.perso, sous)
@@ -55,6 +58,12 @@ class Session:
             env[var] = d
         with open(os.path.join(self.perso, ".bashrc"), "w", encoding="utf-8") as f:
             f.write(f'PS1="{INVITE}"\nunset PROMPT_COMMAND\n')
+        # Jamais l'agent ni le trousseau de l'utilisateur : le fond lance son propre
+        # ssh-agent dans XDG_RUNTIME_DIR (TMPDIR temporaire : pas de recherche dans /tmp),
+        # le trousseau est celui, jetable, de scripts/trousseau-test.sh.
+        for var in ("SSH_AUTH_SOCK", "SSH_AGENT_PID", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE"):
+            env.pop(var, None)
+        self.preparer_ssh()
         env.update(
             SHELL="/bin/bash",
             GDK_BACKEND="x11",
@@ -70,6 +79,20 @@ class Session:
         env.pop("WAYLAND_DISPLAY", None)
         self.env = env
         self.pupitre = pupitre
+
+    def preparer_ssh(self):
+        """Clé de test chiffrée, ~/.ssh/config et connexions.toml pour les vérifications 15 et 16."""
+        ssh = os.path.join(self.perso, ".ssh")
+        os.makedirs(ssh, mode=0o700, exist_ok=True)
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-q", "-N", PHRASE_CLE,
+                        "-C", "cle-de-test", "-f", os.path.join(ssh, "id_test")], check=True)
+        with open(os.path.join(ssh, "config"), "w", encoding="utf-8") as f:
+            f.write("Host essai-un\n  HostName 127.0.0.1\n  Port 1\n")
+        dossier = os.path.join(self.perso, ".config", "pupitre")
+        os.makedirs(dossier, mode=0o700, exist_ok=True)
+        with open(os.path.join(dossier, "connexions.toml"), "w", encoding="utf-8") as f:
+            f.write('[[connexion]]\nnom = "serveur-test"\nhote = "127.0.0.1"\n'
+                    'utilisateur = "alice"\nport = 2222\n')
 
     # --- processus -------------------------------------------------------------
 
@@ -100,12 +123,18 @@ class Session:
         for pid in os.listdir("/proc"):
             if not pid.isdigit():
                 continue
-            try:
-                with open(f"/proc/{pid}/environ", "rb") as f:
-                    if self.perso.encode() in f.read():
+            # Le fond, ses shells et son veilleur ont le dossier dans leur environnement ;
+            # le ssh-agent de Pupitre (setgid : environnement illisible) l'a dans sa ligne
+            # de commande (-a <socket>).
+            for nom in ("environ", "cmdline"):
+                try:
+                    with open(f"/proc/{pid}/{nom}", "rb") as f:
+                        trouve = self.perso.encode() in f.read()
+                    if trouve:
                         os.kill(int(pid), signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                pass
+                        break
+                except (OSError, ProcessLookupError):
+                    pass
         time.sleep(0.5)
         shutil.rmtree(self.perso, ignore_errors=True)
 
@@ -404,6 +433,74 @@ def v14_commandes_orca(s):
     exiger(s.attendre(re.escape(INVITE.strip()), 4), "Orca : lecture de la ligne courante sans effet")
 
 
+def v15_phrase_de_passe(s):
+    s.revenir_au_terminal()
+    s.marquer()
+    s.commande("ssh-add ~/.ssh/id_test")
+    exiger(s.attendre(r"Phrase de passe SSH", 10), "la fenêtre « Phrase de passe SSH » n'est pas annoncée")
+    exiger(s.attendre(r"bo[iî]te de dialogue|dialog", 3), "le rôle « boîte de dialogue » n'est pas dit")
+    exiger(s.attendre(r"Phrase de passe de la clé .*id_test", 4),
+           "la question avec le chemin de la clé n'est pas lue")
+    exiger(s.attendre(r"mot de passe|password", 3), "la saisie n'est pas annoncée « saisie de mot de passe »")
+    s.calme()
+    s.marquer()
+    s.touches("Tab")
+    exiger(s.attendre(r"Mémoriser dans le trousseau", 4), "la case « Mémoriser dans le trousseau » n'est pas lue")
+    exiger(s.attendre(r"case à cocher|check", 2), "le rôle « case à cocher » n'est pas dit")
+    exiger(s.attendre(r"coch[ée]e|checked", 2) and not s.attendre(r"non coch", 0.5),
+           "l'état « cochée » n'est pas dit")
+    s.calme()
+    s.marquer()
+    s.touches("Escape")  # vraie touche Échap : seul test qui la fait arriver au dialogue
+    s.calme(1.5)
+    # ssh-add a fini (sinon la commande suivante resterait en attente) et le terminal a le clavier.
+    s.marquer()
+    s.commande("echo fin-$((6*7))")
+    exiger(s.attendre(r"fin-42", 8), "après Échap, ssh-add n'a pas fini ou le terminal n'a pas le clavier")
+    exiger(not any(re.search(r"Phrase de passe SSH", p) for p in s.paroles()),
+           "une seconde fenêtre de phrase de passe est apparue après Échap")
+
+
+def v16_connexions(s):
+    s.revenir_au_terminal()
+    s.marquer()
+    s.touches("ctrl+shift+o")
+    exiger(s.attendre(r"Connexions SSH", 6), "la fenêtre « Connexions SSH » n'est pas annoncée")
+    exiger(s.attendre(r"bo[iî]te de dialogue|dialog", 3), "le rôle « boîte de dialogue » n'est pas dit")
+    exiger(s.attendre(r"serveur-test.*alice@127\.0\.0\.1:2222", 4), "la première ligne n'est pas lue")
+    s.calme()
+    s.marquer()
+    s.touches("Down")
+    exiger(s.attendre(r"essai-un.*ssh/config", 4), "flèche bas : la ligne suivante n'est pas lue")
+    # Tab : les boutons, jusqu'à « Ajouter… » ; Entrée ouvre le formulaire.
+    s.calme()
+    s.marquer()
+    s.touches("Tab", "Tab")
+    exiger(s.attendre(r"Ajouter", 4), "Tab : « Ajouter… » n'est pas lu")
+    s.calme()
+    s.marquer()
+    s.touches("Return")
+    # Orca ignore l'activation du formulaire (juste après celle de la liste) : le titre est
+    # annoncé par Pupitre lui-même, après le premier champ.
+    exiger(s.attendre(r"Nom texte", 5), "le premier champ « Nom » n'est pas lu")
+    exiger(s.attendre(r"Ajouter une connexion", 3), "le titre du formulaire d'ajout n'est pas annoncé")
+    s.calme()
+    s.marquer()
+    s.touches("Tab", "Tab", "Tab", "Tab")
+    exiger(s.attendre(r"^Clé liste déroulante", 4),
+           "Tab jusqu'à la liste déroulante : « Clé liste déroulante » n'est pas lu")
+    s.calme()
+    s.touches("Escape")  # ferme le formulaire
+    s.calme()
+    s.marquer()
+    s.touches("Escape")  # ferme la liste
+    s.calme()
+    s.revenir_au_terminal()
+    s.marquer()
+    s.commande("echo ok-$((6*7))")
+    exiger(s.attendre(r"ok-42", 6), "après Échap, le terminal n'a pas le clavier")
+
+
 VERIFICATIONS = [
     (1, "Lancement : fenêtre et invite annoncées", v01_lancement),
     (2, "Sortie d'une commande lue ligne par ligne, accents compris", v02_sortie),
@@ -419,6 +516,8 @@ VERIFICATIONS = [
     (12, "Cloche : onglet lu « …, cloche »", v12_cloche),
     (13, "F10 va au programme, pas au menu", v13_f10),
     (14, "Commandes d'Orca non captées par Pupitre", v14_commandes_orca),
+    (15, "ssh-add : fenêtre de phrase de passe lue, case, Échap", v15_phrase_de_passe),
+    (16, "Connexions SSH : liste lue, formulaire, Échap", v16_connexions),
 ]
 
 

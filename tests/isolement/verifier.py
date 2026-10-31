@@ -2,10 +2,13 @@
 """Vérifie, sous strace, qu'une session type de Pupitre :
 - n'ouvre aucune connexion réseau (seulement des sockets Unix) ;
 - n'écrit rien hors de ses dossiers ($XDG_CONFIG_HOME/pupitre, $XDG_STATE_HOME/pupitre,
-  et son socket dans $XDG_RUNTIME_DIR/pupitre).
+  et son socket dans $XDG_RUNTIME_DIR/pupitre) ;
+- ne laisse la phrase de passe d'une clé SSH de test dans aucun fichier sous $HOME ni
+  $XDG_RUNTIME_DIR (recherche de la chaîne après la session), ni dans les arguments d'un
+  `execve` de la trace.
 
-Seuls Pupitre et pupitre-fond sont jugés : les shells lancés dans les onglets (et leurs
-commandes) écrivent ce qu'ils veulent, ce n'est pas le fait de Pupitre.
+Seuls Pupitre, pupitre-fond et pupitre-askpass sont jugés : les shells lancés dans les onglets (et leurs
+commandes, dont `ssh`) écrivent ce qu'ils veulent, ce n'est pas le fait de Pupitre.
 
 Usage (sur un écran X11, normalement via scripts/verifier-isolement.sh) :
   python3 verifier.py --pupitre CHEMIN --fond CHEMIN --sortie DOSSIER
@@ -33,6 +36,13 @@ TOLERES = (
 # $XDG_CACHE_HOME : signalés à part, sans faire échouer la vérification.
 CACHES_BIBLIOTHEQUES = ("mesa_shader_cache", "mesa_shader_cache_db", "fontconfig")
 
+# Phrase de passe de la clé de test (jamais utilisée ailleurs). La clé est créée AVANT le
+# démarrage de strace : `ssh-keygen -N` ne figure donc pas dans la trace.
+PHRASE_CLE = "phrase-isolement-7316"
+
+# Appel coupé par strace -f : « <unfinished ...> », puis « <... nom resumed> » plus loin.
+COUPE = re.compile(r"^(\d+)\s+(.*?)\s*<unfinished \.\.\.>\s*$")
+REPRIS = re.compile(r"^(\d+)\s+<\.\.\. \w+ resumed>(.*)$")
 LIGNE = re.compile(r"^(\d+)\s+(\w+)\((.*)\)\s+=\s+(-?\d+|\?)")
 
 
@@ -50,6 +60,16 @@ def taper(env, texte):
 def session_type(env, perso):
     """Onglets, commandes, recherche, zoom, configuration modifiée, fermeture."""
     taper(env, "echo bonjour; ls /")
+    # Clé SSH : ssh-add (la fenêtre de phrase de passe est remplie au clavier, la phrase
+    # est mémorisée dans le trousseau jetable), puis une connexion refusée par l'utilisateur.
+    taper(env, "ssh-add ~/.ssh/id_test")
+    time.sleep(4)
+    subprocess.run(["xdotool", "type", "--delay", "40", PHRASE_CLE], env=env, check=True)
+    touches(env, "Return")
+    time.sleep(4)
+    taper(env, "ssh-add -l > ~/liste-cles")
+    taper(env, "ssh -p 1 127.0.0.1")
+    time.sleep(2)
     touches(env, "ctrl+shift+t")
     taper(env, "printf '\\e]0;essai\\a'")
     touches(env, "ctrl+shift+f")
@@ -71,24 +91,67 @@ def session_type(env, perso):
         time.sleep(0.5)
 
 
+def phrase_dans_fichiers(racines, phrase):
+    """Fichiers réguliers (liens non suivis) contenant `phrase`, lus en binaire."""
+    cible = phrase.encode()
+    trouves, lus = [], 0
+    for racine in racines:
+        for dossier, _, noms in os.walk(racine):
+            for nom in noms:
+                chemin = os.path.join(dossier, nom)
+                try:
+                    if os.path.islink(chemin) or not os.path.isfile(chemin):
+                        continue
+                    with open(chemin, "rb") as f:
+                        lus += 1
+                        if cible in f.read():
+                            trouves.append(chemin)
+                except OSError:
+                    pass
+    return trouves, lus
+
+
+def recoller(lignes):
+    """Reforme les appels que strace -f a coupés en deux (sinon ils échappent à l'analyse)."""
+    en_cours, sortie = {}, []
+    for l in lignes:
+        c = COUPE.match(l)
+        if c:
+            en_cours[c.group(1)] = c.group(2)
+            continue
+        r = REPRIS.match(l)
+        if r:
+            debut = en_cours.pop(r.group(1), None)
+            if debut is not None:
+                sortie.append(f"{r.group(1)} {debut}{r.group(2)}\n")
+            continue
+        sortie.append(l)
+    return sortie
+
+
 def analyser(trace, autorises, cache):
     programmes = {}  # pid → programme exécuté
     premier = None
     reseau, ecritures, caches = [], [], set()
+    ignores = []  # connexions réseau de programmes non jugés (ssh de l'utilisateur)
+    phrase_argv = []
     with open(trace, encoding="utf-8", errors="replace") as f:
         lignes = f.readlines()
+    lignes = recoller(lignes)
     for l in lignes:
         m = LIGNE.match(l)
         if not m:
             continue
         pid, appel, args, ret = m.groups()
+        if appel == "execve" and PHRASE_CLE in l:
+            phrase_argv.append(f"{os.path.basename(args.split(chr(34))[1])}[{pid}] {l.strip()[:120]}")
         if appel == "execve" and ret == "0":
             prog = os.path.basename(args.split('"')[1])
             programmes[pid] = prog
             premier = premier or pid
         elif appel in ("clone", "clone3", "vfork", "fork") and ret.isdigit():
             programmes.setdefault(ret, programmes.get(pid, "?"))
-    juges = {"pupitre", "pupitre-fond"}
+    juges = {"pupitre", "pupitre-fond", "pupitre-askpass"}
     for l in lignes:
         m = LIGNE.match(l)
         if not m:
@@ -96,6 +159,8 @@ def analyser(trace, autorises, cache):
         pid, appel, args, ret = m.groups()
         prog = programmes.get(pid, "pupitre" if pid == premier else "?")
         if prog not in juges:
+            if appel == "connect" and "sa_family=AF_INET" in args:
+                ignores.append(prog)
             continue
         if appel == "connect" and "sa_family=AF_UNIX" not in args:
             reseau.append(f"{prog}[{pid}] {l.strip()}")
@@ -120,7 +185,8 @@ def analyser(trace, autorises, cache):
                 caches.add(nom)
                 continue
             ecritures.append(f"{prog}[{pid}] {appel} {c}")
-    return reseau, sorted(set(ecritures)), sorted(caches)
+    return (reseau, sorted(set(ecritures)), sorted(caches), phrase_argv,
+            sorted(set(programmes.values())), ignores)
 
 
 def main():
@@ -138,6 +204,16 @@ def main():
         d = os.path.join(perso, sous)
         os.makedirs(d, mode=0o700, exist_ok=True)
         env[var] = d
+    os.makedirs(os.path.join(perso, "tmp"), mode=0o700, exist_ok=True)
+    env["TMPDIR"] = os.path.join(perso, "tmp")
+    # Jamais l'agent SSH ni le trousseau de l'utilisateur : le fond lance son propre
+    # ssh-agent ; le trousseau est celui, jetable, de scripts/trousseau-test.sh.
+    for var in ("SSH_AUTH_SOCK", "SSH_AGENT_PID", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE"):
+        env.pop(var, None)
+    ssh = os.path.join(perso, ".ssh")
+    os.makedirs(ssh, mode=0o700, exist_ok=True)
+    subprocess.run(["ssh-keygen", "-t", "ed25519", "-q", "-N", PHRASE_CLE, "-C", "cle-de-test",
+                    "-f", os.path.join(ssh, "id_test")], check=True)
     env.update(SHELL="/bin/bash", GDK_BACKEND="x11", GIO_USE_VFS="local",
                GDK_DEBUG="no-portals", PUPITRE_FOND=os.path.abspath(a.fond))
     env.pop("WAYLAND_DISPLAY", None)
@@ -158,7 +234,11 @@ def main():
             proc.wait(timeout=20)
         except subprocess.TimeoutExpired:
             proc.send_signal(signal.SIGTERM)
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
         # Le processus de fond s'arrête seul quand il n'a plus de client ni de session.
         limite = time.time() + 30
         while time.time() < limite and subprocess.run(
@@ -170,11 +250,32 @@ def main():
     autorises = [os.path.join(env["XDG_CONFIG_HOME"], "pupitre"),
                  os.path.join(env["XDG_STATE_HOME"], "pupitre"),
                  os.path.join(env["XDG_RUNTIME_DIR"], "pupitre")]
-    reseau, ecritures, caches = analyser(trace, autorises, env["XDG_CACHE_HOME"])
+    (reseau, ecritures, caches, phrase_argv, programmes,
+     ignores) = analyser(trace, autorises, env["XDG_CACHE_HOME"])
+    # Les étapes SSH ont-elles eu lieu ? (sinon la vérification ne prouverait rien)
+    manquants = [p for p in ("pupitre-askpass", "ssh-add", "ssh") if p not in programmes]
+    try:
+        with open(os.path.join(perso, "liste-cles"), encoding="utf-8") as f:
+            cle_chargee = "cle-de-test" in f.read()
+    except OSError:
+        cle_chargee = False
+    fichiers, lus = phrase_dans_fichiers([env["HOME"], env["XDG_RUNTIME_DIR"]], PHRASE_CLE)
     lignes = ["Connexions réseau (hors sockets Unix) : " + ("aucune" if not reseau else "")]
     lignes += [f"  {r}" for r in reseau]
     lignes.append("Écritures hors des dossiers de Pupitre : " + ("aucune" if not ecritures else ""))
     lignes += [f"  {e}" for e in ecritures]
+    lignes.append("Connexions IPv4/IPv6 de programmes non jugés (ssh de l'utilisateur) : "
+                  f"{len(ignores)} ({', '.join(sorted(set(ignores))) or 'aucune'})")
+    lignes.append("Étapes SSH exécutées (pupitre-askpass, ssh-add, ssh dans la trace ; clé "
+                  "chargée dans l'agent) : "
+                  + ("oui" if not manquants and cle_chargee else
+                     f"NON (manquants : {manquants}, clé chargée : {cle_chargee})"))
+    lignes.append("Phrase de passe de test dans un fichier sous HOME ou XDG_RUNTIME_DIR "
+                  f"({lus} fichiers lus) : " + ("aucune" if not fichiers else ""))
+    lignes += [f"  {f}" for f in fichiers]
+    lignes.append("Phrase de passe de test dans les arguments d'un execve : "
+                  + ("aucune" if not phrase_argv else ""))
+    lignes += [f"  {f}" for f in phrase_argv]
     if caches:
         lignes.append("Caches de bibliothèques système dans ~/.cache (tolérés) : "
                       + ", ".join(caches))
@@ -183,7 +284,8 @@ def main():
         f.write(rapport)
     print(rapport)
     shutil.rmtree(perso, ignore_errors=True)
-    return 1 if (reseau or ecritures) else 0
+    return 1 if (reseau or ecritures or fichiers or phrase_argv or manquants
+                 or not cle_chargee) else 0
 
 
 sys.exit(main())
