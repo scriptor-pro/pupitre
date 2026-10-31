@@ -32,3 +32,7 @@ harness = false
 [[test]]
 name = "gui_configuration"
 harness = false
+
+[[test]]
+name = "gui_clavier"
+harness = false

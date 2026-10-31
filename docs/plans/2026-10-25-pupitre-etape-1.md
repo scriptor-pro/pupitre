@@ -373,7 +373,9 @@ police_inconnue_replie_sur_b612   : police = "Nexiste Pas 11" → famille effect
   - Cloche : signal `bell` → flash de la zone terminal (une seule inversion de 150 ms, donc ≤ 3 flashs/s même pour des cloches répétées : ignorer les cloches à moins de 350 ms d'intervalle) + ● sur l'onglet s'il n'est pas actif ; aucun son.
   - Réduire les animations : si `gtk-enable-animations` est faux, curseur forcé non clignotant et flash remplacé par l'indicateur d'onglet seul.
 
-- [ ] **Step 1 : Tests GUI** :
+> **Précisions (2026-10-31)** : `raccourcis::raccourci(touche, code, mods)` (fonction pure) + `installer_raccourcis` ; repli sur la position physique pour Alt+1…9 et Ctrl+0 (codes 10–19). **Xvfb ignore ici tout changement de disposition** (setxkbmap, xkbcomp, xmodmap : vérifié) → la fr dvorak est couverte par les tests unitaires (symboles de `/usr/share/X11/xkb/symbols/fr`, variante dvorak : la rangée du haut donne `= / - è \ ^ ( ` ) "` sans Maj) ; vraies frappes xdotool en QWERTY sous X11. Recherche : Entrée = **précédent** (vers le haut, cohérent avec le test du plan), Maj+Entrée = suivant ; « Aucun résultat » annoncé. Zoom par onglet. Ctrl+Maj+V déplacé de `terminal.rs` vers les raccourcis de la fenêtre. Animations réduites : indicateur ● même sur l'onglet actif (effacé à la frappe suivante). Plein écran vérifié sous Wayland seulement (pas de gestionnaire de fenêtres sous Xvfb). Tests : `crates/pupitre/tests/gui_clavier.rs` ; les tests graphiques ferment leurs sessions à la fin (`commun::fermer_sessions`).
+
+- [x] **Step 1 : Tests GUI** :
 ```text
 zoom_jusqu_a_200                : 20 × Ctrl+plus → font_scale == 2.0 ; Ctrl+0 → 1.0.
 alt_chiffre_change_d_onglet     : 3 onglets, disposition "fr dvorak" (setxkbmap sous Xvfb) ; Alt+touche physique "2" → onglet 2 actif.
@@ -381,8 +383,8 @@ recherche_trouve_le_texte       : "echo aiguille" ; Ctrl+Maj+F, saisir "aiguille
 cloches_rapprochees_limitees    : 10 BEL en 1 s → ≤ 3 flashs comptés.
 lien_non_ouvert_sans_ctrl       : clic simple sur une URL → aucun appel à UriLauncher (lanceur simulé).
 ```
-- [ ] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** → PASS.
-- [ ] **Step 5 : Commit** — `feat(pupitre): raccourcis, zoom, recherche, copie, liens, cloche`
+- [x] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** → PASS.
+- [x] **Step 5 : Commit** — `feat(pupitre): raccourcis, zoom, recherche, copie, liens, cloche`
 
 ### Task 12 : Accessibilité — sonde automatique et liste de contrôle Orca
 

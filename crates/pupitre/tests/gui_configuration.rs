@@ -75,6 +75,7 @@ fn main() {
     ex.lancer("nouvelle_fenetre_herite_des_messages", || {
         nouvelle_fenetre(&p, &config)
     });
+    fermer_sessions(&dossier.path().join("pupitre/fond.sock"));
     ex.conclure();
 }
 

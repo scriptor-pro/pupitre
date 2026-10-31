@@ -138,6 +138,30 @@ pub fn sonder_jusqu_a(nom: &str, delai: Duration, cond: impl Fn(&str) -> bool) -
     (false, arbre)
 }
 
+/// Ferme toutes les sessions du processus de fond de `socket` (il s'arrête ensuite).
+/// Sans cela, les sessions d'une interface de test arrêtée survivraient, comme après un
+/// plantage, avec leurs shells.
+pub fn fermer_sessions(socket: &Path) {
+    use pupitre_proto::{ClientMsg, ServerMsg};
+    let Ok((c, rx)) = pupitre::client::connect_or_spawn_at(socket) else {
+        return;
+    };
+    let _ = c.send(ClientMsg::List);
+    let limite = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < limite {
+        match rx.try_recv() {
+            Ok(ServerMsg::Sessions(v)) => {
+                for s in v {
+                    let _ = c.send(ClientMsg::Close { id: s.id });
+                }
+                std::thread::sleep(Duration::from_millis(300));
+                return;
+            }
+            _ => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+}
+
 /// Exécute les tests nommés et termine le processus en échec si l'un échoue.
 pub struct Executeur {
     echecs: usize,

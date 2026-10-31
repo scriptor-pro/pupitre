@@ -14,10 +14,56 @@ use pupitre_config::{Config, Rgb, Theme};
 use pupitre_proto::{ClientMsg, SessionId};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 use vte4::prelude::*;
 
 /// Propriété de terminal portant le titre envoyé par le programme.
 const TITRE: &str = "xterm.title";
+
+/// Zoom : de 50 % au maximum de la configuration, par pas de 10 %.
+const ZOOM_MIN: u16 = 50;
+const ZOOM_PAS: u16 = 10;
+/// Cloche : une inversion de 150 ms, au plus une toutes les 350 ms (≤ 3 flashs/s).
+const DUREE_FLASH: Duration = Duration::from_millis(150);
+const ECART_FLASHS: Duration = Duration::from_millis(350);
+const CLASSE_FLASH: &str = "pupitre-flash";
+
+/// Adresses reconnues dans le texte (ouvertes au Ctrl+clic). Ponctuation finale exclue.
+const REGEX_URL: &str = r#"\b(?:https?|file)://[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]"#;
+/// Options PCRE2 utilisées par VTE : UTF, MULTILINE, CASELESS.
+pub const PCRE2_UTF: u32 = 0x0008_0000;
+pub const PCRE2_MULTILINE: u32 = 0x0000_0400;
+pub const PCRE2_CASELESS: u32 = 0x0000_0008;
+
+/// Rappel de la cloche (posé par la fenêtre).
+type RappelCloche = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
+/// Ouvre une adresse (remplaçable dans les tests).
+pub type Lanceur = Rc<dyn Fn(&str)>;
+
+/// Vrai si le bureau autorise les animations (« réduire les animations » désactivé).
+pub fn animations_actives() -> bool {
+    gtk::Settings::default().is_none_or(|r| r.is_gtk_enable_animations())
+}
+
+/// Style du flash de la cloche, installé une fois pour l'affichage.
+fn installer_style() {
+    thread_local! {
+        static FAIT: Cell<bool> = const { Cell::new(false) };
+    }
+    if FAIT.with(|f| f.replace(true)) {
+        return;
+    }
+    if let Some(affichage) = gdk::Display::default() {
+        let css = gtk::CssProvider::new();
+        css.load_from_string(&format!(".{CLASSE_FLASH} {{ filter: invert(100%); }}"));
+        gtk::style_context_add_provider_for_display(
+            &affichage,
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+}
 
 // Conteneur autour de `vte4::Terminal`. Deux raisons (cf. Task 0, essai-jetable/feed) :
 // VTE n'a pas de propriété « column-count » à surveiller, et dériver `vte4::Terminal`
@@ -127,6 +173,21 @@ pub struct TerminalOnglet {
     /// Session terminée : frappes et tailles ne sont plus envoyées.
     muet: Rc<Cell<bool>>,
     attenuation: RefCell<FiltreAttenue>,
+    zoom: Cell<u16>,
+    /// Clignotement demandé par la configuration (appliqué si les animations sont permises).
+    clignote: Rc<Cell<bool>>,
+    lanceur: Rc<RefCell<Lanceur>>,
+    flashs: Rc<Cell<u32>>,
+    sur_cloche: RappelCloche,
+    reglages: Option<(gtk::Settings, glib::SignalHandlerId)>,
+}
+
+impl Drop for TerminalOnglet {
+    fn drop(&mut self) {
+        if let Some((r, id)) = self.reglages.take() {
+            r.disconnect(id);
+        }
+    }
 }
 
 impl TerminalOnglet {
@@ -158,19 +219,76 @@ impl TerminalOnglet {
             }
         });
 
-        // Ctrl+Maj+V : VTE ne fournit pas de raccourci de collage lui-même.
-        let touches = gtk::EventControllerKey::new();
-        touches.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let t = terminal.clone();
-        touches.connect_key_pressed(move |_, touche, _, mods| {
-            let ctrl_maj = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
-            if mods.contains(ctrl_maj) && matches!(touche, gdk::Key::V | gdk::Key::v) {
-                t.paste_clipboard();
-                return glib::Propagation::Stop;
+        // Adresses en texte brut : reconnues, ouvertes seulement au Ctrl+clic.
+        match vte4::Regex::for_match(REGEX_URL, PCRE2_UTF | PCRE2_MULTILINE | PCRE2_CASELESS) {
+            Ok(re) => {
+                let tag = terminal.match_add_regex(&re, 0);
+                terminal.match_set_cursor_name(tag, "pointer");
             }
-            glib::Propagation::Proceed
+            Err(e) => eprintln!("pupitre: expression des adresses refusée : {e}"),
+        }
+        let defaut: Lanceur = {
+            let t = terminal.clone();
+            Rc::new(move |uri: &str| {
+                let parent = t.root().and_downcast::<gtk::Window>();
+                gtk::UriLauncher::new(uri).launch(
+                    parent.as_ref(),
+                    gtk::gio::Cancellable::NONE,
+                    |r| {
+                        if let Err(e) = r {
+                            eprintln!("pupitre: ouverture du lien impossible : {e}");
+                        }
+                    },
+                );
+            })
+        };
+        let lanceur = Rc::new(RefCell::new(defaut));
+        let clic = gtk::GestureClick::new();
+        clic.set_button(1);
+        clic.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let (t, l) = (terminal.clone(), lanceur.clone());
+        clic.connect_pressed(move |g, _, x, y| {
+            if ouvrir_lien(&t, &l, x, y, g.current_event_state()) {
+                g.set_state(gtk::EventSequenceState::Claimed);
+            }
         });
-        terminal.add_controller(touches);
+        terminal.add_controller(clic);
+
+        // Cloche : flash limité (sauf animations réduites), puis rappel de la fenêtre.
+        installer_style();
+        let flashs = Rc::new(Cell::new(0u32));
+        let sur_cloche: RappelCloche = Rc::new(RefCell::new(None));
+        let dernier: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
+        let (c, f, sc) = (cadre.clone(), flashs.clone(), sur_cloche.clone());
+        terminal.connect_bell(move |_| {
+            let maintenant = Instant::now();
+            let assez_loin = dernier
+                .get()
+                .is_none_or(|d| maintenant.duration_since(d) >= ECART_FLASHS);
+            if animations_actives() && assez_loin {
+                dernier.set(Some(maintenant));
+                f.set(f.get() + 1);
+                c.add_css_class(CLASSE_FLASH);
+                let c = c.clone();
+                glib::timeout_add_local_once(DUREE_FLASH, move || c.remove_css_class(CLASSE_FLASH));
+            }
+            let rappel = sc.borrow().clone();
+            if let Some(r) = rappel {
+                r();
+            }
+        });
+
+        // « Réduire les animations » du bureau : curseur fixe, suivi en direct.
+        let clignote = Rc::new(Cell::new(false));
+        let reglages = gtk::Settings::default().map(|r| {
+            let (t, cl) = (terminal.downgrade(), clignote.clone());
+            let id = r.connect_notify_local(Some("gtk-enable-animations"), move |_, _| {
+                if let Some(t) = t.upgrade() {
+                    t.set_cursor_blink_mode(mode_curseur(cl.get()));
+                }
+            });
+            (r, id)
+        });
 
         let onglet = TerminalOnglet {
             cadre,
@@ -178,9 +296,62 @@ impl TerminalOnglet {
             id,
             muet,
             attenuation: RefCell::new(FiltreAttenue::default()),
+            zoom: Cell::new(100),
+            clignote,
+            lanceur,
+            flashs,
+            sur_cloche,
+            reglages,
         };
         onglet.appliquer(config, theme);
         onglet
+    }
+
+    /// Zoom en pour cent (100 = taille de la configuration).
+    pub fn zoom(&self) -> u16 {
+        self.zoom.get()
+    }
+
+    /// Change le zoom de `pas` crans de 10 % (borné de 50 % à `maximum`) ; `None` : 100 %.
+    pub fn zoomer(&self, pas: Option<i32>, maximum: u16) {
+        let z = match pas {
+            None => 100,
+            Some(p) => {
+                let v = i32::from(self.zoom.get()) + p * i32::from(ZOOM_PAS);
+                let v = v.clamp(i32::from(ZOOM_MIN), i32::from(maximum.max(ZOOM_MIN)));
+                u16::try_from(v).unwrap_or(100)
+            }
+        };
+        self.zoom.set(z);
+        self.terminal().set_font_scale(f64::from(z) / 100.0);
+    }
+
+    pub fn copier(&self) {
+        self.terminal().copy_clipboard_format(vte4::Format::Text);
+    }
+
+    pub fn coller(&self) {
+        self.terminal().paste_clipboard();
+    }
+
+    /// Remplace l'ouverture des liens (tests).
+    pub fn definir_lanceur(&self, l: Lanceur) {
+        *self.lanceur.borrow_mut() = l;
+    }
+
+    /// Clic à `(x, y)` : ouvre le lien qui s'y trouve si Ctrl est enfoncé. Vrai si ouvert.
+    pub fn clic(&self, x: f64, y: f64, mods: gdk::ModifierType) -> bool {
+        ouvrir_lien(self.terminal(), &self.lanceur, x, y, mods)
+    }
+
+    /// Nombre de flashs de cloche affichés depuis la création.
+    pub fn nombre_flashs(&self) -> u32 {
+        self.flashs.get()
+    }
+
+    /// `f` est appelé à chaque cloche (après l'éventuel flash).
+    pub fn connecter_cloche(&self, f: impl Fn() + 'static) {
+        *self.sur_cloche.borrow_mut() = Some(Rc::new(f));
     }
 
     pub fn id(&self) -> SessionId {
@@ -286,14 +457,43 @@ impl TerminalOnglet {
         t.set_color_highlight(Some(&rgba(theme.selection_fond)));
         t.set_color_highlight_foreground(Some(&rgba(theme.selection_texte)));
         t.set_font(Some(&pango::FontDescription::from_string(&config.police)));
-        t.set_cursor_blink_mode(if config.curseur_clignote {
-            vte4::CursorBlinkMode::On
-        } else {
-            vte4::CursorBlinkMode::Off
-        });
+        self.clignote.set(config.curseur_clignote);
+        t.set_cursor_blink_mode(mode_curseur(config.curseur_clignote));
         t.set_scrollback_lines(i64::from(config.historique_lignes));
         t.set_allow_hyperlink(true);
         t.set_audible_bell(false);
+    }
+}
+
+fn mode_curseur(clignote: bool) -> vte4::CursorBlinkMode {
+    if clignote && animations_actives() {
+        vte4::CursorBlinkMode::On
+    } else {
+        vte4::CursorBlinkMode::Off
+    }
+}
+
+/// Ouvre le lien (OSC 8 ou adresse reconnue) sous `(x, y)`, seulement avec Ctrl.
+fn ouvrir_lien(
+    t: &vte4::Terminal,
+    lanceur: &RefCell<Lanceur>,
+    x: f64,
+    y: f64,
+    mods: gdk::ModifierType,
+) -> bool {
+    if !mods.contains(gdk::ModifierType::CONTROL_MASK) {
+        return false;
+    }
+    let uri = t
+        .check_hyperlink_at(x, y)
+        .or_else(|| t.check_match_at(x, y).0);
+    match uri {
+        Some(u) if !u.is_empty() => {
+            let l = lanceur.borrow().clone();
+            l(u.as_str());
+            true
+        }
+        _ => false,
     }
 }
 

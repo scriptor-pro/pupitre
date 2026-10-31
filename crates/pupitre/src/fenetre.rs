@@ -9,9 +9,11 @@
 use crate::apparence::{suivre_preference_systeme, theme_systeme, Preference};
 use crate::client::{connect_or_spawn_at, Client, CONNEXION_PERDUE};
 use crate::messages::{ActionMessage, BandeauMessages};
+use crate::raccourcis::{raccourci, Raccourci};
 use crate::rechargement::{surveiller, surveiller_fichiers, Surveillance};
+use crate::recherche::BarreRecherche;
 use crate::taille::{largeur_ecran, taille_ouverture};
-use crate::terminal::TerminalOnglet;
+use crate::terminal::{animations_actives, TerminalOnglet};
 use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
@@ -48,26 +50,6 @@ const TAILLE_DE_SECOURS: i32 = 11;
 const MSG_FOND_ARRETE: &str = "Le processus de fond s'est arrêté : les shells ouverts sont perdus.";
 const BOUTON_NOUVEAU_TERMINAL: &str = "Ouvrir un nouveau terminal";
 
-/// Action de fenêtre (préfixe `win.`) déclenchée par une combinaison de touches.
-/// Ctrl+Maj+T, Ctrl+Maj+W, Ctrl+Maj+N (conception §12.1) ; les autres modificateurs
-/// (Alt, Super) doivent être absents.
-pub fn action_pour_touche(touche: gdk::Key, mods: gdk::ModifierType) -> Option<&'static str> {
-    let utiles = gdk::ModifierType::CONTROL_MASK
-        | gdk::ModifierType::SHIFT_MASK
-        | gdk::ModifierType::ALT_MASK
-        | gdk::ModifierType::SUPER_MASK
-        | gdk::ModifierType::META_MASK;
-    if mods & utiles != gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK {
-        return None;
-    }
-    match touche.to_lower() {
-        gdk::Key::t => Some("nouvel-onglet"),
-        gdk::Key::w => Some("fermer-onglet"),
-        gdk::Key::n => Some("nouvelle-fenetre"),
-        _ => None,
-    }
-}
-
 /// Un onglet : un terminal et son étiquette (titre ou nom choisi, modifiable sur place).
 pub struct Onglet {
     terminal: TerminalOnglet,
@@ -79,6 +61,8 @@ pub struct Onglet {
     termine: Cell<bool>,
     /// Rattaché après une reprise : la sortie est ignorée jusqu'à la relecture.
     attend_relecture: Cell<bool>,
+    /// Indicateur ● (cloche dans un onglet non visible).
+    signale: Cell<bool>,
 }
 
 impl Onglet {
@@ -120,10 +104,39 @@ impl Onglet {
         self.rafraichir_titre();
     }
 
+    /// Un événement attend l'attention de l'utilisateur dans cet onglet (●).
+    pub fn signale(&self) -> bool {
+        self.signale.get()
+    }
+
+    /// Texte de l'étiquette de l'onglet, indicateur compris.
+    pub fn titre_affiche(&self) -> String {
+        self.etiquette.text().to_string()
+    }
+
+    fn signaler(&self, oui: bool) {
+        if self.signale.replace(oui) != oui {
+            self.rafraichir_titre();
+        }
+    }
+
     fn rafraichir_titre(&self) {
         let titre = self.titre();
-        self.etiquette.set_text(&titre);
-        self.etiquette.set_tooltip_text(Some(&titre));
+        if self.signale.get() {
+            // Le ● est doublé d'un texte pour le lecteur d'écran.
+            self.etiquette.set_text(&format!("● {titre}"));
+            self.etiquette
+                .set_tooltip_text(Some(&format!("{titre} (cloche)")));
+            self.etiquette
+                .update_property(&[gtk::accessible::Property::Label(&format!(
+                    "{titre}, cloche"
+                ))]);
+        } else {
+            self.etiquette.set_text(&titre);
+            self.etiquette.set_tooltip_text(Some(&titre));
+            self.etiquette
+                .reset_property(gtk::AccessibleProperty::Label);
+        }
         // Le nom accessible de l'onglet suit son étiquette ; le terminal porte le même nom.
         self.terminal
             .terminal()
@@ -667,6 +680,7 @@ pub struct FenetreInterne {
     fenetre: gtk::ApplicationWindow,
     carnet: gtk::Notebook,
     bandeau: Rc<BandeauMessages>,
+    recherche: Rc<BarreRecherche>,
     /// Ne pas fermer la fenêtre quand son dernier onglet part (reconnexion en cours).
     garder_ouverte: Cell<bool>,
     fermee: Cell<bool>,
@@ -700,7 +714,9 @@ impl FenetrePupitre {
         let bandeau = BandeauMessages::new();
 
         let boite = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let recherche = BarreRecherche::new();
         boite.append(bandeau.widget());
+        boite.append(recherche.widget());
         boite.append(&carnet);
         fenetre.set_child(Some(&boite));
 
@@ -708,6 +724,7 @@ impl FenetrePupitre {
             fenetre,
             carnet,
             bandeau,
+            recherche,
             garder_ouverte: Cell::new(false),
             fermee: Cell::new(false),
             pupitre: Rc::downgrade(pupitre),
@@ -716,6 +733,7 @@ impl FenetrePupitre {
             f.0.bandeau.poser(cle, Some(texte));
         }
         f.installer_actions();
+        crate::raccourcis::installer_raccourcis(&f);
         f.installer_signaux();
         pupitre.fenetres.borrow_mut().push(f.clone());
         pupitre.garde.borrow_mut().take();
@@ -848,6 +866,107 @@ impl FenetrePupitre {
         self.0.bandeau.donner_focus(CLE_PANNE);
     }
 
+    /// Référence faible (pour les rappels attachés aux widgets de la fenêtre elle-même).
+    pub fn faible(&self) -> Weak<FenetreInterne> {
+        Rc::downgrade(&self.0)
+    }
+
+    pub fn depuis_faible(f: &Weak<FenetreInterne>) -> Option<FenetrePupitre> {
+        f.upgrade().map(FenetrePupitre)
+    }
+
+    /// Exécute le raccourci de la touche, s'il y en a un ; vrai si la touche est consommée.
+    pub fn traiter_touche(&self, touche: gdk::Key, code: u32, mods: gdk::ModifierType) -> bool {
+        match raccourci(touche, code, mods) {
+            Some(r) => {
+                self.executer(r);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Exécute un raccourci dans cette fenêtre (onglet actif pour zoom, copie, recherche).
+    pub fn executer(&self, r: Raccourci) {
+        let c = &self.0.carnet;
+        let n = c.n_pages();
+        let actif = self.onglet_actif();
+        let zoom_max = self
+            .pupitre()
+            .map_or(200, |p| p.config_effective.borrow().zoom_max_pourcent);
+        match r {
+            Raccourci::NouvelOnglet => self.ouvrir_session(),
+            Raccourci::NouvelleFenetre => {
+                if let Some(p) = self.pupitre() {
+                    p.nouvelle_fenetre();
+                }
+            }
+            Raccourci::FermerOnglet => {
+                if let Some(o) = actif {
+                    self.demander_fermeture_onglet(&o);
+                }
+            }
+            Raccourci::Copier => actif.iter().for_each(|o| o.terminal.copier()),
+            Raccourci::Coller => actif.iter().for_each(|o| o.terminal.coller()),
+            Raccourci::Rechercher => {
+                if let Some(o) = actif {
+                    self.0.recherche.ouvrir(o.terminal.terminal());
+                }
+            }
+            Raccourci::OngletSuivant | Raccourci::OngletPrecedent if n > 1 => {
+                let i = c.current_page().unwrap_or(0);
+                let j = if r == Raccourci::OngletSuivant {
+                    (i + 1) % n
+                } else {
+                    (i + n - 1) % n
+                };
+                c.set_current_page(Some(j));
+            }
+            Raccourci::OngletSuivant | Raccourci::OngletPrecedent => {}
+            Raccourci::Onglet(k) => {
+                if (1..=n).contains(&k) {
+                    c.set_current_page(Some(k - 1));
+                }
+            }
+            Raccourci::PleinEcran => {
+                let f = &self.0.fenetre;
+                if f.is_fullscreen() {
+                    f.unfullscreen();
+                } else {
+                    f.fullscreen();
+                }
+            }
+            Raccourci::ZoomPlus => actif
+                .iter()
+                .for_each(|o| o.terminal.zoomer(Some(1), zoom_max)),
+            Raccourci::ZoomMoins => actif
+                .iter()
+                .for_each(|o| o.terminal.zoomer(Some(-1), zoom_max)),
+            Raccourci::ZoomNormal => actif.iter().for_each(|o| o.terminal.zoomer(None, zoom_max)),
+        }
+    }
+
+    pub fn recherche_ouverte(&self) -> bool {
+        self.0.recherche.ouverte()
+    }
+
+    pub fn entree_recherche(&self) -> gtk::SearchEntry {
+        self.0.recherche.entree().clone()
+    }
+
+    pub fn recherche_expression_reguliere(&self, oui: bool) {
+        self.0.recherche.expression_reguliere(oui);
+    }
+
+    /// « Aucun résultat » si la dernière recherche n'a rien trouvé, sinon vide.
+    pub fn etat_recherche(&self) -> String {
+        self.0.recherche.etat()
+    }
+
+    pub fn fermer_recherche(&self) {
+        self.0.recherche.fermer();
+    }
+
     fn installer_actions(&self) {
         let ajouter = |nom: &str, f: Box<dyn Fn(&FenetrePupitre)>| {
             let action = gio::SimpleAction::new(nom, None);
@@ -884,6 +1003,17 @@ impl FenetrePupitre {
                 }
             }),
         );
+        for (nom, r) in [
+            ("copier", Raccourci::Copier),
+            ("coller", Raccourci::Coller),
+            ("rechercher", Raccourci::Rechercher),
+            ("plein-ecran", Raccourci::PleinEcran),
+            ("zoom-plus", Raccourci::ZoomPlus),
+            ("zoom-moins", Raccourci::ZoomMoins),
+            ("zoom-normal", Raccourci::ZoomNormal),
+        ] {
+            ajouter(nom, Box::new(move |f| f.executer(r)));
+        }
         ajouter(
             "detacher-onglet",
             Box::new(|f| {
@@ -892,21 +1022,6 @@ impl FenetrePupitre {
                 }
             }),
         );
-
-        // Raccourcis : interceptés avant le terminal (sinon VTE consomme les touches).
-        let touches = gtk::EventControllerKey::new();
-        touches.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let fenetre = self.0.fenetre.clone();
-        touches.connect_key_pressed(move |_, touche, _, mods| {
-            match action_pour_touche(touche, mods) {
-                Some(a) => {
-                    let _ = WidgetExt::activate_action(&fenetre, &format!("win.{a}"), None);
-                    glib::Propagation::Stop
-                }
-                None => glib::Propagation::Proceed,
-            }
-        });
-        self.0.fenetre.add_controller(touches);
     }
 
     fn installer_signaux(&self) {
@@ -927,6 +1042,7 @@ impl FenetrePupitre {
         self.0.carnet.connect_switch_page(move |_, page, _| {
             if let Some(f) = faible.upgrade() {
                 if let Some(o) = f.pupitre.upgrade().and_then(|p| p.onglet_de_widget(page)) {
+                    o.signaler(false);
                     f.fenetre
                         .set_title(Some(&format!("{} — Pupitre", o.titre())));
                     o.terminal.widget().grab_focus();
@@ -1033,6 +1149,27 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
         occupe: Cell::new(false),
         termine: Cell::new(false),
         attend_relecture: Cell::new(false),
+        signale: Cell::new(false),
+    });
+
+    // Cloche : ● si l'onglet n'est pas visible, ou si le flash est remplacé (animations
+    // réduites). Effacé quand l'onglet devient actif ou à la prochaine frappe.
+    let faible = Rc::downgrade(&o);
+    o.terminal.connecter_cloche(move || {
+        if let Some(o) = faible.upgrade() {
+            let visible = o
+                .carnet()
+                .is_some_and(|c| c.page_num(&o.widget()) == c.current_page());
+            if !visible || !animations_actives() {
+                o.signaler(true);
+            }
+        }
+    });
+    let faible = Rc::downgrade(&o);
+    o.terminal.terminal().connect_commit(move |_, _, _| {
+        if let Some(o) = faible.upgrade() {
+            o.signaler(false);
+        }
     });
 
     // Titre : à chaque propriété de terminal changée (titre OSC 0/2, dossier OSC 7).
@@ -1168,6 +1305,33 @@ fn bouton_menu() -> gtk::MenuButton {
         "win.nouvelle-fenetre",
         Some("<Control><Shift>n"),
     ));
+    let edition = gio::Menu::new();
+    edition.append_item(&item("Copier", "win.copier", Some("<Control><Shift>c")));
+    edition.append_item(&item("Coller", "win.coller", Some("<Control><Shift>v")));
+    edition.append_item(&item(
+        "Rechercher…",
+        "win.rechercher",
+        Some("<Control><Shift>f"),
+    ));
+    m.append_section(None, &edition);
+    let affichage = gio::Menu::new();
+    affichage.append_item(&item(
+        "Agrandir le texte",
+        "win.zoom-plus",
+        Some("<Control>plus"),
+    ));
+    affichage.append_item(&item(
+        "Réduire le texte",
+        "win.zoom-moins",
+        Some("<Control>minus"),
+    ));
+    affichage.append_item(&item(
+        "Taille normale",
+        "win.zoom-normal",
+        Some("<Control>0"),
+    ));
+    affichage.append_item(&item("Plein écran", "win.plein-ecran", Some("F11")));
+    m.append_section(None, &affichage);
     let onglet = gio::Menu::new();
     onglet.append_item(&item("Renommer l'onglet", "win.renommer-onglet", None));
     onglet.append_item(&item(
@@ -1251,33 +1415,4 @@ fn confirmer(parent: &impl IsA<gtk::Window>, question: &str, si_oui: impl Fn() +
     dialogue.add_controller(echap);
     dialogue.present();
     annuler.grab_focus();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn raccourcis_de_la_conception() {
-        let cs = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
-        assert_eq!(action_pour_touche(gdk::Key::T, cs), Some("nouvel-onglet"));
-        assert_eq!(action_pour_touche(gdk::Key::w, cs), Some("fermer-onglet"));
-        assert_eq!(
-            action_pour_touche(gdk::Key::N, cs),
-            Some("nouvelle-fenetre")
-        );
-        assert_eq!(
-            action_pour_touche(gdk::Key::t, gdk::ModifierType::CONTROL_MASK),
-            None
-        );
-        let avec_verr = cs | gdk::ModifierType::LOCK_MASK;
-        assert_eq!(
-            action_pour_touche(gdk::Key::T, avec_verr),
-            Some("nouvel-onglet")
-        );
-        assert_eq!(
-            action_pour_touche(gdk::Key::T, cs | gdk::ModifierType::ALT_MASK),
-            None
-        );
-    }
 }

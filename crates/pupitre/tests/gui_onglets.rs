@@ -13,8 +13,9 @@ use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
 use pupitre::client::{connect_or_spawn_at, Client};
-use pupitre::fenetre::{action_pour_touche, FenetrePupitre, Onglet, Pupitre};
+use pupitre::fenetre::{FenetrePupitre, Onglet, Pupitre};
 use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
+use pupitre::raccourcis::{raccourci, Raccourci};
 use pupitre_config::Config;
 use pupitre_proto::{ClientMsg, ServerMsg, SessionInfo};
 use std::path::{Path, PathBuf};
@@ -78,6 +79,7 @@ fn main() {
     });
     ex.lancer("reprise_apres_plantage", reprise_apres_plantage);
     drop(pupitre);
+    fermer_sessions(&socket);
     ex.conclure();
 }
 
@@ -139,16 +141,16 @@ fn fenetres_visibles(p: &Pupitre) -> Vec<FenetrePupitre> {
 fn raccourcis_reconnus() -> Resultat {
     let cs = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
     let cas = [
-        (gdk::Key::T, cs, Some("nouvel-onglet")),
-        (gdk::Key::t, cs, Some("nouvel-onglet")),
-        (gdk::Key::W, cs, Some("fermer-onglet")),
-        (gdk::Key::N, cs, Some("nouvelle-fenetre")),
+        (gdk::Key::T, cs, Some(Raccourci::NouvelOnglet)),
+        (gdk::Key::t, cs, Some(Raccourci::NouvelOnglet)),
+        (gdk::Key::W, cs, Some(Raccourci::FermerOnglet)),
+        (gdk::Key::N, cs, Some(Raccourci::NouvelleFenetre)),
         (gdk::Key::t, gdk::ModifierType::CONTROL_MASK, None),
         (gdk::Key::T, gdk::ModifierType::SHIFT_MASK, None),
         (gdk::Key::W, cs | gdk::ModifierType::ALT_MASK, None),
     ];
     for (k, m, attendu) in cas {
-        let obtenu = action_pour_touche(k, m);
+        let obtenu = raccourci(k, 0, m);
         verifier(obtenu == attendu, || {
             format!("{k:?} {m:?} → {obtenu:?}, attendu {attendu:?}")
         })?;
@@ -513,5 +515,6 @@ fn reprise_apres_plantage() -> Resultat {
     })();
     let _ = appli.kill();
     let _ = appli.wait();
+    fermer_sessions(&socket);
     res
 }
