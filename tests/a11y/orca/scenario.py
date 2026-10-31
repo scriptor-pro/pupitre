@@ -490,12 +490,14 @@ def v16_connexions(s):
     exiger(s.attendre(r"^Clé liste déroulante", 4),
            "Tab jusqu'à la liste déroulante : « Clé liste déroulante » n'est pas lu")
     s.calme()
+    s.marquer()
     s.touches("Escape")  # ferme le formulaire
+    exiger(s.attendre(r"Connexions SSH", 4),
+           "Échap dans le formulaire : le retour à la liste « Connexions SSH » n'est pas annoncé")
     s.calme()
     s.marquer()
     s.touches("Escape")  # ferme la liste
     s.calme()
-    s.revenir_au_terminal()
     s.marquer()
     s.commande("echo ok-$((6*7))")
     exiger(s.attendre(r"ok-42", 6), "après Échap, le terminal n'a pas le clavier")

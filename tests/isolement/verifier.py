@@ -218,6 +218,7 @@ def main():
                GDK_DEBUG="no-portals", PUPITRE_FOND=os.path.abspath(a.fond))
     env.pop("WAYLAND_DISPLAY", None)
     trace = os.path.join(a.sortie, "strace.log")
+    arret = "propre"  # Pupitre se ferme seul après la session ; sinon c'est un échec
     wm = subprocess.Popen(["xfwm4", "--compositor=off"], env=env,
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(1)
@@ -233,10 +234,12 @@ def main():
         try:
             proc.wait(timeout=20)
         except subprocess.TimeoutExpired:
+            arret = "forcé (SIGTERM)"
             proc.send_signal(signal.SIGTERM)
             try:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
+                arret = "forcé (SIGKILL)"
                 proc.kill()
                 proc.wait()
         # Le processus de fond s'arrête seul quand il n'a plus de client ni de session.
@@ -273,6 +276,7 @@ def main():
     lignes.append("Phrase de passe de test dans un fichier sous HOME ou XDG_RUNTIME_DIR "
                   f"({lus} fichiers lus) : " + ("aucune" if not fichiers else ""))
     lignes += [f"  {f}" for f in fichiers]
+    lignes.append(f"Arrêt de Pupitre : {arret}")
     lignes.append("Phrase de passe de test dans les arguments d'un execve : "
                   + ("aucune" if not phrase_argv else ""))
     lignes += [f"  {f}" for f in phrase_argv]
@@ -285,7 +289,7 @@ def main():
     print(rapport)
     shutil.rmtree(perso, ignore_errors=True)
     return 1 if (reseau or ecritures or fichiers or phrase_argv or manquants
-                 or not cle_chargee) else 0
+                 or not cle_chargee or arret != "propre") else 0
 
 
 sys.exit(main())
