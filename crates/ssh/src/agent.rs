@@ -102,11 +102,25 @@ impl AgentPupitre {
     /// Lance `ssh-agent -D -a <socket>` avec les variables `env` (l'agent ne
     /// lit `SSH_ASKPASS` qu'au démarrage) et attend au plus 2 s qu'il réponde.
     pub fn lancer(socket: &Path, env: &[(String, String)]) -> io::Result<AgentPupitre> {
-        // Supprime un socket périmé, mais jamais autre chose qu'un socket.
-        if let Ok(m) = fs::symlink_metadata(socket) {
-            if m.file_type().is_socket() {
-                fs::remove_file(socket)?;
+        // Ne supprime qu'un socket à soi et périmé ; un agent vivant est respecté.
+        match fs::symlink_metadata(socket) {
+            Ok(m) => {
+                if m.file_type().is_socket() && m.uid() == nix::unistd::getuid().as_raw() {
+                    if agent_joignable(socket, DELAI_SONDE) {
+                        return Err(io::Error::new(
+                            io::ErrorKind::AddrInUse,
+                            "un agent répond déjà sur ce socket",
+                        ));
+                    }
+                    match fs::remove_file(socket) {
+                        Ok(()) => {}
+                        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(e),
+                    }
+                }
             }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
         }
         let mut cmd = Command::new("ssh-agent");
         cmd.arg("-D")
@@ -131,7 +145,10 @@ impl AgentPupitre {
             if fini || Instant::now() >= limite {
                 let _ = enfant.kill();
                 let _ = enfant.wait();
-                let _ = fs::remove_file(socket);
+                // Si l'enfant est déjà mort, le fichier n'est pas de lui : on n'y touche pas.
+                if !fini && socket_a_moi(socket) {
+                    let _ = fs::remove_file(socket);
+                }
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "ssh-agent n'est pas devenu joignable",
@@ -263,6 +280,31 @@ mod tests {
         faux_agent(&c);
         assert_eq!(chercher_agent(Some(&env), &rt, t.path(), D), Some(c));
         assert!(chercher_agent(None, &rt, t.path(), D).is_some());
+    }
+
+    #[test]
+    fn socket_vivant_pas_supprime() {
+        let t = tempfile::tempdir().unwrap();
+        let s = t.path().join("a");
+        faux_agent(&s);
+        let e = AgentPupitre::lancer(&s, &[]).err().unwrap();
+        assert_eq!(e.kind(), std::io::ErrorKind::AddrInUse);
+        assert!(agent_joignable(&s, D));
+    }
+
+    #[test]
+    fn socket_perime_remplace() {
+        let present = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).any(|d| d.join("ssh-agent").is_file()))
+            .unwrap_or(false);
+        if !present {
+            return;
+        }
+        let t = tempfile::tempdir().unwrap();
+        let s = t.path().join("a");
+        drop(UnixListener::bind(&s).unwrap());
+        let a = AgentPupitre::lancer(&s, &[]).unwrap();
+        assert!(agent_joignable(a.socket(), Duration::from_secs(1)));
     }
 
     #[test]
