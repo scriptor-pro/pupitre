@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 pub mod ssh;
 pub mod trame;
-pub use ssh::EtatTrousseau;
+pub use ssh::{EtatTrousseau, Genre};
 pub use trame::{read_frame, write_frame, FrameError, MAX_FRAME};
 
 /// Version du protocole ; échangée dans `Hello`/`Welcome`.
