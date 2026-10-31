@@ -10,7 +10,8 @@ mod theme_fichier;
 
 pub use atomique::ecrire_atomique;
 pub use connexions::{
-    argv_ssh, charger_connexions, chemin_connexions, enregistrer_connexions, Connexion,
+    analyser_port, argv_ssh, charger_connexions, chemin_connexions, enregistrer_connexions,
+    valider_connexions, ChampConnexion, Connexion, ErreurValidation,
 };
 pub use couleur::{contrast_ratio, ErreurCouleur, Rgb};
 pub use fichier::{

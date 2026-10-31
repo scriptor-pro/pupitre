@@ -135,25 +135,61 @@ fn cle_valide<'de, D: Deserializer<'de>>(d: D) -> Result<Option<PathBuf>, D::Err
 }
 
 /// Mêmes contrôles que le chargement, pour une liste construite en mémoire.
-fn valider(v: &[Connexion]) -> Result<(), String> {
+/// Champ d'une connexion, pour montrer l'erreur de validation au bon endroit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChampConnexion {
+    Nom,
+    Hote,
+    Utilisateur,
+    Port,
+    Cle,
+}
+
+/// Première règle violée par une liste de connexions, et le champ fautif.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErreurValidation {
+    pub champ: ChampConnexion,
+    pub message: String,
+}
+
+/// Mêmes contrôles que le chargement, pour une liste construite en mémoire. Appelée par
+/// [`enregistrer_connexions`] ; l'interface l'appelle d'abord pour savoir quel champ
+/// du formulaire est en cause.
+pub fn valider_connexions(v: &[Connexion]) -> Result<(), ErreurValidation> {
     let mut vus = HashSet::new();
     for c in v {
-        verifier_nom(&c.nom)?;
-        verifier_mot("hôte", &c.hote)?;
+        let erreur = |champ, message| ErreurValidation { champ, message };
+        verifier_nom(&c.nom).map_err(|m| erreur(ChampConnexion::Nom, m))?;
+        verifier_mot("hôte", &c.hote).map_err(|m| erreur(ChampConnexion::Hote, m))?;
         if let Some(u) = &c.utilisateur {
-            verifier_mot("utilisateur", u)?;
+            verifier_mot("utilisateur", u).map_err(|m| erreur(ChampConnexion::Utilisateur, m))?;
         }
         if let Some(p) = c.port {
-            verifier_port(i64::from(p))?;
+            verifier_port(i64::from(p)).map_err(|m| erreur(ChampConnexion::Port, m))?;
         }
         if let Some(k) = &c.cle {
-            verifier_cle(k)?;
+            verifier_cle(k).map_err(|m| erreur(ChampConnexion::Cle, m))?;
         }
         if !vus.insert(c.nom.as_str()) {
-            return Err(format!("nom « {} » en double", c.nom));
+            return Err(erreur(
+                ChampConnexion::Nom,
+                format!("nom « {} » en double", c.nom),
+            ));
         }
     }
     Ok(())
+}
+
+/// Port saisi à la main : vide = aucun ; sinon un nombre de 1 à 65535.
+pub fn analyser_port(texte: &str) -> Result<Option<u16>, String> {
+    let t = texte.trim();
+    if t.is_empty() {
+        return Ok(None);
+    }
+    let v: i64 = t
+        .parse()
+        .map_err(|_| format!("port « {t} » invalide : un nombre de 1 à 65535 est attendu"))?;
+    verifier_port(v).map(Some)
 }
 
 /// `$XDG_CONFIG_HOME/pupitre/connexions.toml`, sinon `~/.config/pupitre/connexions.toml`.
@@ -190,7 +226,7 @@ pub fn charger_connexions(chemin: &Path) -> Result<Vec<Connexion>, ErreurConfig>
 /// Écrit la liste (de façon atomique) après les mêmes contrôles qu'au chargement.
 pub fn enregistrer_connexions(chemin: &Path, v: &[Connexion]) -> io::Result<()> {
     let invalide = |m: String| io::Error::new(io::ErrorKind::InvalidInput, m);
-    valider(v).map_err(invalide)?;
+    valider_connexions(v).map_err(|e| invalide(e.message))?;
     let f = Fichier {
         connexion: v.to_vec(),
     };
@@ -313,6 +349,33 @@ mod tests {
         let p = d.path().join("c.toml");
         let r = enregistrer_connexions(&p, &[c("a", "-oProxyCommand=x")]);
         assert_eq!(r.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn validation_indique_le_champ() {
+        use ChampConnexion as C;
+        let champ = |x: Connexion| valider_connexions(&[x]).unwrap_err().champ;
+        assert_eq!(champ(c("", "h")), C::Nom);
+        assert_eq!(champ(c("a", "-x")), C::Hote);
+        let mut x = c("a", "h");
+        x.utilisateur = Some("-u".into());
+        assert_eq!(champ(x), C::Utilisateur);
+        let mut x = c("a", "h");
+        x.cle = Some(PathBuf::from("-k"));
+        assert_eq!(champ(x), C::Cle);
+        let e = valider_connexions(&[c("a", "h"), c("a", "i")]).unwrap_err();
+        assert_eq!(e.champ, C::Nom);
+        assert!(valider_connexions(&[c("a", "h")]).is_ok());
+    }
+
+    #[test]
+    fn port_saisi() {
+        assert_eq!(analyser_port(""), Ok(None));
+        assert_eq!(analyser_port(" 22 "), Ok(Some(22)));
+        assert!(analyser_port("0").is_err());
+        assert!(analyser_port("65536").is_err());
+        assert!(analyser_port("ab").is_err());
+        assert!(analyser_port("-1").is_err());
     }
 
     #[test]

@@ -341,6 +341,7 @@ Bulles via les notifications de GIO (locales). Respect du mode « Ne pas dérang
 | Copier / coller | Ctrl+Maj+C / Ctrl+Maj+V ; sélection primaire (clic du milieu) active |
 | Copie automatique à la sélection | non |
 | Nouvel onglet / fermer / fenêtre | Ctrl+Maj+T / Ctrl+Maj+W / Ctrl+Maj+N |
+| Connexions SSH | Ctrl+Maj+O |
 | Onglet suivant / précédent | Ctrl+PgSuiv / Ctrl+PgPréc ; Alt+1…9 |
 | Plein écran | F11 |
 | Sortir du terminal au clavier | Ctrl+Tab / Ctrl+Maj+Tab (messages, recherche, onglets, menu, terminal) ; Tab reste au shell ; F10 reste aux programmes [Choix du concepteur, 2026-10-31] |

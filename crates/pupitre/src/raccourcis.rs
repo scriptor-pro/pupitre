@@ -18,6 +18,8 @@ pub enum Raccourci {
     NouvelOnglet,
     FermerOnglet,
     NouvelleFenetre,
+    /// Ctrl+Maj+O : fenêtre des connexions SSH.
+    Connexions,
     Copier,
     Coller,
     Rechercher,
@@ -56,6 +58,7 @@ pub fn raccourci(touche: gdk::Key, code: u32, mods: gdk::ModifierType) -> Option
             gdk::Key::t => Some(Raccourci::NouvelOnglet),
             gdk::Key::w => Some(Raccourci::FermerOnglet),
             gdk::Key::n => Some(Raccourci::NouvelleFenetre),
+            gdk::Key::o => Some(Raccourci::Connexions),
             gdk::Key::c => Some(Raccourci::Copier),
             gdk::Key::v => Some(Raccourci::Coller),
             gdk::Key::f => Some(Raccourci::Rechercher),
@@ -128,6 +131,8 @@ mod tests {
             raccourci(gdk::Key::N, 57, CS),
             Some(Raccourci::NouvelleFenetre)
         );
+        assert_eq!(raccourci(gdk::Key::O, 32, CS), Some(Raccourci::Connexions));
+        assert_eq!(raccourci(gdk::Key::o, 32, M::CONTROL_MASK), None);
         assert_eq!(raccourci(gdk::Key::C, 54, CS), Some(Raccourci::Copier));
         assert_eq!(raccourci(gdk::Key::V, 55, CS), Some(Raccourci::Coller));
         assert_eq!(raccourci(gdk::Key::F, 41, CS), Some(Raccourci::Rechercher));

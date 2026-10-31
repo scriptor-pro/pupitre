@@ -412,16 +412,21 @@ impl TerminalOnglet {
         let _ = self.client.send(ClientMsg::Resize { id, cols, rows });
     }
 
+    /// Titre envoyé par le programme (OSC 0/2), s'il n'est pas vide.
+    pub fn titre_programme(&self) -> Option<String> {
+        let (titre, _) = self.terminal().termprop_string(TITRE);
+        let titre = titre?;
+        let titre = titre.trim();
+        (!titre.is_empty()).then(|| titre.to_string())
+    }
+
     /// Titre envoyé par le programme (OSC 0/2), sinon dernier élément du dossier courant
     /// (OSC 7), sinon `None`.
     pub fn titre(&self) -> Option<String> {
-        let t = self.terminal();
-        if let (Some(titre), _) = t.termprop_string(TITRE) {
-            let titre = titre.trim();
-            if !titre.is_empty() {
-                return Some(titre.to_string());
-            }
+        if let Some(titre) = self.titre_programme() {
+            return Some(titre);
         }
+        let t = self.terminal();
         // Accesseur marqué obsolète depuis VTE 0.78 au profit des termprops de type URI,
         // non exposées par vte4-rs ; il reste fonctionnel.
         #[allow(deprecated)]

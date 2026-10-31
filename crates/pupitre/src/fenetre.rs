@@ -51,6 +51,7 @@ const CLE_CONTRASTE: &str = "contraste";
 const CLE_POLICE: &str = "police";
 const CLE_SURVEILLANCE: &str = "surveillance";
 const CLE_FOND_ANCIEN: &str = "fond-ancien";
+const CLE_CONNEXIONS: &str = "connexions-invalides";
 /// Police embarquée, utilisée si celle demandée est introuvable.
 const POLICE_DE_SECOURS: &str = "B612 Mono";
 const TAILLE_DE_SECOURS: i32 = 11;
@@ -68,6 +69,9 @@ pub struct Onglet {
     etiquette: gtk::Label,
     entree: gtk::Entry,
     nom: RefCell<Option<String>>,
+    /// Titre en attendant que le programme en donne un (nom d'une connexion SSH) ; ce
+    /// n'est pas un nom choisi : il cède la place au titre du programme.
+    provisoire: RefCell<Option<String>>,
     occupe: Cell<bool>,
     termine: Cell<bool>,
     /// Rattaché après une reprise : la sortie est ignorée jusqu'à la relecture.
@@ -99,6 +103,11 @@ impl Onglet {
     pub fn titre(&self) -> String {
         if let Some(n) = self.nom.borrow().as_ref() {
             return n.clone();
+        }
+        if self.terminal.titre_programme().is_none() {
+            if let Some(p) = self.provisoire.borrow().as_ref() {
+                return p.clone();
+            }
         }
         self.terminal
             .titre()
@@ -210,7 +219,7 @@ impl Onglet {
 
 enum Attente {
     /// `Open` envoyé pour un nouvel onglet de cette fenêtre.
-    NouvelOnglet(Weak<FenetreInterne>),
+    NouvelOnglet(Weak<FenetreInterne>, Option<String>),
     /// `Open` envoyé pour remplacer le shell terminé de cet onglet.
     Remplacer(Weak<Onglet>),
 }
@@ -562,9 +571,12 @@ impl Pupitre {
             ServerMsg::Opened { id } => {
                 let attente = self.attentes.borrow_mut().pop_front();
                 match attente {
-                    Some(Attente::NouvelOnglet(f)) => match f.upgrade() {
+                    Some(Attente::NouvelOnglet(f, titre)) => match f.upgrade() {
                         Some(f) if !f.fermee.get() => {
-                            FenetrePupitre(f).ajouter_onglet(id);
+                            if let Some(o) = FenetrePupitre(f).ajouter_onglet(id) {
+                                *o.provisoire.borrow_mut() = titre;
+                                o.rafraichir_titre();
+                            }
                         }
                         _ => self.envoyer(ClientMsg::Close { id }),
                     },
@@ -585,7 +597,7 @@ impl Pupitre {
                 let message = format!("Le shell n'a pas pu être lancé : {error}");
                 let attente = self.attentes.borrow_mut().pop_front();
                 match attente {
-                    Some(Attente::NouvelOnglet(f)) => {
+                    Some(Attente::NouvelOnglet(f, _)) => {
                         if let Some(f) = f.upgrade() {
                             FenetrePupitre(f).afficher_message(&message);
                         }
@@ -946,6 +958,16 @@ impl FenetrePupitre {
 
     /// Ouvre un nouveau shell dans un nouvel onglet de cette fenêtre.
     pub fn ouvrir_session(&self) {
+        self.ouvrir(None, None);
+    }
+
+    /// Ouvre `argv` (une commande `ssh …`) dans un nouvel onglet de cette fenêtre. `titre`
+    /// reste affiché tant que le programme n'en donne pas.
+    pub fn ouvrir_connexion(&self, argv: Vec<String>, titre: String) {
+        self.ouvrir(Some(argv), Some(titre));
+    }
+
+    fn ouvrir(&self, argv: Option<Vec<String>>, titre: Option<String>) {
         let Some(p) = self.pupitre() else { return };
         let (cols, rows) = self
             .onglet_actif()
@@ -953,9 +975,9 @@ impl FenetrePupitre {
             .unwrap_or(GRILLE_PAR_DEFAUT);
         p.attentes
             .borrow_mut()
-            .push_back(Attente::NouvelOnglet(Rc::downgrade(&self.0)));
+            .push_back(Attente::NouvelOnglet(Rc::downgrade(&self.0), titre));
         p.envoyer(ClientMsg::Open {
-            argv: None,
+            argv,
             cwd: None,
             cols,
             rows,
@@ -990,6 +1012,13 @@ impl FenetrePupitre {
     /// Équivaut à un clic sur « Ouvrir un nouveau terminal » du message de panne.
     pub fn activer_message(&self) {
         self.0.bandeau.activer(CLE_PANNE);
+    }
+
+    /// Pose (ou retire) le message « connexions.toml invalide », dans toutes les fenêtres.
+    pub fn poser_message_connexions(&self, texte: Option<String>) {
+        if let Some(p) = self.pupitre() {
+            p.poser_message(CLE_CONNEXIONS, texte);
+        }
     }
 
     /// Affiche un message persistant (lu par le lecteur d'écran).
@@ -1053,6 +1082,9 @@ impl FenetrePupitre {
                 if let Some(p) = self.pupitre() {
                     p.nouvelle_fenetre();
                 }
+            }
+            Raccourci::Connexions => {
+                crate::connexions::ouvrir_connexions(self);
             }
             Raccourci::FermerOnglet => {
                 if let Some(o) = actif {
@@ -1214,6 +1246,7 @@ impl FenetrePupitre {
             }),
         );
         for (nom, r) in [
+            ("connexions", Raccourci::Connexions),
             ("copier", Raccourci::Copier),
             ("coller", Raccourci::Coller),
             ("rechercher", Raccourci::Rechercher),
@@ -1370,6 +1403,7 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
         etiquette,
         entree,
         nom: RefCell::new(None),
+        provisoire: RefCell::new(None),
         occupe: Cell::new(false),
         termine: Cell::new(false),
         attend_relecture: Cell::new(false),
@@ -1529,6 +1563,11 @@ fn bouton_menu() -> gtk::MenuButton {
         "win.nouvelle-fenetre",
         Some("<Control><Shift>n"),
     ));
+    m.append_item(&item(
+        "Connexions SSH…",
+        "win.connexions",
+        Some("<Control><Shift>o"),
+    ));
     let edition = gio::Menu::new();
     edition.append_item(&item("Copier", "win.copier", Some("<Control><Shift>c")));
     edition.append_item(&item("Coller", "win.coller", Some("<Control><Shift>v")));
@@ -1583,8 +1622,19 @@ fn bouton_menu() -> gtk::MenuButton {
 
 /// Dialogue modal « question ? » avec Annuler (par défaut, et Échap) et Fermer.
 fn confirmer(parent: &impl IsA<gtk::Window>, question: &str, si_oui: impl Fn() + 'static) {
+    confirmer_action(parent, "Fermer ?", question, "Fermer", si_oui);
+}
+
+/// Dialogue modal de confirmation : Annuler (par défaut, et Échap) ou `action`.
+pub(crate) fn confirmer_action(
+    parent: &impl IsA<gtk::Window>,
+    titre: &str,
+    question: &str,
+    action: &str,
+    si_oui: impl Fn() + 'static,
+) {
     let dialogue = gtk::Window::builder()
-        .title("Fermer ?")
+        .title(titre)
         .modal(true)
         .transient_for(parent)
         .destroy_with_parent(true)
@@ -1597,7 +1647,7 @@ fn confirmer(parent: &impl IsA<gtk::Window>, question: &str, si_oui: impl Fn() +
         .max_width_chars(48)
         .build();
     let annuler = gtk::Button::with_label("Annuler");
-    let fermer = gtk::Button::with_label("Fermer");
+    let fermer = gtk::Button::with_label(action);
     fermer.add_css_class("destructive-action");
     let boutons = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)

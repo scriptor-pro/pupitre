@@ -15,7 +15,10 @@ use gtk::glib;
 use gtk::prelude::*;
 use pupitre::fenetre::{FenetrePupitre, Onglet, Pupitre};
 use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
-use pupitre_config::Config;
+use pupitre::raccourcis::Raccourci;
+use pupitre_config::{
+    charger_connexions, chemin_connexions, enregistrer_connexions, Config, Connexion,
+};
 use pupitre_ssh::trousseau::{chemin_lisible, Coffre, CoffreSecretService};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -81,6 +84,24 @@ fn main() {
     });
     ex.lancer("fenetre_dans_la_bonne_fenetre", || {
         bonne_fenetre(&pupitre, &cle)
+    });
+    preparer_ssh_perso(perso.path());
+    ex.lancer("raccourci_ouvre_les_connexions", || {
+        raccourci_ouvre_les_connexions(&pupitre)
+    });
+    ex.lancer("hotes_ssh_config_listes", || {
+        hotes_ssh_config_listes(&pupitre)
+    });
+    ex.lancer("ajouter_puis_relire", || ajouter_puis_relire(&pupitre));
+    ex.lancer("hote_invalide_signale", || hote_invalide_signale(&pupitre));
+    ex.lancer("se_connecter_ouvre_un_onglet", || {
+        se_connecter_ouvre_un_onglet(&pupitre)
+    });
+    ex.lancer("fichier_invalide_pas_reecrit", || {
+        fichier_invalide_pas_reecrit(&pupitre)
+    });
+    ex.lancer("menu_contient_connexions", || {
+        menu_contient_connexions(&pupitre)
     });
     drop(pupitre);
     fermer_sessions(&socket);
@@ -533,4 +554,371 @@ fn bonne_fenetre(p: &Rc<Pupitre>, cle: &Path) -> Resultat {
         parent.as_ref() == Some(seconde.fenetre().upcast_ref::<gtk::Window>()),
         || format!("parent : {parent:?}"),
     )
+}
+
+// --- Fenêtre « Connexions SSH » (Task 10) ---
+
+const TITRE_LISTE: &str = "Connexions SSH";
+
+/// `~/.ssh` du HOME temporaire : deux hôtes (et un joker, ignoré), une clé avec sa
+/// publique et une clé sans publique.
+fn preparer_ssh_perso(perso: &Path) {
+    let ssh = perso.join(".ssh");
+    std::fs::create_dir_all(&ssh).unwrap();
+    std::fs::write(
+        ssh.join("config"),
+        "Host alpha\n  HostName a.example\nHost *\n  ForwardAgent no\nHost beta\n",
+    )
+    .unwrap();
+    std::fs::write(ssh.join("id_test"), "x").unwrap();
+    std::fs::write(ssh.join("id_test.pub"), "x").unwrap();
+    std::fs::write(ssh.join("id_orphelin"), "x").unwrap();
+}
+
+fn fenetre_titree(titre: &str) -> Option<gtk::Window> {
+    gtk::Window::list_toplevels()
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk::Window>().ok())
+        .find(|w| w.is_visible() && w.title().as_deref() == Some(titre))
+}
+
+fn attendre_titree(titre: &str) -> Result<gtk::Window, String> {
+    attendre(Duration::from_secs(10), || fenetre_titree(titre).is_some());
+    fenetre_titree(titre).ok_or_else(|| format!("fenêtre « {titre} » absente"))
+}
+
+fn par_nom(fenetre: &gtk::Window, nom: &str) -> Result<gtk::Widget, String> {
+    contenu(fenetre)
+        .into_iter()
+        .find(|w| w.widget_name() == nom)
+        .ok_or_else(|| format!("widget « {nom} » absent"))
+}
+
+fn texte_saisie(fenetre: &gtk::Window, nom: &str) -> Result<String, String> {
+    let e = par_nom(fenetre, nom)?
+        .dynamic_cast::<gtk::Editable>()
+        .map_err(|_| format!("« {nom} » n'est pas une saisie"))?;
+    Ok(e.text().to_string())
+}
+
+fn remplir(fenetre: &gtk::Window, nom: &str, texte: &str) -> Resultat {
+    let e = par_nom(fenetre, nom)?
+        .dynamic_cast::<gtk::Editable>()
+        .map_err(|_| format!("« {nom} » n'est pas une saisie"))?;
+    e.set_text(texte);
+    Ok(())
+}
+
+/// Textes des lignes de la liste, dans l'ordre.
+fn lignes(fenetre: &gtk::Window) -> Result<Vec<String>, String> {
+    let liste = par_nom(fenetre, "liste")?;
+    let mut v = Vec::new();
+    let mut e = liste.first_child();
+    while let Some(x) = e {
+        e = x.next_sibling();
+        let mut d = Vec::new();
+        descendants(&x, &mut d);
+        if let Some(l) = d.into_iter().find_map(|w| w.downcast::<gtk::Label>().ok()) {
+            v.push(l.text().to_string());
+        }
+    }
+    Ok(v)
+}
+
+fn focus_dans(f: &gtk::Window, w: &gtk::Widget) -> bool {
+    GtkWindowExt::focus(f).is_some_and(|x| x == *w || x.is_ancestor(w) || w.is_ancestor(&x))
+}
+
+fn ouvrir_liste(f: &FenetrePupitre) -> Result<gtk::Window, String> {
+    f.executer(Raccourci::Connexions);
+    attendre_titree(TITRE_LISTE)
+}
+
+fn fermer_si_ouverte(titre: &str) {
+    while let Some(w) = fenetre_titree(titre) {
+        w.destroy();
+    }
+}
+
+fn repartir_de_zero() {
+    for t in [
+        TITRE_LISTE,
+        "Ajouter une connexion",
+        "Modifier la connexion",
+    ] {
+        fermer_si_ouverte(t);
+    }
+    let _ = std::fs::remove_file(chemin_connexions());
+}
+
+fn premiere_fenetre(p: &Rc<Pupitre>) -> Result<FenetrePupitre, String> {
+    let ok = attendre(Duration::from_secs(10), || !p.fenetres().is_empty());
+    verifier(ok, || "pas de fenêtre".into())?;
+    Ok(p.fenetres()[0].clone())
+}
+
+fn raccourci_ouvre_les_connexions(p: &Rc<Pupitre>) -> Resultat {
+    repartir_de_zero();
+    let f = premiere_fenetre(p)?;
+    let t = f.traiter_touche(
+        gtk::gdk::Key::O,
+        32,
+        gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::SHIFT_MASK,
+    );
+    verifier(t, || "Ctrl+Maj+O non reconnu".into())?;
+    let w = attendre_titree(TITRE_LISTE)?;
+    verifier(w.is_modal(), || "fenêtre non modale".into())?;
+    verifier(
+        w.transient_for().as_ref() == Some(f.fenetre().upcast_ref::<gtk::Window>()),
+        || "mauvaise fenêtre parente".into(),
+    )?;
+    verifier(envoyer_echap(&w), || "Échap non traité".into())?;
+    verifier(
+        attendre(Duration::from_secs(2), || {
+            fenetre_titree(TITRE_LISTE).is_none()
+        }),
+        || "Échap ne ferme pas la fenêtre".into(),
+    )
+}
+
+fn hotes_ssh_config_listes(p: &Rc<Pupitre>) -> Resultat {
+    repartir_de_zero();
+    let f = premiere_fenetre(p)?;
+    let w = ouvrir_liste(&f)?;
+    let l = lignes(&w)?;
+    verifier(
+        l == ["alpha (~/.ssh/config)", "beta (~/.ssh/config)"],
+        || format!("lignes : {l:?}"),
+    )?;
+    let ligne = par_nom(&w, "liste")?.first_child().ok_or("liste vide")?;
+    verifier(
+        attendre(Duration::from_secs(2), || focus_dans(&w, &ligne)),
+        || "le focus n'est pas sur la première ligne".into(),
+    )?;
+    for b in ["Modifier…", "Supprimer"] {
+        verifier(!bouton(&w, b)?.is_sensitive(), || {
+            format!("« {b} » actif sur un hôte de ~/.ssh/config")
+        })?;
+    }
+    verifier(bouton(&w, "Se connecter")?.is_sensitive(), || {
+        "« Se connecter » inactif".into()
+    })?;
+    w.destroy();
+    Ok(())
+}
+
+fn ajouter_puis_relire(p: &Rc<Pupitre>) -> Resultat {
+    repartir_de_zero();
+    let f = premiere_fenetre(p)?;
+    let w = ouvrir_liste(&f)?;
+    bouton(&w, "Ajouter…")?.emit_clicked();
+    let form = attendre_titree("Ajouter une connexion")?;
+    verifier(
+        attendre(Duration::from_secs(2), || {
+            focus_dans(&form, &par_nom(&form, "nom").unwrap())
+        }),
+        || "le focus n'est pas dans « Nom »".into(),
+    )?;
+    // « Clé » : « Par défaut » puis les clés ayant une publique, rien d'autre.
+    let cle = par_nom(&form, "cle")?
+        .dynamic_cast::<gtk::DropDown>()
+        .map_err(|_| "« Clé » n'est pas une liste déroulante")?;
+    let modele = cle.model().ok_or("pas de modèle")?;
+    let noms: Vec<String> = (0..modele.n_items())
+        .filter_map(|i| modele.item(i))
+        .filter_map(|o| o.downcast::<gtk::StringObject>().ok())
+        .map(|o| o.string().to_string())
+        .collect();
+    verifier(noms == ["Par défaut", "id_test"], || {
+        format!("clés : {noms:?}")
+    })?;
+    remplir(&form, "nom", "prod")?;
+    remplir(&form, "hote", "example.org")?;
+    remplir(&form, "utilisateur", "bob")?;
+    remplir(&form, "port", "2222")?;
+    cle.set_selected(1);
+    bouton(&form, "Enregistrer")?.emit_clicked();
+    verifier(
+        attendre(Duration::from_secs(2), || {
+            fenetre_titree("Ajouter une connexion").is_none()
+        }),
+        || "le formulaire reste ouvert".into(),
+    )?;
+    let lues = charger_connexions(&chemin_connexions()).map_err(|e| e.to_string())?;
+    let attendu = Connexion {
+        nom: "prod".into(),
+        hote: "example.org".into(),
+        utilisateur: Some("bob".into()),
+        port: Some(2222),
+        cle: Some(std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".ssh/id_test")),
+    };
+    verifier(lues == [attendu], || format!("fichier : {lues:?}"))?;
+    let l = lignes(&w)?;
+    verifier(
+        l == [
+            "prod — bob@example.org:2222",
+            "alpha (~/.ssh/config)",
+            "beta (~/.ssh/config)",
+        ],
+        || format!("lignes : {l:?}"),
+    )?;
+    w.destroy();
+    Ok(())
+}
+
+fn hote_invalide_signale(p: &Rc<Pupitre>) -> Resultat {
+    repartir_de_zero();
+    let f = premiere_fenetre(p)?;
+    let w = ouvrir_liste(&f)?;
+    bouton(&w, "Ajouter…")?.emit_clicked();
+    let form = attendre_titree("Ajouter une connexion")?;
+    remplir(&form, "nom", "x")?;
+    remplir(&form, "hote", "-x")?;
+    bouton(&form, "Enregistrer")?.emit_clicked();
+    let erreur = par_nom(&form, "erreur-hote")?
+        .downcast::<gtk::Label>()
+        .map_err(|_| "message d'erreur : pas une étiquette")?;
+    verifier(
+        erreur.text().to_lowercase().contains("hôte") && erreur.is_visible(),
+        || format!("message sous « Hôte » : {:?}", erreur.text()),
+    )?;
+    let hote = par_nom(&form, "hote")?;
+    verifier(
+        attendre(Duration::from_secs(2), || focus_dans(&form, &hote)),
+        || "le focus n'est pas dans « Hôte »".into(),
+    )?;
+    verifier(fenetre_titree("Ajouter une connexion").is_some(), || {
+        "formulaire fermé malgré l'erreur".into()
+    })?;
+    verifier(!chemin_connexions().exists(), || {
+        "connexions.toml écrit malgré l'erreur".into()
+    })?;
+    // La saisie n'est pas perdue.
+    verifier(texte_saisie(&form, "nom")? == "x", || {
+        "« Nom » perdu".into()
+    })?;
+    form.destroy();
+    w.destroy();
+    Ok(())
+}
+
+fn se_connecter_ouvre_un_onglet(p: &Rc<Pupitre>) -> Resultat {
+    repartir_de_zero();
+    enregistrer_connexions(
+        &chemin_connexions(),
+        &[Connexion {
+            nom: "refus".into(),
+            hote: "127.0.0.1".into(),
+            utilisateur: None,
+            port: Some(1),
+            cle: None,
+        }],
+    )
+    .map_err(|e| e.to_string())?;
+    let f = p.nouvelle_fenetre();
+    let o0 = onglet(&f)?;
+    verifier(executer(&o0, "echo pret-$((1+1))", "pret-2"), || {
+        "le shell ne répond pas".into()
+    })?;
+    let w = ouvrir_liste(&f)?;
+    let l = lignes(&w)?;
+    verifier(
+        l.first().map(String::as_str) == Some("refus — 127.0.0.1:1"),
+        || format!("lignes : {l:?}"),
+    )?;
+    bouton(&w, "Se connecter")?.emit_clicked();
+    verifier(
+        attendre(Duration::from_secs(10), || f.onglets().len() == 2),
+        || format!("{} onglet(s) dans la fenêtre d'origine", f.onglets().len()),
+    )?;
+    verifier(fenetre_titree(TITRE_LISTE).is_none(), || {
+        "la fenêtre des connexions reste ouverte".into()
+    })?;
+    let o = f.onglets()[1].clone();
+    let ok = attendre(Duration::from_secs(15), || {
+        texte(&o).contains("Connection refused")
+    });
+    verifier(ok, || format!("sortie de ssh : {:?}", texte(&o)))?;
+    verifier(o.titre_affiche() == "refus", || {
+        format!("titre : {:?}", o.titre_affiche())
+    })?;
+    f.fenetre().close();
+    Ok(())
+}
+
+fn fichier_invalide_pas_reecrit(p: &Rc<Pupitre>) -> Resultat {
+    repartir_de_zero();
+    let f = premiere_fenetre(p)?;
+    let contenu_invalide = "[[connexion]]\nnom = \"a\"\nhote = \"-x\"\n";
+    std::fs::write(chemin_connexions(), contenu_invalide).map_err(|e| e.to_string())?;
+    let w = ouvrir_liste(&f)?;
+    let ms = f.messages();
+    verifier(
+        ms.iter()
+            .any(|m| m.contains("connexions.toml") && m.contains("ligne 3")),
+        || format!("messages : {ms:?}"),
+    )?;
+    let l = lignes(&w)?;
+    verifier(
+        l == ["alpha (~/.ssh/config)", "beta (~/.ssh/config)"],
+        || format!("lignes : {l:?}"),
+    )?;
+    for b in ["Ajouter…", "Modifier…", "Supprimer"] {
+        verifier(!bouton(&w, b)?.is_sensitive(), || {
+            format!("« {b} » actif alors que le fichier est invalide")
+        })?;
+    }
+    w.destroy();
+    let relu = std::fs::read_to_string(chemin_connexions()).map_err(|e| e.to_string())?;
+    verifier(relu == contenu_invalide, || {
+        format!("fichier réécrit : {relu:?}")
+    })?;
+    // Corrigé, il redevient utilisable et le message disparaît.
+    std::fs::remove_file(chemin_connexions()).map_err(|e| e.to_string())?;
+    let w = ouvrir_liste(&f)?;
+    let ms = f.messages();
+    verifier(!ms.iter().any(|m| m.contains("connexions.toml")), || {
+        format!("message persistant : {ms:?}")
+    })?;
+    verifier(bouton(&w, "Ajouter…")?.is_sensitive(), || {
+        "« Ajouter… » inactif".into()
+    })?;
+    w.destroy();
+    Ok(())
+}
+
+fn menu_contient_connexions(p: &Rc<Pupitre>) -> Resultat {
+    repartir_de_zero();
+    let f = premiere_fenetre(p)?;
+    fn parcourir(m: &gtk::gio::MenuModel, v: &mut Vec<(String, String)>) {
+        for i in 0..m.n_items() {
+            let attr = |nom: &str| {
+                m.item_attribute_value(i, nom, None)
+                    .and_then(|x| x.str().map(String::from))
+                    .unwrap_or_default()
+            };
+            let (libelle, action) = (attr("label"), attr("action"));
+            if !libelle.is_empty() {
+                v.push((libelle, action));
+            }
+            if let Some(s) = m.item_link(i, "section") {
+                parcourir(&s, v);
+            }
+        }
+    }
+    let modele = f.bouton_menu().menu_model().ok_or("pas de menu")?;
+    let mut items = Vec::new();
+    parcourir(&modele, &mut items);
+    let pos = |l: &str| items.iter().position(|(x, _)| x == l);
+    verifier(
+        items.contains(&("Connexions SSH…".into(), "win.connexions".into())),
+        || format!("entrées : {items:?}"),
+    )?;
+    verifier(pos("Nouvelle fenêtre") < pos("Connexions SSH…"), || {
+        "« Connexions SSH… » doit suivre « Nouvelle fenêtre »".into()
+    })?;
+    WidgetExt::activate_action(f.fenetre(), "win.connexions", None).map_err(|e| e.to_string())?;
+    let w = attendre_titree(TITRE_LISTE)?;
+    w.destroy();
+    Ok(())
 }
