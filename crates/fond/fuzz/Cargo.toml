@@ -1,0 +1,23 @@
+[package]
+name = "pupitre-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pupitre-proto = { path = "../../proto" }
+
+[[bin]]
+name = "trame"
+path = "fuzz_targets/trame.rs"
+test = false
+doc = false
+bench = false
+
+# Projet séparé de l'espace de travail (compilé en nightly avec les sanitizers).
+[workspace]

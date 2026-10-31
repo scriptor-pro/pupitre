@@ -114,18 +114,18 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
   - `pub enum FrameError { Io(io::Error), TooLarge(usize), Decode(String), Closed }`
 - Format : longueur `u32` petit-boutiste + charge postcard. Tous les types dérivent `Serialize, Deserialize, Debug, Clone, PartialEq`.
 
-- [ ] **Step 1 : Tests** (dans `trame.rs`) :
+- [x] **Step 1 : Tests** (dans `trame.rs`) :
 ```rust
 #[test] fn aller_retour_chaque_message() { /* chaque variante de ClientMsg et ServerMsg écrite puis relue == originale */ }
 #[test] fn trame_trop_grande_refusee() { /* en-tête annonçant MAX_FRAME + 1 → Err(FrameError::TooLarge(MAX_FRAME + 1)) */ }
 #[test] fn flux_coupe_donne_closed() { /* lecteur vide → Err(FrameError::Closed) ; en-tête tronqué (2 octets) → Err(FrameError::Closed) */ }
 #[test] fn charge_corrompue_donne_decode() { /* longueur 3 + octets [0xff,0xff,0xff] → Err(FrameError::Decode(_)) */ }
 ```
-- [ ] **Step 2 :** `cargo test -p pupitre-proto` → échec (fonctions absentes).
-- [ ] **Step 3 :** Implémenter `write_frame` / `read_frame`.
-- [ ] **Step 4 :** `cargo test -p pupitre-proto` → PASS.
-- [ ] **Step 5 :** Cible de fuzzing `trame` : octets arbitraires → `read_frame::<_, ClientMsg>` et `<_, ServerMsg>` ne paniquent jamais. Lancer `cargo +nightly fuzz run trame -- -max_total_time=60` → aucun crash.
-- [ ] **Step 6 : Commit** — `feat(proto): messages versionnés et trames`
+- [x] **Step 2 :** `cargo test -p pupitre-proto` → échec (fonctions absentes).
+- [x] **Step 3 :** Implémenter `write_frame` / `read_frame`.
+- [x] **Step 4 :** `cargo test -p pupitre-proto` → PASS.
+- [x] **Step 5 :** Cible de fuzzing `trame` : octets arbitraires → `read_frame::<_, ClientMsg>` et `<_, ServerMsg>` ne paniquent jamais. Lancer `cargo +nightly fuzz run trame -- -max_total_time=60` → aucun crash.
+- [x] **Step 6 : Commit** — `feat(proto): messages versionnés et trames`
 
 ### Task 3 : Couleurs, thèmes, vérificateur de contraste, configuration
 
