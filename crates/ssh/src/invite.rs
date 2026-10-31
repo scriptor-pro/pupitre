@@ -66,9 +66,12 @@ pub fn classer_invite(invite: &str, prompt_env: Option<&str>) -> Genre {
     if invite.contains("(yes/no") {
         return Genre::HoteInconnu;
     }
-    Genre::Texte {
-        masque: !invite.to_lowercase().contains("username"),
-    }
+    // Visible seulement pour une demande de nom d'utilisateur ; tout ce qui
+    // évoque un mot de passe reste masqué, même avec « username » dans l'URL.
+    let bas = invite.trim_start().to_lowercase();
+    let visible =
+        bas.starts_with("username") && !bas.contains("password") && !bas.contains("passphrase");
+    Genre::Texte { masque: !visible }
 }
 
 #[cfg(test)]
@@ -146,6 +149,22 @@ mod tests {
         assert_eq!(
             classer_invite("Username for 'http://127.0.0.1:18401': ", None),
             Genre::Texte { masque: false }
+        );
+    }
+
+    #[test]
+    fn mot_de_passe_git_avec_username_dans_l_url_masque() {
+        assert_eq!(
+            classer_invite("Password for 'https://myusername@exemple.org': ", None),
+            Genre::Texte { masque: true }
+        );
+    }
+
+    #[test]
+    fn mot_de_passe_ssh_utilisateur_username_masque() {
+        assert_eq!(
+            classer_invite("myusername@hote's password: ", None),
+            Genre::Texte { masque: true }
         );
     }
 
