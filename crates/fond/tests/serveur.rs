@@ -4,7 +4,10 @@
 
 use pupitre_fond::serveur::{preparer_dossier, run_avec, socket_path};
 use pupitre_fond::ssh::EntreesSsh;
-use pupitre_proto::{read_frame, write_frame, ClientMsg, ServerMsg, SessionId, VERSION};
+use pupitre_proto::{
+    read_frame, write_frame, ClientMsg, DemandeId, EtatTrousseau, Genre, ServerMsg, SessionId,
+    VERSION,
+};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -125,6 +128,50 @@ impl Client {
             }
         }
         panic!("message attendu non reçu");
+    }
+
+    /// Vrai si rien n'arrive pendant `delai`.
+    fn silence(&mut self, delai: Duration) -> bool {
+        self.lecture.set_read_timeout(Some(delai)).unwrap();
+        let rien = read_frame::<_, ServerMsg>(&mut self.lecture).is_err();
+        self.lecture
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        rien
+    }
+
+    /// Envoie une demande de phrase de passe (comme `pupitre-askpass`).
+    fn demander(&mut self) {
+        self.envoyer(ClientMsg::Demander {
+            session: None,
+            invite: "Enter passphrase for /tmp/x: ".into(),
+            genre: Genre::PhraseCle {
+                cle: "/tmp/x".into(),
+                nouvel_essai: false,
+            },
+            trousseau: EtatTrousseau::Absent,
+        });
+    }
+
+    /// Attend une `Demande` et rend son numéro.
+    fn attendre_demande(&mut self) -> DemandeId {
+        self.attendre(|m| match m {
+            ServerMsg::Demande {
+                demande, invite, ..
+            } => {
+                assert_eq!(invite, "Enter passphrase for /tmp/x: ");
+                Some(*demande)
+            }
+            _ => None,
+        })
+    }
+
+    fn repondre(&mut self, demande: DemandeId, texte: &str) {
+        self.envoyer(ClientMsg::Repondre {
+            demande,
+            reponse: Some(texte.into()),
+            memoriser: false,
+        });
     }
 
     fn ouvrir(&mut self, argv: &[&str]) -> SessionId {
@@ -577,4 +624,113 @@ fn sans_ssh_agent_message() {
     assert_eq!(c2.variable_du_shell("SSH_AUTH_SOCK"), "<unset>");
     c2.envoyer(ClientMsg::List);
     c2.attendre(|m| matches!(m, ServerMsg::Sessions(_)).then_some(()));
+}
+
+/// Client v2 qui sera demandeur : accueilli, puis `Demander`. Les `Demande` reçues entre
+/// les deux (interface d'avant) sont ignorées par `attendre_reponse`.
+fn demandeur(socket: &Path) -> Client {
+    let mut c = Client::brut(socket);
+    c.envoyer(ClientMsg::Hello { version: 2 });
+    c.demander();
+    c
+}
+
+fn attendre_reponse(c: &mut Client) -> (Option<String>, bool) {
+    c.attendre(|m| match m {
+        ServerMsg::Reponse { reponse, memoriser } => Some((reponse.clone(), *memoriser)),
+        _ => None,
+    })
+}
+
+#[test]
+fn demande_relayee_puis_reponse() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut ui = Client::connecter(&s.socket);
+    let mut ask = demandeur(&s.socket);
+    let d = ui.attendre_demande();
+    ui.envoyer(ClientMsg::Repondre {
+        demande: d,
+        reponse: Some("secret".into()),
+        memoriser: true,
+    });
+    assert_eq!(attendre_reponse(&mut ask), (Some("secret".into()), true));
+}
+
+#[test]
+fn premiere_reponse_gagne() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut a = Client::connecter(&s.socket);
+    let mut b = Client::connecter(&s.socket);
+    let mut ask = demandeur(&s.socket);
+    let da = a.attendre_demande();
+    let db = b.attendre_demande();
+    assert_eq!(da, db);
+    a.repondre(da, "premier");
+    b.attendre(|m| {
+        matches!(m, ServerMsg::DemandeClose { demande } if *demande == da).then_some(())
+    });
+    b.repondre(da, "second");
+    assert_eq!(attendre_reponse(&mut ask), (Some("premier".into()), false));
+    // La seconde réponse est ignorée : rien d'autre pour le demandeur.
+    assert!(ask.silence(Duration::from_millis(300)));
+    // L'interface gagnante ne reçoit pas de DemandeClose.
+    assert!(a.silence(Duration::from_millis(300)));
+}
+
+#[test]
+fn demande_annulee_si_askpass_part() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut ui = Client::connecter(&s.socket);
+    let ask = demandeur(&s.socket);
+    let d = ui.attendre_demande();
+    drop(ask);
+    ui.attendre(|m| {
+        matches!(m, ServerMsg::DemandeClose { demande } if *demande == d).then_some(())
+    });
+}
+
+#[test]
+fn sans_interface_refus_immediat() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut ask = demandeur(&s.socket);
+    assert_eq!(attendre_reponse(&mut ask), (None, false));
+}
+
+#[test]
+fn demande_renvoyee_a_une_interface_qui_arrive() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut a = Client::connecter(&s.socket);
+    let mut ask = demandeur(&s.socket);
+    let d = a.attendre_demande();
+    // Une interface arrive plus tard : elle reçoit la demande encore ouverte.
+    let mut b = Client::connecter(&s.socket);
+    assert_eq!(b.attendre_demande(), d);
+    // Et à nouveau sur List.
+    b.envoyer(ClientMsg::List);
+    assert_eq!(b.attendre_demande(), d);
+    b.repondre(d, "ok");
+    assert_eq!(attendre_reponse(&mut ask), (Some("ok".into()), false));
+}
+
+#[test]
+fn client_v1_ne_recoit_pas_de_demande() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut v1 = Client::brut(&s.socket);
+    v1.envoyer(ClientMsg::Hello { version: 1 });
+    assert_eq!(v1.recevoir(), ServerMsg::Welcome { version: 1 });
+    // Seul client v1 : pas une interface, refus immédiat.
+    let mut ask = demandeur(&s.socket);
+    assert_eq!(attendre_reponse(&mut ask), (None, false));
+    assert!(v1.silence(Duration::from_millis(300)));
+}
+
+#[test]
+fn demandeur_ne_retient_pas_le_fond() {
+    let s = demarrer(Duration::from_millis(300));
+    let mut ask = demandeur(&s.socket);
+    assert_eq!(attendre_reponse(&mut ask), (None, false));
+    s.fin
+        .recv_timeout(Duration::from_secs(3))
+        .expect("le fond reste vivant à cause d'un demandeur")
+        .unwrap();
 }

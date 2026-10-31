@@ -182,7 +182,8 @@ fn demarrer(
         Ok(ServerMsg::Error(e)) => return Err(ClientError::Refus(e)),
         Ok(autre) => {
             return Err(ClientError::Refus(format!(
-                "réponse inattendue : {autre:?}"
+                "réponse inattendue : {}",
+                autre.nom()
             )))
         }
         Err(FrameError::Io(e)) => return Err(ClientError::Injoignable(e.to_string())),

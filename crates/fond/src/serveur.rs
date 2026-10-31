@@ -15,9 +15,10 @@ use crate::ssh::{EntreesSsh, EtatSsh};
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
 use pupitre_proto::{
-    read_frame, write_frame, ClientMsg, ServerMsg, SessionId, SessionInfo, VERSION, VERSION_MIN,
+    read_frame, write_frame, ClientMsg, DemandeId, ServerMsg, SessionId, SessionInfo, VERSION,
+    VERSION_MIN,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io;
 use std::net::Shutdown;
@@ -127,6 +128,8 @@ pub fn run_avec(socket: &Path, idle_exit: Duration, entrees: EntreesSsh) -> io::
         clients: HashMap::new(),
         sessions: HashMap::new(),
         prochain_id: 1,
+        demandes: BTreeMap::new(),
+        prochaine_demande: 1,
         evt_tx,
         ssh: EtatSsh::avec_entrees(socket, entrees),
     };
@@ -212,6 +215,16 @@ struct ClientEtat {
     accueilli: bool,
     /// Version négociée au `Hello` (1 tant que le client n'est pas accueilli).
     version: u32,
+    /// Vrai dès que le client a envoyé `Demander` (`pupitre-askpass`) : ce n'est pas une
+    /// interface et il ne retient pas le processus de fond.
+    demandeur: bool,
+}
+
+/// Demande de saisie en attente de réponse.
+struct DemandeOuverte {
+    demandeur: ClientId,
+    /// Le `ServerMsg::Demande` à (re)envoyer aux interfaces.
+    msg: ServerMsg,
 }
 
 struct SessionEtat {
@@ -227,6 +240,8 @@ struct Etat {
     clients: HashMap<ClientId, ClientEtat>,
     sessions: HashMap<SessionId, SessionEtat>,
     prochain_id: SessionId,
+    demandes: BTreeMap<DemandeId, DemandeOuverte>,
+    prochaine_demande: DemandeId,
     evt_tx: SyncSender<Evt>,
     ssh: EtatSsh,
 }
@@ -245,7 +260,9 @@ impl Etat {
                 self.controler_occupation();
                 dernier_controle = Instant::now();
             }
-            if self.clients.is_empty() && self.sessions.is_empty() {
+            // Un demandeur (et donc sa demande) ne retient pas le fond à lui seul.
+            let clients_utiles = self.clients.values().any(|c| !c.demandeur);
+            if !clients_utiles && self.sessions.is_empty() {
                 if inactif_depuis.get_or_insert_with(Instant::now).elapsed() >= idle_exit {
                     return;
                 }
@@ -265,11 +282,12 @@ impl Etat {
                         flux,
                         accueilli: false,
                         version: VERSION_MIN,
+                        demandeur: false,
                     },
                 );
             }
             Evt::Depart(id) => {
-                self.clients.remove(&id);
+                self.retirer(id);
             }
             Evt::Message(id, m) => self.message(id, m),
             Evt::Session(sid, SessionEvent::Output(data)) => {
@@ -302,6 +320,7 @@ impl Etat {
                         c.version = negociee;
                     }
                     self.envoyer(cid, ServerMsg::Welcome { version: negociee });
+                    self.envoyer_demandes(cid);
                 } else {
                     self.envoyer(
                         cid,
@@ -360,6 +379,7 @@ impl Etat {
                     .collect();
                 v.sort_by_key(|s| s.id);
                 self.envoyer(cid, ServerMsg::Sessions(v));
+                self.envoyer_demandes(cid);
             }
             ClientMsg::Attach { id } => match self.sessions.get(&id) {
                 Some(s) => {
@@ -368,11 +388,129 @@ impl Etat {
                 }
                 None => self.inconnue(cid, id),
             },
-            // Traité à la Task 6/7. Le contenu (invite, réponse) n'est jamais journalisé.
-            ClientMsg::Demander { .. }
-            | ClientMsg::Repondre { .. }
-            | ClientMsg::ChargerCle { .. } => {}
+            // Le contenu des demandes et des réponses n'est jamais journalisé ni mis dans
+            // un message d'erreur.
+            ClientMsg::Demander {
+                session,
+                invite,
+                genre,
+                trousseau,
+            } => self.demander(cid, session, invite, genre, trousseau),
+            ClientMsg::Repondre {
+                demande,
+                reponse,
+                memoriser,
+            } => self.repondre(cid, demande, reponse, memoriser),
+            // Traité à la Task 7.
+            ClientMsg::ChargerCle { .. } => {}
         }
+    }
+
+    /// Interfaces : clients accueillis en version 2 qui ne sont pas demandeurs.
+    fn interfaces(&self) -> Vec<ClientId> {
+        let mut v: Vec<ClientId> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.accueilli && c.version >= 2 && !c.demandeur)
+            .map(|(&id, _)| id)
+            .collect();
+        v.sort_unstable();
+        v
+    }
+
+    fn demander(
+        &mut self,
+        cid: ClientId,
+        session: Option<SessionId>,
+        invite: String,
+        genre: pupitre_proto::Genre,
+        trousseau: pupitre_proto::EtatTrousseau,
+    ) {
+        if let Some(c) = self.clients.get_mut(&cid) {
+            c.demandeur = true;
+        }
+        let interfaces = self.interfaces();
+        if interfaces.is_empty() {
+            // Personne pour répondre : refus tout de suite, rien n'est conservé.
+            self.envoyer(
+                cid,
+                ServerMsg::Reponse {
+                    reponse: None,
+                    memoriser: false,
+                },
+            );
+            return;
+        }
+        let demande = self.prochaine_demande;
+        self.prochaine_demande += 1;
+        let msg = ServerMsg::Demande {
+            demande,
+            session,
+            invite,
+            genre,
+            trousseau,
+        };
+        self.demandes.insert(
+            demande,
+            DemandeOuverte {
+                demandeur: cid,
+                msg: msg.clone(),
+            },
+        );
+        for i in interfaces {
+            self.envoyer(i, msg.clone());
+        }
+    }
+
+    fn repondre(
+        &mut self,
+        cid: ClientId,
+        demande: DemandeId,
+        reponse: Option<String>,
+        memoriser: bool,
+    ) {
+        // Seule une interface répond ; une demande inconnue ou déjà réglée est ignorée.
+        if !self.interfaces().contains(&cid) {
+            return;
+        }
+        let Some(d) = self.demandes.remove(&demande) else {
+            return;
+        };
+        self.envoyer(d.demandeur, ServerMsg::Reponse { reponse, memoriser });
+        for i in self.interfaces() {
+            if i != cid {
+                self.envoyer(i, ServerMsg::DemandeClose { demande });
+            }
+        }
+    }
+
+    /// Envoie à `cid` les demandes ouvertes, s'il est une interface.
+    fn envoyer_demandes(&mut self, cid: ClientId) {
+        if !self.interfaces().contains(&cid) {
+            return;
+        }
+        let msgs: Vec<ServerMsg> = self.demandes.values().map(|d| d.msg.clone()).collect();
+        for m in msgs {
+            self.envoyer(cid, m);
+        }
+    }
+
+    /// Retire un client ; s'il était demandeur, ses demandes ouvertes sont closes.
+    fn retirer(&mut self, cid: ClientId) -> Option<ClientEtat> {
+        let c = self.clients.remove(&cid)?;
+        let fermees: Vec<DemandeId> = self
+            .demandes
+            .iter()
+            .filter(|(_, d)| d.demandeur == cid)
+            .map(|(&id, _)| id)
+            .collect();
+        for demande in fermees {
+            self.demandes.remove(&demande);
+            for i in self.interfaces() {
+                self.envoyer(i, ServerMsg::DemandeClose { demande });
+            }
+        }
+        Some(c)
     }
 
     fn ouvrir(&mut self, cid: ClientId, argv: &[String], cwd: Option<&Path>, cols: u16, rows: u16) {
@@ -468,7 +606,7 @@ impl Etat {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => self.couper(cid),
             Err(TrySendError::Disconnected(_)) => {
-                self.clients.remove(&cid);
+                self.retirer(cid);
             }
         }
     }
@@ -488,12 +626,12 @@ impl Etat {
 
     /// Retire un client après lui avoir laissé recevoir ce qui est déjà dans sa file.
     fn congedier(&mut self, cid: ClientId) {
-        self.clients.remove(&cid);
+        self.retirer(cid);
     }
 
     /// Retire un client immédiatement (il ne lit plus) : la coupure débloque son écriture.
     fn couper(&mut self, cid: ClientId) {
-        if let Some(c) = self.clients.remove(&cid) {
+        if let Some(c) = self.retirer(cid) {
             let _ = c.flux.shutdown(Shutdown::Both);
         }
     }

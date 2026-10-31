@@ -26,7 +26,7 @@ pub type DemandeId = u64;
 pub type SessionId = u64;
 
 /// Messages envoyés par l'interface au processus de fond.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum ClientMsg {
     Hello {
         version: u32,
@@ -78,7 +78,7 @@ pub enum ClientMsg {
 }
 
 /// Messages envoyés par le processus de fond à l'interface.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
 pub enum ServerMsg {
     Welcome {
         version: u32,
@@ -129,7 +129,161 @@ pub enum ServerMsg {
     Message(String),
 }
 
+/// Réponse d'un utilisateur pour `Debug` : jamais son contenu (phrase de passe).
+struct Masque<'a>(&'a Option<String>);
+
+impl std::fmt::Debug for Masque<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(_) => f.write_str("Some(«masqué»)"),
+            None => f.write_str("None"),
+        }
+    }
+}
+
+// `Debug` écrit à la main : une réponse (phrase de passe) ne doit jamais apparaître dans
+// un message d'erreur ou un journal.
+impl std::fmt::Debug for ClientMsg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ClientMsg::Hello { version } => {
+                f.debug_struct("Hello").field("version", version).finish()
+            }
+            ClientMsg::Open {
+                argv,
+                cwd,
+                cols,
+                rows,
+            } => f
+                .debug_struct("Open")
+                .field("argv", argv)
+                .field("cwd", cwd)
+                .field("cols", cols)
+                .field("rows", rows)
+                .finish(),
+            ClientMsg::Input { id, data } => f
+                .debug_struct("Input")
+                .field("id", id)
+                .field("data", data)
+                .finish(),
+            ClientMsg::Resize { id, cols, rows } => f
+                .debug_struct("Resize")
+                .field("id", id)
+                .field("cols", cols)
+                .field("rows", rows)
+                .finish(),
+            ClientMsg::Close { id } => f.debug_struct("Close").field("id", id).finish(),
+            ClientMsg::List => f.write_str("List"),
+            ClientMsg::Attach { id } => f.debug_struct("Attach").field("id", id).finish(),
+            ClientMsg::Demander {
+                session,
+                invite,
+                genre,
+                trousseau,
+            } => f
+                .debug_struct("Demander")
+                .field("session", session)
+                .field("invite", invite)
+                .field("genre", genre)
+                .field("trousseau", trousseau)
+                .finish(),
+            ClientMsg::Repondre {
+                demande,
+                reponse,
+                memoriser,
+            } => f
+                .debug_struct("Repondre")
+                .field("demande", demande)
+                .field("reponse", &Masque(reponse))
+                .field("memoriser", memoriser)
+                .finish(),
+            ClientMsg::ChargerCle { cle } => {
+                f.debug_struct("ChargerCle").field("cle", cle).finish()
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for ServerMsg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ServerMsg::Welcome { version } => {
+                f.debug_struct("Welcome").field("version", version).finish()
+            }
+            ServerMsg::Opened { id } => f.debug_struct("Opened").field("id", id).finish(),
+            ServerMsg::OpenFailed { error } => {
+                f.debug_struct("OpenFailed").field("error", error).finish()
+            }
+            ServerMsg::Output { id, data } => f
+                .debug_struct("Output")
+                .field("id", id)
+                .field("data", data)
+                .finish(),
+            ServerMsg::Replay { id, data } => f
+                .debug_struct("Replay")
+                .field("id", id)
+                .field("data", data)
+                .finish(),
+            ServerMsg::Exited { id, code } => f
+                .debug_struct("Exited")
+                .field("id", id)
+                .field("code", code)
+                .finish(),
+            ServerMsg::Sessions(v) => f.debug_tuple("Sessions").field(v).finish(),
+            ServerMsg::Busy { id, busy } => f
+                .debug_struct("Busy")
+                .field("id", id)
+                .field("busy", busy)
+                .finish(),
+            ServerMsg::Error(e) => f.debug_tuple("Error").field(e).finish(),
+            ServerMsg::Demande {
+                demande,
+                session,
+                invite,
+                genre,
+                trousseau,
+            } => f
+                .debug_struct("Demande")
+                .field("demande", demande)
+                .field("session", session)
+                .field("invite", invite)
+                .field("genre", genre)
+                .field("trousseau", trousseau)
+                .finish(),
+            ServerMsg::DemandeClose { demande } => f
+                .debug_struct("DemandeClose")
+                .field("demande", demande)
+                .finish(),
+            ServerMsg::Reponse { reponse, memoriser } => f
+                .debug_struct("Reponse")
+                .field("reponse", &Masque(reponse))
+                .field("memoriser", memoriser)
+                .finish(),
+            ServerMsg::Message(t) => f.debug_tuple("Message").field(t).finish(),
+        }
+    }
+}
+
 impl ServerMsg {
+    /// Nom de la variante, sans aucun contenu : pour les messages d'erreur.
+    pub fn nom(&self) -> &'static str {
+        match self {
+            ServerMsg::Welcome { .. } => "Welcome",
+            ServerMsg::Opened { .. } => "Opened",
+            ServerMsg::OpenFailed { .. } => "OpenFailed",
+            ServerMsg::Output { .. } => "Output",
+            ServerMsg::Replay { .. } => "Replay",
+            ServerMsg::Exited { .. } => "Exited",
+            ServerMsg::Sessions(_) => "Sessions",
+            ServerMsg::Busy { .. } => "Busy",
+            ServerMsg::Error(_) => "Error",
+            ServerMsg::Demande { .. } => "Demande",
+            ServerMsg::DemandeClose { .. } => "DemandeClose",
+            ServerMsg::Reponse { .. } => "Reponse",
+            ServerMsg::Message(_) => "Message",
+        }
+    }
+
     /// Vrai pour les variantes introduites par la version 2, qu'un client en version 1
     /// ne sait pas décoder.
     pub fn est_v2(&self) -> bool {
@@ -242,5 +396,26 @@ mod tests {
             postcard::to_stdvec(&ServerMsg::DemandeClose { demande: 0 }).unwrap()[0],
             10
         );
+    }
+
+    #[test]
+    fn debug_ne_montre_pas_la_phrase() {
+        let r = ClientMsg::Repondre {
+            demande: 1,
+            reponse: Some("PHRASE-SECRETE".into()),
+            memoriser: false,
+        };
+        let a = ServerMsg::Reponse {
+            reponse: Some("PHRASE-SECRETE".into()),
+            memoriser: true,
+        };
+        for t in [format!("{r:?}"), format!("{a:?}"), format!("{r:#?}")] {
+            assert!(!t.contains("PHRASE-SECRETE"), "{t}");
+            assert!(t.contains("Some(«masqué»)"), "{t}");
+        }
+        assert_eq!(a.nom(), "Reponse");
+        // L'encodage n'est pas touché.
+        let o = postcard::to_stdvec(&a).unwrap();
+        assert!(o.windows(14).any(|w| w == b"PHRASE-SECRETE"));
     }
 }
