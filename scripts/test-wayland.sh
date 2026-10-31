@@ -29,4 +29,4 @@ for _ in $(seq 50); do [ -S "$RUNTIME/$SOCKET" ] && break; sleep 0.1; done
 [ -S "$RUNTIME/$SOCKET" ] || { echo "Weston n'a pas démarré :" >&2; cat "$RUNTIME/weston.log" >&2; exit 1; }
 unset DISPLAY
 export WAYLAND_DISPLAY="$SOCKET" GDK_BACKEND=wayland
-dbus-run-session -- cargo test --workspace "$@" -- --include-ignored
+dbus-run-session -- scripts/trousseau-test.sh cargo test --workspace "$@" -- --include-ignored

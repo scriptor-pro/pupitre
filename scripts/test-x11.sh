@@ -11,4 +11,4 @@ command -v xvfb-run >/dev/null || { echo "xvfb-run manquant : sudo apt install x
 unset WAYLAND_DISPLAY
 export GDK_BACKEND=x11
 exec xvfb-run -a -s "-screen 0 1920x1080x24" \
-  dbus-run-session -- cargo test --workspace "$@" -- --include-ignored
+  dbus-run-session -- scripts/trousseau-test.sh cargo test --workspace "$@" -- --include-ignored
