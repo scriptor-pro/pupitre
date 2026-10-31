@@ -287,8 +287,11 @@ struct ChargementEtat {
     attente: Travail,
     /// Trousseau verrouillé au dernier essai : on réessaie à la prochaine ouverture.
     reessai: bool,
-    /// Le message « trousseau verrouillé » a été montré à une interface.
+    /// Le message « trousseau verrouillé » a été émis (montré ou gardé pour une interface).
     verrouille_signale: bool,
+    /// Messages du chargement qu'aucune interface n'a encore pu recevoir : remis à la
+    /// première interface qui parle.
+    messages_en_attente: Vec<String>,
 }
 
 impl Etat {
@@ -388,6 +391,19 @@ impl Etat {
             ClientMsg::Hello { .. } => {
                 self.envoyer(cid, ServerMsg::Error("protocole : Hello déjà reçu".into()))
             }
+            // Un client qui parle sans être demandeur est une interface : elle reçoit ce
+            // que le chargement n'a pu dire plus tôt (le demandeur, lui, ne reçoit rien).
+            _ if !matches!(m, ClientMsg::Demander { .. } | ClientMsg::ChargerCle { .. }) => {
+                self.livrer_messages_en_attente(cid);
+                self.message_accueilli(cid, m);
+            }
+            _ => self.message_accueilli(cid, m),
+        }
+    }
+
+    fn message_accueilli(&mut self, cid: ClientId, m: ClientMsg) {
+        match m {
+            ClientMsg::Hello { .. } => {}
             ClientMsg::Open {
                 argv,
                 cwd,
@@ -498,27 +514,41 @@ impl Etat {
     fn fin_chargement(&mut self, rapport: Rapport) {
         self.chargement.en_cours = false;
         self.chargement.reessai = rapport.verrouille;
-        let interfaces = self.interfaces();
         if rapport.verrouille {
-            // Une seule fois, et seulement si quelqu'un a pu le lire.
-            if !self.chargement.verrouille_signale && !interfaces.is_empty() {
+            // Une seule fois.
+            if !self.chargement.verrouille_signale {
                 self.chargement.verrouille_signale = true;
-                for i in &interfaces {
-                    self.envoyer(
-                        *i,
-                        ServerMsg::Message(chargement::MESSAGE_VERROUILLE.into()),
-                    );
-                }
+                self.notifier(chargement::MESSAGE_VERROUILLE.to_string());
             }
         } else {
             self.chargement.verrouille_signale = false;
         }
         for texte in rapport.messages {
-            for i in &interfaces {
-                self.envoyer(*i, ServerMsg::Message(texte.clone()));
-            }
+            self.notifier(texte);
         }
         self.lancer_chargement();
+    }
+
+    /// Montre `texte` aux interfaces ; sans interface, il est gardé pour la première.
+    fn notifier(&mut self, texte: String) {
+        let interfaces = self.interfaces();
+        if interfaces.is_empty() {
+            self.chargement.messages_en_attente.push(texte);
+            return;
+        }
+        for i in interfaces {
+            self.envoyer(i, ServerMsg::Message(texte.clone()));
+        }
+    }
+
+    /// Remet à `cid`, si c'est une interface, les messages gardés.
+    fn livrer_messages_en_attente(&mut self, cid: ClientId) {
+        if self.chargement.messages_en_attente.is_empty() || !self.interfaces().contains(&cid) {
+            return;
+        }
+        for texte in std::mem::take(&mut self.chargement.messages_en_attente) {
+            self.envoyer(cid, ServerMsg::Message(texte));
+        }
     }
 
     /// Interfaces : clients accueillis en version 2 qui ne sont pas demandeurs.

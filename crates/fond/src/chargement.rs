@@ -32,6 +32,14 @@ pub fn message_oubliee(cle: &Path) -> String {
     )
 }
 
+/// Texte du bandeau quand la phrase qu'on vient de saisir (et de mémoriser) n'ouvre pas la clé.
+pub fn message_non_memorisee(cle: &Path) -> String {
+    format!(
+        "La phrase de passe saisie pour {} n'a pas été mémorisée : elle n'ouvre pas la clé.",
+        chemin_lisible(cle)
+    )
+}
+
 /// Ce qu'il faut charger.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Travail {
@@ -207,7 +215,11 @@ pub fn executer(coffre: &dyn Coffre, agent: &Path, askpass: &Path, travail: &Tra
         if charger_cle(agent, askpass, &cle).is_err() && coffre.lire(&cle).is_none() {
             // L'askpass a vu « Bad passphrase » et oublié l'entrée. Pour tout autre échec
             // (délai, agent disparu) l'entrée reste et on ne dit rien.
-            rapport.messages.push(message_oubliee(&cle));
+            rapport.messages.push(if travail.cles.contains(&cle) {
+                message_non_memorisee(&cle)
+            } else {
+                message_oubliee(&cle)
+            });
         }
     }
     rapport
@@ -353,6 +365,76 @@ mod tests {
         let r = executer(&coffre, agent.socket(), &ask, &travail);
         assert!(r.messages.is_empty(), "{r:?}");
         assert!(coffre.lire(&cle).is_some());
+    }
+
+    /// Coffre à une clé dont l'entrée existe tant que le fichier `marque` existe : le faux
+    /// askpass le supprime au « Bad passphrase », comme le vrai oublie l'entrée.
+    struct CoffreMarque {
+        marque: PathBuf,
+        cle: PathBuf,
+    }
+
+    impl Coffre for CoffreMarque {
+        fn etat(&self) -> EtatTrousseau {
+            EtatTrousseau::Disponible
+        }
+        fn lire(&self, c: &Path) -> Option<zeroize::Zeroizing<String>> {
+            (c == self.cle && self.marque.exists()).then(|| zeroize::Zeroizing::new("x".into()))
+        }
+        fn ecrire(&self, _: &Path, _: &str) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
+            Ok(())
+        }
+        fn oublier(&self, _: &Path) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
+            Ok(())
+        }
+        fn cles(&self) -> Vec<PathBuf> {
+            vec![self.cle.clone()]
+        }
+    }
+
+    /// Lance `executer` avec une mauvaise phrase qui fait oublier l'entrée ; `saisie` vrai =
+    /// chargement d'une phrase qu'on vient de saisir (clé désignée), sinon chargement général.
+    fn rapport_phrase_fausse(saisie: bool) -> (Rapport, PathBuf) {
+        let t = tempfile::tempdir().unwrap();
+        let cle = cle_jetable(t.path(), "bonne");
+        let agent = agent_jetable(t.path());
+        let marque = t.path().join("entree");
+        std::fs::write(&marque, "").unwrap();
+        let ask = t.path().join("oublieux.sh");
+        std::fs::write(
+            &ask,
+            format!(
+                "#!/bin/sh\ncase \"$1\" in Bad*) rm -f {}; exit 1;; esac\necho fausse\n",
+                marque.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&ask, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let coffre = CoffreMarque {
+            marque,
+            cle: cle.clone(),
+        };
+        let travail = Travail {
+            toutes: !saisie,
+            cles: if saisie { vec![cle.clone()] } else { vec![] },
+        };
+        (executer(&coffre, agent.socket(), &ask, &travail), cle)
+    }
+
+    #[test]
+    fn phrase_fausse_au_demarrage_message_oubliee() {
+        let (r, cle) = rapport_phrase_fausse(false);
+        assert_eq!(r.messages, vec![message_oubliee(&cle)]);
+    }
+
+    #[test]
+    fn phrase_saisie_fausse_message_non_memorisee() {
+        let (r, cle) = rapport_phrase_fausse(true);
+        assert_eq!(r.messages, vec![message_non_memorisee(&cle)]);
+        assert_eq!(
+            message_non_memorisee(Path::new("/opt/k")),
+            "La phrase de passe saisie pour /opt/k n'a pas été mémorisée : elle n'ouvre pas la clé."
+        );
     }
 
     #[test]

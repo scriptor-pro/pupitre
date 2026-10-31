@@ -3,6 +3,7 @@
 
 use serde::{de::DeserializeOwned, Serialize};
 use std::io::{self, Read, Write};
+use zeroize::Zeroizing;
 
 /// Taille maximale d'une charge (16 Mio) ; au-delà, la trame est refusée sans être lue.
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
@@ -36,8 +37,11 @@ impl std::error::Error for FrameError {}
 /// et rien n'est écrit. L'en-tête et la charge partent en un seul `write_all`.
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {
     // Réserve l'en-tête, puis encode la charge à la suite.
-    let mut buf = postcard::to_extend(msg, vec![0u8; 4])
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    // Effacé à la destruction : la trame peut contenir une phrase de passe.
+    let mut buf = Zeroizing::new(
+        postcard::to_extend(msg, vec![0u8; 4])
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?,
+    );
     let longueur = buf.len() - 4;
     if longueur > MAX_FRAME {
         return Err(io::Error::new(
@@ -60,9 +64,9 @@ pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> Result<T, FrameErr
     if longueur > MAX_FRAME {
         return Err(FrameError::TooLarge(longueur));
     }
-    let mut charge = vec![0u8; longueur];
+    let mut charge = Zeroizing::new(vec![0u8; longueur]);
     lire_exactement(r, &mut charge)?;
-    match postcard::take_from_bytes::<T>(&charge) {
+    match postcard::take_from_bytes::<T>(charge.as_slice()) {
         Ok((msg, [])) => Ok(msg),
         Ok((_, reste)) => Err(FrameError::Decode(format!(
             "{} octet(s) en trop après le message",

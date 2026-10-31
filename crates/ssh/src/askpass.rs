@@ -9,17 +9,22 @@ use crate::trousseau::{Coffre, EtatTrousseau};
 use pupitre_proto::{read_frame, write_frame, ClientMsg, Genre, ServerMsg, VERSION};
 use std::io::Write;
 use std::os::unix::net::UnixStream;
+use zeroize::Zeroizing;
 
 /// Message sur la sortie d'erreur (jamais de secret).
 fn dire(texte: &str) {
     eprintln!("pupitre-askpass : {texte}");
 }
 
-/// Écrit la réponse suivie de `\n` sur la sortie et la vide.
+/// Écrit la réponse suivie de `\n` en un seul `write_all`, depuis un tampon effacé ensuite,
+/// puis vide la sortie. `sortie` doit être sans tampon (le binaire fournit le descripteur 1
+/// tel quel) : aucune copie de la phrase ne reste dans un tampon de ligne.
 fn ecrire_reponse(sortie: &mut dyn Write, reponse: &str) -> bool {
+    let mut tampon = Zeroizing::new(Vec::with_capacity(reponse.len() + 1));
+    tampon.extend_from_slice(reponse.as_bytes());
+    tampon.push(b'\n');
     sortie
-        .write_all(reponse.as_bytes())
-        .and_then(|()| sortie.write_all(b"\n"))
+        .write_all(&tampon)
         .and_then(|()| sortie.flush())
         .is_ok()
 }

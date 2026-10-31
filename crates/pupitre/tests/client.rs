@@ -43,6 +43,14 @@ fn isoler_ssh() -> &'static std::path::Path {
         std::fs::create_dir_all(&tmp).unwrap();
         std::env::set_var("XDG_RUNTIME_DIR", &run);
         std::env::set_var("TMPDIR", &tmp);
+        // Le fond charge les clés mémorisées du trousseau : hors du trousseau jetable des
+        // scripts de test, il ne doit voir aucun bus (donc jamais le vrai trousseau).
+        if std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_none() {
+            std::env::set_var(
+                "DBUS_SESSION_BUS_ADDRESS",
+                "unix:path=/nonexistent/pupitre-test",
+            );
+        }
         b
     })
     .path()
@@ -51,6 +59,12 @@ fn isoler_ssh() -> &'static std::path::Path {
 fn dossier() -> (tempfile::TempDir, PathBuf) {
     binaire_fond();
     isoler_ssh();
+    // Garde : le fond de ces tests ne voit jamais le trousseau réel de l'utilisateur.
+    assert!(
+        std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_some()
+            || std::env::var("DBUS_SESSION_BUS_ADDRESS").is_ok_and(|a| a.contains("/nonexistent/")),
+        "bus D-Bus réel visible par le fond des tests"
+    );
     let d = tempfile::tempdir().unwrap();
     let socket = d.path().join("pupitre/fond.sock");
     (d, socket)

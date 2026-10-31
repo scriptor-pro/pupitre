@@ -839,7 +839,7 @@ fn lister(agent: &Path) -> String {
 fn demarrer_reel(coffre: &Arc<CoffreSecretService>) -> Serveur {
     let askpass = binaire_askpass();
     demarrer_coffre(
-        Duration::from_secs(2),
+        Duration::from_secs(6),
         |e| e.askpass = Some(askpass),
         coffre.clone(),
     )
@@ -892,9 +892,22 @@ fn phrase_memorisee_fausse_est_oubliee() {
     coffre.ecrire(&cle, "la-fausse").unwrap();
     let debut = Instant::now();
     let s = demarrer_reel(&coffre);
-    // L'interface arrive après le chargement possible : elle se connecte tout de suite et
-    // ouvre un onglet pour recevoir les messages (le bandeau n'est envoyé qu'aux interfaces).
+    // Un client v1 (qui n'est pas une interface v2) retient le fond sans recevoir de message.
+    let mut tenue = Client::brut(&s.socket);
+    tenue.envoyer(ClientMsg::Hello { version: 1 });
+    assert_eq!(tenue.recevoir(), ServerMsg::Welcome { version: 1 });
+    // Aucune interface connectée pendant le chargement : l'entrée est oubliée et le message
+    // est gardé par le fond jusqu'à la première interface qui parle. (Si l'échec n'était pas
+    // encore rapporté à sa connexion, il lui serait envoyé directement : le test vaut dans
+    // les deux ordres.)
+    let limite = Instant::now() + Duration::from_secs(20);
+    while coffre.lire(&cle).is_some() {
+        assert!(Instant::now() < limite, "entrée jamais oubliée");
+        thread::sleep(Duration::from_millis(100));
+    }
+    thread::sleep(Duration::from_millis(300));
     let mut ui = Client::connecter(&s.socket);
+    ui.envoyer(ClientMsg::List);
     let texte = ui.attendre(|m| match m {
         ServerMsg::Message(t) if t.contains("ne fonctionne plus") => Some(t.clone()),
         _ => None,
@@ -907,7 +920,7 @@ fn phrase_memorisee_fausse_est_oubliee() {
     assert!(coffre.lire(&cle).is_none(), "entrée oubliée");
     assert!(debut.elapsed() < Duration::from_secs(20));
     assert!(!lister(&s.dossier.path().join("pupitre/agent.sock")).contains("ED25519"));
-    drop(ui);
+    drop((ui, tenue));
     arreter(s);
 }
 
@@ -941,7 +954,7 @@ fn cle_deja_dans_l_agent_pas_rechargee() {
     coffre.ecrire(&cle, "la-fausse").unwrap();
     let askpass = binaire_askpass();
     let s = demarrer_coffre(
-        Duration::from_secs(2),
+        Duration::from_secs(6),
         |e| {
             e.askpass = Some(askpass);
             e.env_sock = Some(agent_sock.clone());
@@ -989,9 +1002,12 @@ fn trousseau_verrouille_message_unique() {
     );
     let mut ui = Client::connecter(&s.socket);
     let attendu = "Trousseau verrouillé : les clés mémorisées n'ont pas été chargées.";
-    // Le premier onglet relance le chargement : le message arrive à l'interface.
-    ui.ouvrir(&["sh", "-c", "sleep 2"]);
+    // Le message, gardé par le fond tant qu'aucune interface n'avait parlé, arrive à la
+    // première requête de l'interface (ou plus tard s'il n'était pas encore émis).
+    ui.envoyer(ClientMsg::List);
     ui.attendre(|m| matches!(m, ServerMsg::Message(t) if t == attendu).then_some(()));
+    // Un onglet relance le chargement (trousseau toujours verrouillé) sans répéter le message.
+    ui.ouvrir(&["sh", "-c", "sleep 2"]);
     // Un deuxième onglet réessaie mais ne répète pas le message.
     ui.ouvrir(&["sh", "-c", "sleep 2"]);
     thread::sleep(Duration::from_secs(1));
@@ -1028,5 +1044,38 @@ fn charger_cle_demande_par_l_askpass() {
     let _ = coffre.oublier(&cle);
     assert!(chargee);
     drop(ask);
+    arreter(s);
+}
+
+#[test]
+fn phrase_saisie_fausse_pas_memorisee() {
+    let Some(_exclusif) = exclusif() else {
+        return;
+    };
+    let t = tempfile::tempdir().unwrap();
+    let cle = cle_chiffree(t.path(), "la-bonne");
+    let coffre = Arc::new(CoffreSecretService::ouvrir());
+    let s = demarrer_reel(&coffre);
+    let mut ui = Client::connecter(&s.socket);
+    ui.envoyer(ClientMsg::List);
+    // Le chargement de démarrage (trousseau vide) doit être fini avant d'écrire l'entrée.
+    thread::sleep(Duration::from_secs(2));
+    // L'askpass vient de mémoriser une phrase fausse puis demande le chargement.
+    coffre.ecrire(&cle, "la-fausse").unwrap();
+    let mut ask = demandeur(&s.socket);
+    ask.envoyer(ClientMsg::ChargerCle { cle: cle.clone() });
+    let texte = ui.attendre(|m| match m {
+        ServerMsg::Message(t) if t.contains("n'a pas été mémorisée") => Some(t.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        texte,
+        format!(
+            "La phrase de passe saisie pour {} n'a pas été mémorisée : elle n'ouvre pas la clé.",
+            pupitre_ssh::trousseau::chemin_lisible(&cle)
+        )
+    );
+    assert!(coffre.lire(&cle).is_none());
+    drop((ui, ask));
     arreter(s);
 }

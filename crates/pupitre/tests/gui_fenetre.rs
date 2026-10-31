@@ -114,7 +114,7 @@ fn compiler(racine: &Path) {
         .unwrap()
         .success();
     assert!(ok, "compilation des binaires");
-    std::env::set_var("PUPITRE_FOND", racine.join("target/debug/pupitre-fond"));
+    std::env::set_var("PUPITRE_FOND", commun::fond_sans_trousseau());
 }
 
 /// Fait tourner la boucle GTK jusqu'à ce que `cond` soit vraie (ou délai écoulé).

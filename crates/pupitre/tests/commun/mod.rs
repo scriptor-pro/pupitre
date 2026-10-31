@@ -58,7 +58,32 @@ pub fn compiler() {
         .unwrap()
         .success();
     assert!(ok, "compilation des binaires");
-    std::env::set_var("PUPITRE_FOND", racine().join("target/debug/pupitre-fond"));
+    std::env::set_var("PUPITRE_FOND", fond_sans_trousseau());
+}
+
+/// Chemin du `pupitre-fond` à lancer pour les tests. Le fond charge les clés mémorisées du
+/// trousseau, mais le processus de test a besoin de son bus D-Bus (GTK, accessibilité) :
+/// hors du trousseau jetable des scripts, on passe par un petit script qui retire le bus
+/// au fond seul, pour qu'il ne puisse jamais approcher le vrai trousseau.
+pub fn fond_sans_trousseau() -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let reel = racine().join("target/debug/pupitre-fond");
+    if std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_some() {
+        return reel;
+    }
+    static DOSSIER: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let d = DOSSIER.get_or_init(|| tempfile::tempdir().unwrap());
+    let script = d.path().join("pupitre-fond");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nexport DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/pupitre-test\nexec '{}' \"$@\"\n",
+            reel.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    script
 }
 
 /// Dossier personnel et dossiers XDG vides : rien de l'utilisateur n'est lu ni écrit.
