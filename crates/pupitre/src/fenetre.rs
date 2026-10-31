@@ -8,6 +8,7 @@
 
 use crate::apparence::{suivre_preference_systeme, theme_systeme, Preference};
 use crate::client::{connect_or_spawn_at, Client, CONNEXION_PERDUE};
+use crate::demande::{ouvrir_demande, DemandeAffichee};
 use crate::messages::{
     annoncer_focus_une_fois_affiche, refaire_annonce_focus, ActionMessage, BandeauMessages,
 };
@@ -23,9 +24,9 @@ use gtk::prelude::*;
 use pupitre_config::{
     charger_theme, check_theme, theme_clair, theme_sombre, Config, ErreurConfig, Theme, ThemeChoix,
 };
-use pupitre_proto::{ClientMsg, ServerMsg, SessionId};
+use pupitre_proto::{ClientMsg, DemandeId, Genre, ServerMsg, SessionId};
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
@@ -235,6 +236,8 @@ pub struct Pupitre {
     attentes: RefCell<VecDeque<Attente>>,
     onglets: RefCell<Vec<Rc<Onglet>>>,
     fenetres: RefCell<Vec<FenetrePupitre>>,
+    /// Fenêtres des demandes SSH en attente de réponse.
+    demandes: RefCell<HashMap<DemandeId, gtk::Window>>,
     /// Garde l'application en vie tant que la première fenêtre n'existe pas (GTK quitte
     /// une application sans fenêtre).
     garde: RefCell<Option<gio::ApplicationHoldGuard>>,
@@ -260,6 +263,7 @@ impl Pupitre {
             attentes: RefCell::new(VecDeque::new()),
             onglets: RefCell::new(Vec::new()),
             fenetres: RefCell::new(Vec::new()),
+            demandes: RefCell::new(HashMap::new()),
             garde: RefCell::new(Some(app.hold())),
         });
         p.appliquer_config(Ok(config));
@@ -624,13 +628,99 @@ impl Pupitre {
             }
             ServerMsg::Error(e) if e == CONNEXION_PERDUE => self.connexion_perdue(),
             ServerMsg::Error(e) => eprintln!("pupitre: processus de fond : {e}"),
-            // Les demandes SSH de la version 2 sont traitées plus tard (Task 9).
-            ServerMsg::Welcome { .. }
-            | ServerMsg::Sessions(_)
-            | ServerMsg::Demande { .. }
-            | ServerMsg::DemandeClose { .. }
-            | ServerMsg::Reponse { .. }
-            | ServerMsg::Message(_) => {}
+            ServerMsg::Demande {
+                demande,
+                session,
+                invite,
+                genre,
+                trousseau,
+            } => self.ouvrir_demande(
+                demande,
+                session,
+                DemandeAffichee {
+                    invite,
+                    genre,
+                    trousseau,
+                },
+            ),
+            ServerMsg::DemandeClose { demande } => self.fermer_demande(demande),
+            ServerMsg::Message(t) => {
+                for f in self.fenetres() {
+                    f.afficher_message(&t);
+                }
+            }
+            ServerMsg::Welcome { .. } | ServerMsg::Sessions(_) | ServerMsg::Reponse { .. } => {}
+        }
+    }
+
+    fn cle_information(demande: DemandeId) -> String {
+        format!("demande-{demande}")
+    }
+
+    /// Fenêtre qui doit porter la demande de `session` : celle de son onglet, sinon la
+    /// fenêtre active, sinon la première ; aucune fenêtre : une nouvelle.
+    fn fenetre_de_demande(self: &Rc<Self>, session: Option<SessionId>) -> FenetrePupitre {
+        let de_session = session.and_then(|s| self.onglet(s)).and_then(|o| {
+            let carnet = o.carnet()?;
+            self.fenetres().into_iter().find(|f| f.0.carnet == carnet)
+        });
+        de_session
+            .or_else(|| {
+                self.fenetres()
+                    .into_iter()
+                    .find(|f| f.0.fenetre.is_active())
+            })
+            .or_else(|| self.fenetres().into_iter().next())
+            .unwrap_or_else(|| {
+                let f = FenetrePupitre::nouvelle(&self.app, self);
+                f.fenetre().present();
+                f
+            })
+    }
+
+    fn ouvrir_demande(
+        self: &Rc<Self>,
+        demande: DemandeId,
+        session: Option<SessionId>,
+        d: DemandeAffichee,
+    ) {
+        let f = self.fenetre_de_demande(session);
+        if d.genre == Genre::Information {
+            f.0.bandeau
+                .poser(&Self::cle_information(demande), Some(&d.invite));
+            return;
+        }
+        if let Some(ancienne) = self.demandes.borrow_mut().remove(&demande) {
+            ancienne.destroy();
+        }
+        let faible = Rc::downgrade(self);
+        let fenetre = ouvrir_demande(f.fenetre().upcast_ref(), &d, move |reponse, memoriser| {
+            let Some(p) = faible.upgrade() else { return };
+            // Demande déjà réglée côté interface (`DemandeClose`) : pas de réponse.
+            if p.demandes.borrow_mut().remove(&demande).is_none() {
+                return;
+            }
+            let v2 = p.client.borrow().as_ref().is_some_and(|c| c.version() >= 2);
+            if v2 {
+                p.envoyer(ClientMsg::Repondre {
+                    demande,
+                    reponse,
+                    memoriser,
+                });
+            }
+        });
+        self.demandes.borrow_mut().insert(demande, fenetre);
+    }
+
+    /// La demande est réglée ailleurs : fenêtre fermée (ou message retiré), sans réponse.
+    fn fermer_demande(&self, demande: DemandeId) {
+        let fenetre = self.demandes.borrow_mut().remove(&demande);
+        if let Some(w) = fenetre {
+            w.destroy();
+        }
+        let cle = Self::cle_information(demande);
+        for f in self.fenetres() {
+            f.0.bandeau.poser(&cle, None);
         }
     }
 
@@ -639,6 +729,12 @@ impl Pupitre {
         self.generation.set(self.generation.get() + 1);
         self.attend_liste.set(false);
         self.attentes.borrow_mut().clear();
+        // Plus personne à qui répondre.
+        let demandes: Vec<gtk::Window> =
+            self.demandes.borrow_mut().drain().map(|(_, w)| w).collect();
+        for w in demandes {
+            w.destroy();
+        }
         for o in self.onglets.borrow().iter() {
             o.termine.set(true);
             o.occupe.set(false);

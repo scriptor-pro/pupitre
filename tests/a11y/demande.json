@@ -1,0 +1,7 @@
+[
+  {"role": "dialog", "nom": "Phrase de passe SSH"},
+  {"role": "password text", "nom": "~Phrase de passe de la clé"},
+  {"role": "check box", "nom": "Mémoriser dans le trousseau", "min": 0},
+  {"role": "button", "nom": "Annuler"},
+  {"role": "button", "nom": "Valider"}
+]

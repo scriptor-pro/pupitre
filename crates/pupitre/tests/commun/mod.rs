@@ -41,7 +41,7 @@ pub fn racine() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Compile `pupitre` et `pupitre-fond`, et indique au client où trouver `pupitre-fond`.
+/// Compile `pupitre`, `pupitre-fond` et `pupitre-askpass`, et indique au client où trouver `pupitre-fond`.
 pub fn compiler() {
     let ok = Command::new(env!("CARGO"))
         .args([
@@ -49,6 +49,8 @@ pub fn compiler() {
             "-q",
             "-p",
             "pupitre-fond",
+            "-p",
+            "pupitre-ssh",
             "-p",
             "pupitre",
             "--bins",

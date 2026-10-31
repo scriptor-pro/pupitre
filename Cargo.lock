@@ -1282,8 +1282,10 @@ dependencies = [
  "pupitre-config",
  "pupitre-fond",
  "pupitre-proto",
+ "pupitre-ssh",
  "tempfile",
  "vte4",
+ "zeroize",
 ]
 
 [[package]]

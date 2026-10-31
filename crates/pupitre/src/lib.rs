@@ -4,6 +4,7 @@
 pub mod apparence;
 pub mod attenuation;
 pub mod client;
+pub mod demande;
 pub mod fenetre;
 pub mod messages;
 pub mod polices;
