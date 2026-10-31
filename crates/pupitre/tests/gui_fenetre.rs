@@ -54,6 +54,7 @@ fn main() {
         std::fs::create_dir_all(&d).unwrap();
         std::env::set_var(var, &d);
     }
+    commun::isoler_ssh(perso.path());
 
     // Faux portail réservé avant GTK, qui interroge lui aussi le portail au démarrage.
     let portail = FauxPortail::installer();

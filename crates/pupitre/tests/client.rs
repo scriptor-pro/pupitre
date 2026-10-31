@@ -27,8 +27,30 @@ fn binaire_fond() -> PathBuf {
     b
 }
 
+/// Environnement commun des tests : ni l'agent SSH réel, ni le dossier d'exécution ou le
+/// `/tmp` de l'utilisateur ne sont visibles du processus de fond (posé une seule fois).
+fn isoler_ssh() -> &'static std::path::Path {
+    use std::os::unix::fs::PermissionsExt;
+    static BASE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    BASE.get_or_init(|| {
+        let b = tempfile::tempdir().unwrap();
+        for v in ["SSH_AUTH_SOCK", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE"] {
+            std::env::remove_var(v);
+        }
+        let (run, tmp) = (b.path().join("run"), b.path().join("tmp"));
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::set_permissions(&run, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &run);
+        std::env::set_var("TMPDIR", &tmp);
+        b
+    })
+    .path()
+}
+
 fn dossier() -> (tempfile::TempDir, PathBuf) {
     binaire_fond();
+    isoler_ssh();
     let d = tempfile::tempdir().unwrap();
     let socket = d.path().join("pupitre/fond.sock");
     (d, socket)
@@ -219,4 +241,37 @@ fn repli_v1_face_a_un_fond_ancien() {
     });
     drop(c);
     assert_eq!(serveur.join().unwrap(), vec![2, 1]);
+}
+
+#[test]
+fn shell_du_fond_voit_un_agent_isole() {
+    let (d, socket) = dossier();
+    let (c, rx) = connect_or_spawn_at(&socket).unwrap();
+    c.send(ClientMsg::Open {
+        argv: Some(vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "printf 'VAL=%s\\n' \"$SSH_AUTH_SOCK\"; sleep 1".into(),
+        ]),
+        cwd: None,
+        cols: 80,
+        rows: 24,
+    })
+    .unwrap();
+    let mut tout = Vec::new();
+    let val = attendre(&rx, |m| match m {
+        ServerMsg::Output { data, .. } => {
+            tout.extend(data);
+            let t = String::from_utf8_lossy(&tout).into_owned();
+            let debut = t.find("VAL=")? + 4;
+            let fin = t[debut..].find('\n')?;
+            Some(t[debut..debut + fin].trim_end().to_string())
+        }
+        _ => None,
+    });
+    // Jamais l'agent réel : vide (pas de ssh-agent) ou propre à ce test.
+    assert!(
+        val.is_empty() || val.starts_with(d.path().to_str().unwrap()),
+        "SSH_AUTH_SOCK inattendu : {val}"
+    );
 }

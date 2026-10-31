@@ -75,7 +75,33 @@ pub fn isoler_dossiers() -> tempfile::TempDir {
         std::fs::create_dir_all(&d).unwrap();
         std::env::set_var(var, &d);
     }
+    isoler_ssh(perso.path());
     perso
+}
+/// Isole de l'agent SSH réel et du `/tmp` de l'utilisateur tout processus de fond lancé
+/// ensuite : plus de `SSH_AUTH_SOCK` hérité, `XDG_RUNTIME_DIR` (0700) et `TMPDIR` propres
+/// à `base`. Le socket Wayland, relatif à l'ancien `XDG_RUNTIME_DIR`, est rendu absolu.
+pub fn isoler_ssh(base: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    for v in ["SSH_AUTH_SOCK", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE"] {
+        std::env::remove_var(v);
+    }
+    if let (Some(rt), Some(wd)) = (
+        std::env::var_os("XDG_RUNTIME_DIR"),
+        std::env::var_os("WAYLAND_DISPLAY"),
+    ) {
+        let wd = PathBuf::from(wd);
+        if wd.is_relative() {
+            std::env::set_var("WAYLAND_DISPLAY", PathBuf::from(rt).join(wd));
+        }
+    }
+    let run = base.join("run");
+    let tmp = base.join("tmp");
+    std::fs::create_dir_all(&run).unwrap();
+    std::fs::set_permissions(&run, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::env::set_var("XDG_RUNTIME_DIR", &run);
+    std::env::set_var("TMPDIR", &tmp);
 }
 
 /// Fait tourner la boucle GTK jusqu'à ce que `cond` soit vraie (ou délai écoulé).
