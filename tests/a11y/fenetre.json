@@ -1,0 +1,15 @@
+[
+  {"role": "frame", "nom": "~Pupitre"},
+  {"role": "page tab list"},
+  {"role": "page tab", "nom": "!vide", "tous": true, "min": 2},
+  {"role": "terminal", "texte": "!vide"},
+  {"role": "terminal", "nom": "!vide", "tous": true},
+  {"role": "button", "nom": "!vide", "tous": true, "min": 0},
+  {"role": "toggle button", "nom": "!vide", "tous": true, "min": 0},
+  {"role": "check box", "nom": "!vide", "tous": true, "min": 0},
+  {"role": "entry", "nom": "!vide", "tous": true, "min": 0},
+  {"role": "button", "nom": "Fermer"},
+  {"role": "entry", "nom": "Rechercher dans l'historique"},
+  {"role": "button", "nom": "Fermer la recherche"},
+  {"role": "toggle button", "nom": "Menu"}
+]

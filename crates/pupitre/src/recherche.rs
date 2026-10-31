@@ -44,9 +44,14 @@ impl BarreRecherche {
         boite.append(&expression);
         boite.append(&precedent);
         boite.append(&suivant);
+        // Bouton de fermeture nommé (celui de GtkSearchBar n'a pas de nom accessible).
+        let fermer = gtk::Button::from_icon_name("window-close-symbolic");
+        fermer.set_tooltip_text(Some("Fermer la recherche (Échap)"));
+        fermer.update_property(&[gtk::accessible::Property::Label("Fermer la recherche")]);
+        boite.append(&fermer);
         let barre = gtk::SearchBar::builder()
             .child(&boite)
-            .show_close_button(true)
+            .show_close_button(false)
             .build();
         barre.connect_entry(&entree);
 
@@ -83,6 +88,8 @@ impl BarreRecherche {
         suivant.connect_clicked(move |_| a());
         let a = avec(BarreRecherche::fermer);
         b.entree.connect_stop_search(move |_| a());
+        let a = avec(BarreRecherche::fermer);
+        fermer.connect_clicked(move |_| a());
         // Maj+Entrée : suivant (Entrée seule passe par `activate`).
         let touches = gtk::EventControllerKey::new();
         touches.set_propagation_phase(gtk::PropagationPhase::Capture);

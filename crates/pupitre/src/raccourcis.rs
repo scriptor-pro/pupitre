@@ -29,6 +29,10 @@ pub enum Raccourci {
     ZoomPlus,
     ZoomMoins,
     ZoomNormal,
+    /// Ctrl+Tab : quitter le terminal (qui garde Tab pour le shell) vers l'élément suivant.
+    FocusSuivant,
+    /// Ctrl+Maj+Tab : élément précédent.
+    FocusPrecedent,
 }
 
 /// Raccourci correspondant à une touche (`code` = code matériel), s'il y en a un.
@@ -45,6 +49,9 @@ pub fn raccourci(touche: gdk::Key, code: u32, mods: gdk::ModifierType) -> Option
         _ => None,
     };
     if m == ctrl_maj {
+        if matches!(touche, gdk::Key::Tab | gdk::Key::ISO_Left_Tab) {
+            return Some(Raccourci::FocusPrecedent);
+        }
         return match touche.to_lower() {
             gdk::Key::t => Some(Raccourci::NouvelOnglet),
             gdk::Key::w => Some(Raccourci::FermerOnglet),
@@ -60,6 +67,8 @@ pub fn raccourci(touche: gdk::Key, code: u32, mods: gdk::ModifierType) -> Option
         return match touche {
             gdk::Key::Page_Down | gdk::Key::KP_Page_Down => Some(Raccourci::OngletSuivant),
             gdk::Key::Page_Up | gdk::Key::KP_Page_Up => Some(Raccourci::OngletPrecedent),
+            gdk::Key::Tab => Some(Raccourci::FocusSuivant),
+            gdk::Key::ISO_Left_Tab => Some(Raccourci::FocusPrecedent),
             t => zoom(t).or((code == CODE_TOUCHE_0).then_some(Raccourci::ZoomNormal)),
         };
     }
@@ -193,6 +202,25 @@ mod tests {
             raccourci(gdk::Key::quotedbl, 19, c),
             Some(Raccourci::ZoomNormal)
         );
+    }
+
+    #[test]
+    fn sortir_du_terminal() {
+        let c = M::CONTROL_MASK;
+        assert_eq!(
+            raccourci(gdk::Key::Tab, 23, c),
+            Some(Raccourci::FocusSuivant)
+        );
+        assert_eq!(
+            raccourci(gdk::Key::ISO_Left_Tab, 23, CS),
+            Some(Raccourci::FocusPrecedent)
+        );
+        assert_eq!(
+            raccourci(gdk::Key::Tab, 23, CS),
+            Some(Raccourci::FocusPrecedent)
+        );
+        // Tab seul reste au shell (complétion).
+        assert_eq!(raccourci(gdk::Key::Tab, 23, M::empty()), None);
     }
 
     #[test]

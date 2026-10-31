@@ -343,6 +343,7 @@ Bulles via les notifications de GIO (locales). Respect du mode « Ne pas dérang
 | Nouvel onglet / fermer / fenêtre | Ctrl+Maj+T / Ctrl+Maj+W / Ctrl+Maj+N |
 | Onglet suivant / précédent | Ctrl+PgSuiv / Ctrl+PgPréc ; Alt+1…9 |
 | Plein écran | F11 |
+| Sortir du terminal au clavier | Ctrl+Tab / Ctrl+Maj+Tab (messages, recherche, onglets, menu, terminal) ; Tab reste au shell ; F10 reste aux programmes [Choix du concepteur, 2026-10-31] |
 | URL en texte brut | détectées, ouvertes par Ctrl+clic |
 | Titre d'onglet | titre envoyé par le programme, sinon dossier courant |
 | Défilement à la frappe | oui ; défilement à la sortie : non |

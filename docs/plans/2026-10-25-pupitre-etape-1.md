@@ -394,16 +394,18 @@ lien_non_ouvert_sans_ctrl       : clic simple sur une URL → aucun appel à Uri
 - Consumes : application complète (Tasks 8–11).
 - Produces : `tests/a11y/sonde.py --app pupitre --attendu FICHIER.json` (retourne 0 si l'arbre correspond : rôles, noms, présence de texte) ; liste de contrôle d'environ 15 minutes pour le porteur.
 
-- [ ] **Step 1 : Tests** :
+> **Précisions (2026-10-31)** : sonde `tests/a11y/sonde.py --app NOM [--attendu F.json]` (arbre avec états) ; écouteur d'annonces `tests/a11y/ecoute.py` ; attentes `tests/a11y/fenetre.json` (rôle AT-SPI des boutons : `button`). Test : `crates/pupitre/tests/gui_accessibilite.rs`. Corrections : bouton de fermeture de la recherche nommé (celui de GtkSearchBar n'avait pas de nom) ; **Ctrl+Tab / Ctrl+Maj+Tab** = cycle explicite messages → recherche → onglets → menu → terminal (le terminal garde Tab ; la chaîne automatique de GTK sautait les onglets et perdait le focus) ; **F10 n'ouvre plus le menu** (il était pris au programme : mc, htop) — menu par Ctrl+Tab puis Entrée. Ajouté au tableau §12.1 de la conception. L'état AT-SPI « focused » n'est vérifié que sous X11 (fenêtre inactive sous Weston sans écran).
+
+- [x] **Step 1 : Tests** :
 ```text
 arbre_accessible             : fenêtre (rôle frame, nom "Pupitre"), liste d'onglets (page tab list) dont chaque onglet a un nom non vide, terminal (rôle terminal) avec texte.
 tout_au_clavier              : en partant du terminal, Tab/Maj+Tab et les raccourcis atteignent : onglets, menu, barre de recherche, dialogue de fermeture ; le focus est toujours sur un élément visible (AT-SPI state "focused").
 messages_annonces            : un message du bandeau produit un événement d'annonce AT-SPI.
 ```
-- [ ] **Step 2 :** → échec. **Step 3 :** Corriger ce qui manque (noms accessibles, relations `labelled-by`, ordre de focus).
-- [ ] **Step 4 :** → PASS sous X11 et Wayland.
-- [ ] **Step 5 :** Rédiger `docs/orca-liste-de-controle.md` : 10 à 15 vérifications concrètes (Orca lit l'invite ; lit la sortie d'une commande ; annonce le changement d'onglet et son titre ; lit le dialogue de fermeture ; lit un message de configuration invalide ; zoom 200 % sans perte de contenu ; recherche utilisable à l'oreille…), chacune avec la manipulation et le résultat attendu.
-- [ ] **Step 6 : Commit** — `test(a11y): sonde AT-SPI, liste de contrôle Orca`
+- [x] **Step 2 :** → échec. **Step 3 :** Corriger ce qui manque (noms accessibles, relations `labelled-by`, ordre de focus).
+- [x] **Step 4 :** → PASS sous X11 et Wayland.
+- [x] **Step 5 :** Rédiger `docs/orca-liste-de-controle.md` : 10 à 15 vérifications concrètes (Orca lit l'invite ; lit la sortie d'une commande ; annonce le changement d'onglet et son titre ; lit le dialogue de fermeture ; lit un message de configuration invalide ; zoom 200 % sans perte de contenu ; recherche utilisable à l'oreille…), chacune avec la manipulation et le résultat attendu.
+- [x] **Step 6 : Commit** — `test(a11y): sonde AT-SPI, liste de contrôle Orca`
 
 ### Task 13 : Vérification de fin d'étape
 

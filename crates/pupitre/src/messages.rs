@@ -126,6 +126,21 @@ impl BandeauMessages {
         }
     }
 
+    /// Boutons des messages affichés (action puis « Fermer »), dans l'ordre.
+    pub fn boutons(&self) -> Vec<gtk::Widget> {
+        let mut v = Vec::new();
+        for m in self.messages.borrow().iter() {
+            let mut enfant = m.ligne.first_child();
+            while let Some(e) = enfant {
+                enfant = e.next_sibling();
+                if e.is::<gtk::Button>() {
+                    v.push(e);
+                }
+            }
+        }
+        v
+    }
+
     /// Met le focus clavier sur le bouton d'action du message `cle`, s'il existe.
     pub fn donner_focus(&self, cle: &str) {
         if let Some(b) = self

@@ -97,12 +97,17 @@ pub fn patienter(d: Duration) {
     attendre(d, || false);
 }
 
+/// Chemin de la sonde AT-SPI (`tests/a11y/sonde.py`, à la racine du dépôt).
+pub fn sonde_a11y() -> PathBuf {
+    racine().join("tests/a11y/sonde.py")
+}
+
 /// Lance la sonde AT-SPI sur l'application `nom` sans bloquer la boucle GTK (l'application
-/// sondée peut être ce processus même). Renvoie l'arbre « rôle\tnom\ttexte ».
+/// sondée peut être ce processus même). Renvoie l'arbre « rôle\tnom\ttexte\tétats ».
 pub fn sonder(nom: &str) -> Option<String> {
-    let sonde = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sonde.py");
     let mut enfant = Command::new("python3")
-        .arg(sonde)
+        .arg(sonde_a11y())
+        .arg("--app")
         .arg(nom)
         .stdout(std::process::Stdio::piped())
         .spawn()

@@ -454,12 +454,16 @@ fn fenetre_s_ouvre_et_affiche_le_shell(racine: &Path) -> Resultat {
         .unwrap_or_default()
         .trim()
         .to_string();
-    let sonde = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/sonde.py");
+    let sonde = commun::sonde_a11y();
     let mut sortie = String::new();
     let limite = Instant::now() + Duration::from_secs(20);
     let mut trouve = false;
     while Instant::now() < limite && !trouve {
-        if let Ok(o) = Command::new("python3").arg(&sonde).arg("pupitre").output() {
+        if let Ok(o) = Command::new("python3")
+            .arg(&sonde)
+            .args(["--app", "pupitre"])
+            .output()
+        {
             sortie = String::from_utf8_lossy(&o.stdout).into_owned();
             trouve = o.status.success() && sortie.contains(&hote) && sortie.contains('$');
         }

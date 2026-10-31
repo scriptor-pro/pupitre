@@ -36,3 +36,7 @@ harness = false
 [[test]]
 name = "gui_clavier"
 harness = false
+
+[[test]]
+name = "gui_accessibilite"
+harness = false

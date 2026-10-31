@@ -681,6 +681,7 @@ pub struct FenetreInterne {
     carnet: gtk::Notebook,
     bandeau: Rc<BandeauMessages>,
     recherche: Rc<BarreRecherche>,
+    menu: gtk::MenuButton,
     /// Ne pas fermer la fenêtre quand son dernier onglet part (reconnexion en cours).
     garder_ouverte: Cell<bool>,
     fermee: Cell<bool>,
@@ -709,7 +710,8 @@ impl FenetrePupitre {
             .hexpand(true)
             .build();
         carnet.popup_enable();
-        carnet.set_action_widget(&bouton_menu(), gtk::PackType::End);
+        let menu = bouton_menu();
+        carnet.set_action_widget(&menu, gtk::PackType::End);
 
         let bandeau = BandeauMessages::new();
 
@@ -725,6 +727,7 @@ impl FenetrePupitre {
             carnet,
             bandeau,
             recherche,
+            menu,
             garder_ouverte: Cell::new(false),
             fermee: Cell::new(false),
             pupitre: Rc::downgrade(pupitre),
@@ -942,6 +945,12 @@ impl FenetrePupitre {
             Raccourci::ZoomMoins => actif
                 .iter()
                 .for_each(|o| o.terminal.zoomer(Some(-1), zoom_max)),
+            Raccourci::FocusSuivant => {
+                self.deplacer_focus(gtk::DirectionType::TabForward);
+            }
+            Raccourci::FocusPrecedent => {
+                self.deplacer_focus(gtk::DirectionType::TabBackward);
+            }
             Raccourci::ZoomNormal => actif.iter().for_each(|o| o.terminal.zoomer(None, zoom_max)),
         }
     }
@@ -956,6 +965,57 @@ impl FenetrePupitre {
 
     pub fn recherche_expression_reguliere(&self, oui: bool) {
         self.0.recherche.expression_reguliere(oui);
+    }
+
+    /// Éléments que Ctrl+Tab / Ctrl+Maj+Tab parcourent, dans l'ordre visuel : boutons des
+    /// messages, saisie de recherche (si ouverte), onglets, menu, terminal actif.
+    fn cycle_de_focus(&self) -> Vec<gtk::Widget> {
+        let mut v: Vec<gtk::Widget> = self.0.bandeau.boutons();
+        if self.0.recherche.ouverte() {
+            v.push(self.0.recherche.entree().clone().upcast());
+        }
+        if self.0.carnet.n_pages() > 0 {
+            v.push(self.0.carnet.clone().upcast());
+        }
+        v.push(self.0.menu.clone().upcast());
+        if let Some(o) = self.onglet_actif() {
+            v.push(o.terminal.terminal().clone().upcast());
+        }
+        v.retain(|w| w.is_visible() && w.is_sensitive());
+        v
+    }
+
+    /// Ctrl+Tab : élément suivant (ou précédent) du cycle ; boucle, jamais de piège.
+    fn deplacer_focus(&self, sens: gtk::DirectionType) {
+        let cycle = self.cycle_de_focus();
+        if cycle.is_empty() {
+            return;
+        }
+        let actuel = GtkWindowExt::focus(&self.0.fenetre);
+        // Élément du cycle qui contient le focus ; le plus profond, car le menu et le
+        // terminal sont eux-mêmes dans le carnet d'onglets.
+        let profondeur =
+            |w: &gtk::Widget| std::iter::successors(w.parent(), |p| p.parent()).count();
+        let position = actuel.as_ref().and_then(|w| {
+            cycle
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| *c == w || w.is_ancestor(*c))
+                .max_by_key(|(_, c)| profondeur(c))
+                .map(|(i, _)| i)
+        });
+        let n = cycle.len();
+        let suivant = match (position, sens) {
+            (Some(i), gtk::DirectionType::TabBackward) => (i + n - 1) % n,
+            (Some(i), _) => (i + 1) % n,
+            (None, _) => n - 1, // focus perdu : retour au terminal
+        };
+        cycle[suivant].grab_focus();
+    }
+
+    /// Bouton du menu principal.
+    pub fn bouton_menu(&self) -> gtk::MenuButton {
+        self.0.menu.clone()
     }
 
     /// « Aucun résultat » si la dernière recherche n'a rien trouvé, sinon vide.
@@ -1285,7 +1345,7 @@ fn menu_onglet() -> gio::Menu {
     m
 }
 
-/// Menu principal (F10), à droite de la barre d'onglets.
+/// Menu principal, à droite de la barre d'onglets.
 fn bouton_menu() -> gtk::MenuButton {
     let m = gio::Menu::new();
     let item = |libelle: &str, action: &str, accel: Option<&str>| {
@@ -1347,9 +1407,11 @@ fn bouton_menu() -> gtk::MenuButton {
     m.append_section(None, &onglet);
     let b = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
-        .tooltip_text("Menu (F10)")
+        // Pas de F10 : la touche reste aux programmes (mc, htop… quittent par F10).
+        // Le menu s'atteint par Ctrl+Tab puis Entrée.
+        .tooltip_text("Menu (Ctrl+Tab puis Entrée)")
         .menu_model(&m)
-        .primary(true)
+        .primary(false)
         .build();
     b.update_property(&[gtk::accessible::Property::Label("Menu")]);
     b
