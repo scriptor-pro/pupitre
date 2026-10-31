@@ -12,3 +12,9 @@ workspace = true
 [dependencies]
 gtk.workspace = true
 vte4.workspace = true
+async-channel = "2"
+pupitre-proto = { path = "../proto" }
+pupitre-fond = { path = "../fond" }
+
+[dev-dependencies]
+tempfile = "3"

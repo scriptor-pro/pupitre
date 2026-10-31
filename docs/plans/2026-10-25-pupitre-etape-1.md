@@ -264,14 +264,16 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
   - `pub fn send(&self, msg: ClientMsg) -> Result<(), ClientError>` (non bloquant pour GTK : file + thread d'écriture).
   - Perte de connexion → message `ServerMsg::Error("connexion perdue")` sur le canal.
 
-- [ ] **Step 1 : Tests** :
+> **Précisions (2026-10-31)** : `connect_or_spawn_at(socket)` et `connect_or_spawn_with(socket, binaire)` pour les tests ; binaire cherché via `PUPITRE_FOND`, puis dossier de l'exécutable, puis `PATH` ; fond lancé dans son propre groupe de processus, stdio fermés, fin récupérée par un thread (pas de zombie). Le paquet `pupitre` a une partie bibliothèque (`src/lib.rs`).
+
+- [x] **Step 1 : Tests** :
 ```rust
 #[test] fn demarre_le_fond_si_absent() { /* XDG_RUNTIME_DIR temporaire, aucun fond → connect_or_spawn() réussit et Welcome reçu */ }
 #[test] fn deux_clients_voient_les_memes_sessions() { /* client 1 ouvre une session ; client 2 : List → même id */ }
 #[test] fn perte_de_connexion_signalee() { /* tuer le fond → le canal reçoit Error("connexion perdue") */ }
 ```
-- [ ] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** → PASS.
-- [ ] **Step 5 : Commit** — `feat(pupitre): client du processus de fond`
+- [x] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** → PASS.
+- [x] **Step 5 : Commit** — `feat(pupitre): client du processus de fond`
 
 ### Task 8 : Fenêtre, terminal VTE, police et taille d'ouverture
 
