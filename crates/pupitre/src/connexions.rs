@@ -25,6 +25,7 @@ use std::rc::{Rc, Weak};
 const TITRE: &str = "Connexions SSH";
 const TEXTE_VIDE: &str =
     "Aucune connexion. Ajoutez-en une, ou décrivez vos serveurs dans ~/.ssh/config.";
+const TEXTE_VIDE_INVALIDE: &str = "Aucune connexion utilisable : corrigez connexions.toml, ou décrivez vos serveurs dans ~/.ssh/config.";
 const PAR_DEFAUT: &str = "Par défaut";
 
 /// État de la fenêtre de la liste.
@@ -33,6 +34,8 @@ struct Etat {
     dialogue: gtk::Window,
     liste: gtk::ListBox,
     vide: gtk::Label,
+    /// Pourquoi connexions.toml est inutilisable (vide si tout va bien).
+    explication: gtk::Label,
     se_connecter: gtk::Button,
     ajouter: gtk::Button,
     modifier: gtk::Button,
@@ -57,6 +60,7 @@ pub fn ouvrir_connexions(parent: &FenetrePupitre) -> gtk::Window {
         .build();
     let liste = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::Browse)
+        .activate_on_single_click(false)
         .build();
     liste.set_widget_name("liste");
     liste.update_property(&[gtk::accessible::Property::Label("Connexions")]);
@@ -72,12 +76,21 @@ pub fn ouvrir_connexions(parent: &FenetrePupitre) -> gtk::Window {
         .xalign(0.0)
         .visible(false)
         .build();
+    let explication = gtk::Label::builder()
+        .wrap(true)
+        .max_width_chars(56)
+        .xalign(0.0)
+        .visible(false)
+        .build();
+    explication.set_widget_name("explication");
+    explication.add_css_class("error");
     let bouton = |libelle: &str| gtk::Button::with_label(libelle);
     let etat = Rc::new(Etat {
         fenetre: parent.faible(),
         dialogue: dialogue.clone(),
         liste,
         vide,
+        explication,
         se_connecter: bouton("Se connecter"),
         ajouter: bouton("Ajouter…"),
         modifier: bouton("Modifier…"),
@@ -111,6 +124,7 @@ pub fn ouvrir_connexions(parent: &FenetrePupitre) -> gtk::Window {
         .margin_top(18)
         .margin_bottom(18)
         .build();
+    boite.append(&etat.explication);
     boite.append(&etat.vide);
     boite.append(&defile);
     boite.append(&boutons);
@@ -225,6 +239,13 @@ fn recharger(etat: &Rc<Etat>, selection: Option<usize>) {
         ),
     };
     etat.invalide.set(message.is_some());
+    match &message {
+        Some(m) => {
+            etat.explication.set_label(m);
+            etat.explication.set_visible(true);
+        }
+        None => etat.explication.set_visible(false),
+    }
     if let Some(f) = fenetre_pupitre(etat) {
         f.poser_message_connexions(message);
     }
@@ -244,15 +265,26 @@ fn recharger(etat: &Rc<Etat>, selection: Option<usize>) {
     *etat.hotes.borrow_mut() = hotes;
 
     let vide = total == 0;
-    etat.vide.set_visible(vide);
-    if vide {
-        etat.dialogue
-            .update_relation(&[gtk::accessible::Relation::DescribedBy(&[etat
-                .vide
-                .upcast_ref()])]);
+    etat.vide.set_label(if etat.invalide.get() {
+        TEXTE_VIDE_INVALIDE
     } else {
+        TEXTE_VIDE
+    });
+    etat.vide.set_visible(vide);
+    let mut decrit: Vec<gtk::Accessible> = Vec::new();
+    if etat.invalide.get() {
+        decrit.push(etat.explication.clone().upcast());
+    }
+    if vide {
+        decrit.push(etat.vide.clone().upcast());
+    }
+    if decrit.is_empty() {
         etat.dialogue
             .reset_relation(gtk::AccessibleRelation::DescribedBy);
+    } else {
+        let refs: Vec<&gtk::Accessible> = decrit.iter().collect();
+        etat.dialogue
+            .update_relation(&[gtk::accessible::Relation::DescribedBy(&refs)]);
     }
     let choix = selection.unwrap_or(0).min(total.saturating_sub(1));
     if let Some(l) = i32::try_from(choix)

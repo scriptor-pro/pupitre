@@ -97,6 +97,9 @@ fn main() {
     ex.lancer("se_connecter_ouvre_un_onglet", || {
         se_connecter_ouvre_un_onglet(&pupitre)
     });
+    ex.lancer("titre_rendu_au_shell_local", || {
+        titre_rendu_au_shell_local(&pupitre)
+    });
     ex.lancer("fichier_invalide_pas_reecrit", || {
         fichier_invalide_pas_reecrit(&pupitre)
     });
@@ -846,6 +849,45 @@ fn se_connecter_ouvre_un_onglet(p: &Rc<Pupitre>) -> Resultat {
     Ok(())
 }
 
+fn titre_rendu_au_shell_local(p: &Rc<Pupitre>) -> Resultat {
+    repartir_de_zero();
+    enregistrer_connexions(
+        &chemin_connexions(),
+        &[Connexion {
+            nom: "refus".into(),
+            hote: "127.0.0.1".into(),
+            utilisateur: None,
+            port: Some(1),
+            cle: None,
+        }],
+    )
+    .map_err(|e| e.to_string())?;
+    let f = p.nouvelle_fenetre();
+    onglet(&f)?;
+    let w = ouvrir_liste(&f)?;
+    bouton(&w, "Se connecter")?.emit_clicked();
+    verifier(
+        attendre(Duration::from_secs(10), || f.onglets().len() == 2),
+        || "pas de nouvel onglet".into(),
+    )?;
+    let o = f.onglets()[1].clone();
+    verifier(attendre(Duration::from_secs(15), || o.termine()), || {
+        format!("ssh ne termine pas : {:?}", texte(&o))
+    })?;
+    verifier(o.titre_affiche() == "refus", || {
+        format!("titre avant : {:?}", o.titre_affiche())
+    })?;
+    p.rouvrir(&o);
+    verifier(attendre(Duration::from_secs(10), || !o.termine()), || {
+        "pas de nouveau shell".into()
+    })?;
+    verifier(o.titre_affiche() != "refus", || {
+        format!("titre après : {:?}", o.titre_affiche())
+    })?;
+    f.fenetre().close();
+    Ok(())
+}
+
 fn fichier_invalide_pas_reecrit(p: &Rc<Pupitre>) -> Resultat {
     repartir_de_zero();
     let f = premiere_fenetre(p)?;
@@ -862,6 +904,17 @@ fn fichier_invalide_pas_reecrit(p: &Rc<Pupitre>) -> Resultat {
     verifier(
         l == ["alpha (~/.ssh/config)", "beta (~/.ssh/config)"],
         || format!("lignes : {l:?}"),
+    )?;
+    let ex = par_nom(&w, "explication")?
+        .downcast::<gtk::Label>()
+        .map_err(|_| "explication : pas une étiquette")?;
+    verifier(ex.is_visible() && ex.text().contains("ligne 3"), || {
+        format!("explication dans la fenêtre : {:?}", ex.text())
+    })?;
+    let ouvertes = etiquettes(&w);
+    verifier(
+        ouvertes.iter().all(|t| !t.contains("Ajoutez-en une")),
+        || format!("textes : {ouvertes:?}"),
     )?;
     for b in ["Ajouter…", "Modifier…", "Supprimer"] {
         verifier(!bouton(&w, b)?.is_sensitive(), || {

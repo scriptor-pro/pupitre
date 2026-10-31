@@ -585,6 +585,9 @@ impl Pupitre {
                             o.terminal.relier(id);
                             o.termine.set(false);
                             o.occupe.set(false);
+                            // Le shell local n'est plus le serveur dont l'onglet portait le nom.
+                            *o.provisoire.borrow_mut() = None;
+                            o.rafraichir_titre();
                             // La grille a pu changer depuis la demande.
                             o.terminal.forcer_redessin();
                         }
