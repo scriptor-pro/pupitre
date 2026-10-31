@@ -8,7 +8,9 @@
 
 use crate::apparence::{suivre_preference_systeme, theme_systeme, Preference};
 use crate::client::{connect_or_spawn_at, Client, CONNEXION_PERDUE};
-use crate::messages::{ActionMessage, BandeauMessages};
+use crate::messages::{
+    annoncer_focus_une_fois_affiche, refaire_annonce_focus, ActionMessage, BandeauMessages,
+};
 use crate::raccourcis::{raccourci, Raccourci};
 use crate::rechargement::{surveiller, surveiller_fichiers, Surveillance};
 use crate::recherche::BarreRecherche;
@@ -35,6 +37,10 @@ const GRILLE_PAR_DEFAUT: (u16, u16) = (80, 24);
 const DELAI_REDESSIN: Duration = Duration::from_millis(150);
 const TITRE_PAR_DEFAUT: &str = "Terminal";
 const GROUPE_ONGLETS: &str = "pupitre-onglets";
+/// Marque d'un onglet où la cloche a sonné (doublée de « , cloche » pour le lecteur d'écran).
+const MARQUE_CLOCHE: &str = "● ";
+/// Délai avant de refaire l'annonce du lancement (voir `reannoncer_au_lancement`).
+const DELAI_REANNONCE: Duration = Duration::from_millis(500);
 
 /// Clés des messages persistants (un seul message par clé).
 const CLE_PANNE: &str = "panne";
@@ -53,7 +59,10 @@ const BOUTON_NOUVEAU_TERMINAL: &str = "Ouvrir un nouveau terminal";
 /// Un onglet : un terminal et son étiquette (titre ou nom choisi, modifiable sur place).
 pub struct Onglet {
     terminal: TerminalOnglet,
-    pile: gtk::Stack,
+    /// Tête d'onglet : l'étiquette, ou la saisie du nom pendant un renommage. Une boîte
+    /// et non une GtkStack : GTK 4.18 publie l'enfant caché d'une GtkStack avec une
+    /// taille aberrante, et Orca boucle sans fin dessus (revue à plat).
+    tete: gtk::Box,
     etiquette: gtk::Label,
     entree: gtk::Entry,
     nom: RefCell<Option<String>>,
@@ -124,7 +133,7 @@ impl Onglet {
         let titre = self.titre();
         if self.signale.get() {
             // Le ● est doublé d'un texte pour le lecteur d'écran.
-            self.etiquette.set_text(&format!("● {titre}"));
+            self.etiquette.set_text(&format!("{MARQUE_CLOCHE}{titre}"));
             self.etiquette
                 .set_tooltip_text(Some(&format!("{titre} (cloche)")));
             self.etiquette
@@ -143,6 +152,7 @@ impl Onglet {
             .update_property(&[gtk::accessible::Property::Label(&titre)]);
         if let Some(c) = self.carnet() {
             c.page(&self.widget()).set_property("menu-label", &titre);
+            decrire_onglets(&c);
             if c.page_num(&self.widget()) == c.current_page() {
                 if let Some(f) = c.root().and_downcast::<gtk::Window>() {
                     f.set_title(Some(&format!("{titre} — Pupitre")));
@@ -160,13 +170,14 @@ impl Onglet {
 
     fn commencer_renommage(&self) {
         self.entree.set_text(&self.titre());
-        self.pile.set_visible_child(&self.entree);
+        self.etiquette.set_visible(false);
+        self.entree.set_visible(true);
         self.entree.grab_focus();
         self.entree.select_region(0, -1);
     }
 
     fn finir_renommage(&self, valider: bool) {
-        if self.pile.visible_child().as_ref() != Some(self.entree.upcast_ref()) {
+        if !WidgetExt::is_visible(&self.entree) {
             return;
         }
         if valider {
@@ -176,7 +187,8 @@ impl Onglet {
                 self.renommer(Some(&texte));
             }
         }
-        self.pile.set_visible_child(&self.etiquette);
+        self.entree.set_visible(false);
+        self.etiquette.set_visible(true);
         self.terminal.widget().grab_focus();
     }
 
@@ -186,14 +198,11 @@ impl Onglet {
         self.terminal.rendre_muet(true);
         let code = code.map_or_else(|| "signal".to_string(), |c| c.to_string());
         let message = format!(
-            "\r\n\x1b[0mLe shell s'est terminé (code {code}). \
-             Appuyez sur Entrée pour en ouvrir un nouveau.\r\n"
+            "Le shell s'est terminé (code {code}). Appuyez sur Entrée pour en ouvrir un nouveau."
         );
-        self.terminal.on_output(message.as_bytes());
-        self.terminal.terminal().announce(
-            &message.replace(['\r', '\n'], " "),
-            gtk::AccessibleAnnouncementPriority::Medium,
-        );
+        self.terminal
+            .on_output(format!("\r\n\x1b[0m{message}\r\n").as_bytes());
+        crate::messages::annoncer(self.terminal.terminal(), &message);
     }
 }
 
@@ -710,6 +719,9 @@ impl FenetrePupitre {
             .hexpand(true)
             .build();
         carnet.popup_enable();
+        // Ctrl+Tab met le focus sur le carnet lui-même : sans nom, Orca dirait seulement
+        // « groupement ». Sa description donne l'onglet courant (voir `decrire_onglets`).
+        carnet.update_property(&[gtk::accessible::Property::Label("Onglets")]);
         let menu = bouton_menu();
         carnet.set_action_widget(&menu, gtk::PackType::End);
 
@@ -738,6 +750,7 @@ impl FenetrePupitre {
         f.installer_actions();
         crate::raccourcis::installer_raccourcis(&f);
         f.installer_signaux();
+        f.reannoncer_au_lancement();
         pupitre.fenetres.borrow_mut().push(f.clone());
         pupitre.garde.borrow_mut().take();
         f
@@ -745,6 +758,30 @@ impl FenetrePupitre {
 
     pub fn fenetre(&self) -> &gtk::ApplicationWindow {
         &self.0.fenetre
+    }
+
+    /// GTK 4.18 signale l'activation de la première fenêtre avant d'avoir fini de
+    /// s'inscrire sur le bus d'accessibilité : le lecteur d'écran ne trouve pas la fenêtre
+    /// et n'annonce rien au lancement. Peu après la première activation, le focus est
+    /// redonné à l'élément qui l'a, ce qui refait l'annonce (fenêtre, terminal, invite).
+    fn reannoncer_au_lancement(&self) {
+        thread_local! {
+            static FAIT: Cell<bool> = const { Cell::new(false) };
+        }
+        let faible = Rc::downgrade(&self.0);
+        self.0.fenetre.connect_is_active_notify(move |fenetre| {
+            if !fenetre.is_active() || FAIT.with(|f| f.replace(true)) {
+                return;
+            }
+            let faible = faible.clone();
+            glib::timeout_add_local_once(DELAI_REANNONCE, move || {
+                let Some(f) = faible.upgrade() else { return };
+                if !f.fenetre.is_active() {
+                    return;
+                }
+                refaire_annonce_focus(&f.fenetre);
+            });
+        });
     }
 
     fn pupitre(&self) -> Option<Rc<Pupitre>> {
@@ -785,13 +822,14 @@ impl FenetrePupitre {
 
     fn inserer(&self, o: &Rc<Onglet>) {
         let c = &self.0.carnet;
-        let n = c.append_page(&o.widget(), Some(&o.pile));
+        let n = c.append_page(&o.widget(), Some(&o.tete));
         c.set_tab_reorderable(&o.widget(), true);
         c.set_tab_detachable(&o.widget(), true);
         c.set_current_page(Some(n));
         self.0.garder_ouverte.set(false);
         o.rafraichir_titre();
         o.terminal.widget().grab_focus();
+        annoncer_focus_une_fois_affiche(o.terminal.terminal().upcast_ref());
     }
 
     /// Ouvre un nouveau shell dans un nouvel onglet de cette fenêtre.
@@ -1087,6 +1125,7 @@ impl FenetrePupitre {
     fn installer_signaux(&self) {
         let faible = Rc::downgrade(&self.0);
         self.0.carnet.connect_page_removed(move |c, _, _| {
+            decrire_onglets(c);
             if let Some(f) = faible.upgrade() {
                 if c.n_pages() == 0 && !f.garder_ouverte.get() && !f.fermee.get() {
                     FenetrePupitre(f).detruire();
@@ -1097,17 +1136,30 @@ impl FenetrePupitre {
         self.0.carnet.connect_page_added(|c, page, _| {
             c.set_tab_reorderable(page, true);
             c.set_tab_detachable(page, true);
+            decrire_onglets(c);
         });
         let faible = Rc::downgrade(&self.0);
-        self.0.carnet.connect_switch_page(move |_, page, _| {
-            if let Some(f) = faible.upgrade() {
-                if let Some(o) = f.pupitre.upgrade().and_then(|p| p.onglet_de_widget(page)) {
-                    o.signaler(false);
-                    f.fenetre
-                        .set_title(Some(&format!("{} — Pupitre", o.titre())));
+        self.0.carnet.connect_switch_page(move |c, page, _| {
+            let Some(f) = faible.upgrade() else { return };
+            // Flèches sur la barre d'onglets : le clavier y reste et l'onglet choisi est
+            // annoncé. Sinon (Alt+chiffre, clic, nouvel onglet) : retour au terminal.
+            let sur_les_onglets = c.has_focus();
+            if let Some(o) = f.pupitre.upgrade().and_then(|p| p.onglet_de_widget(page)) {
+                o.signaler(false);
+                f.fenetre
+                    .set_title(Some(&format!("{} — Pupitre", o.titre())));
+                if !sur_les_onglets {
                     o.terminal.widget().grab_focus();
                 }
             }
+            // « switch-page » précède le changement de page : décrire une fois fait. Orca
+            // lit la nouvelle description si le focus est sur le carnet ou dedans.
+            let c = c.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(c) = c.upgrade() {
+                    decrire_onglets(&c);
+                }
+            });
         });
         // Onglet lâché hors de toute fenêtre : nouvelle fenêtre.
         let faible = Rc::downgrade(&self.0);
@@ -1195,14 +1247,14 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
         .tooltip_text("Nom de l'onglet (vide : titre automatique)")
         .build();
     entree.update_property(&[gtk::accessible::Property::Label("Nom de l'onglet")]);
-    let pile = gtk::Stack::new();
-    pile.add_child(&etiquette);
-    pile.add_child(&entree);
-    pile.set_visible_child(&etiquette);
+    entree.set_visible(false);
+    let tete = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    tete.append(&etiquette);
+    tete.append(&entree);
 
     let o = Rc::new(Onglet {
         terminal,
-        pile,
+        tete,
         etiquette,
         entree,
         nom: RefCell::new(None),
@@ -1275,7 +1327,7 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
             1 if n == 2 => o.commencer_renommage(),
             3 => {
                 let menu = gtk::PopoverMenu::from_model(Some(&menu_onglet()));
-                menu.set_parent(&o.pile);
+                menu.set_parent(&o.tete);
                 menu.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
                 menu.connect_closed(|m| {
                     let m = m.clone();
@@ -1286,7 +1338,7 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
             _ => {}
         }
     });
-    o.pile.add_controller(clic);
+    o.tete.add_controller(clic);
 
     // Shell terminé : Entrée en ouvre un nouveau dans le même onglet.
     let entree_terminal = gtk::EventControllerKey::new();
@@ -1453,9 +1505,8 @@ fn confirmer(parent: &impl IsA<gtk::Window>, question: &str, si_oui: impl Fn() +
     boite.append(&texte);
     boite.append(&boutons);
     dialogue.set_child(Some(&boite));
-    dialogue.update_relation(&[gtk::accessible::Relation::DescribedBy(
-        &[texte.upcast_ref()],
-    )]);
+    // Pas de relation « décrit par » vers la question : Orca lit déjà le texte du
+    // dialogue, il la dirait deux fois.
     dialogue.set_default_widget(Some(&annuler));
 
     let d = dialogue.clone();
@@ -1477,4 +1528,41 @@ fn confirmer(parent: &impl IsA<gtk::Window>, question: &str, si_oui: impl Fn() +
     dialogue.add_controller(echap);
     dialogue.present();
     annuler.grab_focus();
+}
+
+/// Nom d'onglet tel que lu par le lecteur d'écran (« titre » ou « titre, cloche »).
+fn nom_onglet(c: &gtk::Notebook, page: &gtk::Widget) -> Option<String> {
+    let tete = c.tab_label(page)?.downcast::<gtk::Box>().ok()?;
+    let etiquette = tete.first_child()?.downcast::<gtk::Label>().ok()?;
+    let texte = etiquette.text();
+    Some(match texte.strip_prefix(MARQUE_CLOCHE) {
+        Some(titre) => format!("{titre}, cloche"),
+        None => texte.to_string(),
+    })
+}
+
+/// Met à jour la description accessible du carnet : « essai, onglet 2 sur 3 », suivie
+/// des autres onglets où la cloche a sonné. Orca la lit quand Ctrl+Tab arrive sur la
+/// barre d'onglets, et la relit quand l'onglet change (son nom, lui, n'est pas relu
+/// quand le focus remonte du terminal vers le carnet).
+fn decrire_onglets(c: &gtk::Notebook) {
+    let n = c.n_pages();
+    let courant = c.current_page();
+    let mut texte = String::new();
+    let mut cloches = Vec::new();
+    for i in 0..n {
+        let Some(page) = c.nth_page(Some(i)) else {
+            continue;
+        };
+        let nom = nom_onglet(c, &page).unwrap_or_default();
+        if Some(i) == courant {
+            texte = format!("{nom}, onglet {} sur {n}", i + 1);
+        } else if let Some(titre) = nom.strip_suffix(", cloche") {
+            cloches.push(format!("{titre} (onglet {})", i + 1));
+        }
+    }
+    if !cloches.is_empty() {
+        texte.push_str(&format!(" ; cloche dans : {}", cloches.join(", ")));
+    }
+    c.update_property(&[gtk::accessible::Property::Description(&texte)]);
 }

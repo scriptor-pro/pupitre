@@ -227,9 +227,50 @@ impl BandeauMessages {
             ligne,
             action: bouton_action,
         });
-        // Annonce polie : lue sans couper ce que le lecteur d'écran dit déjà.
-        self.boite
-            .announce(texte, gtk::AccessibleAnnouncementPriority::Medium);
+        annoncer(&self.boite, texte);
         id
     }
+}
+
+/// Annonce `texte` au lecteur d'écran, poliment (sans couper ce qu'il dit déjà).
+///
+/// L'annonce part de la fenêtre qui contient `w` : un widget qui vient d'apparaître
+/// (bandeau, état de la recherche) n'est pas encore publié pour le lecteur d'écran et
+/// son annonce serait perdue.
+pub fn annoncer(w: &impl IsA<gtk::Widget>, texte: &str) {
+    let prio = gtk::AccessibleAnnouncementPriority::Medium;
+    match w.as_ref().root() {
+        Some(r) => r.announce(texte, prio),
+        None => w.as_ref().announce(texte, prio),
+    }
+}
+
+/// Délai avant d'annoncer un élément qui a reçu le focus juste après sa création.
+const DELAI_ANNONCE_NOUVEAU: Duration = Duration::from_millis(100);
+
+/// Retire puis redonne le focus à l'élément qui l'a : le lecteur d'écran reçoit un
+/// nouvel événement « focus » et annonce l'élément (rien ne change pour le clavier).
+pub fn refaire_annonce_focus(fenetre: &impl IsA<gtk::Window>) {
+    if let Some(w) = GtkWindowExt::focus(fenetre) {
+        GtkWindowExt::set_focus(fenetre, None::<&gtk::Widget>);
+        w.grab_focus();
+    }
+}
+
+/// Un widget qui reçoit le focus juste après sa création n'existe pas encore pour le
+/// lecteur d'écran : GTK n'envoie pas l'événement « focus » et rien n'est annoncé
+/// (nouvel onglet, barre de recherche). Peu après, s'il a toujours le focus, l'annonce
+/// est refaite.
+pub fn annoncer_focus_une_fois_affiche(w: &gtk::Widget) {
+    let faible = w.downgrade();
+    glib::timeout_add_local_once(DELAI_ANNONCE_NOUVEAU, move || {
+        let Some(w) = faible.upgrade() else { return };
+        let Some(f) = w.root().and_then(|r| r.downcast::<gtk::Window>().ok()) else {
+            return;
+        };
+        // Le focus peut être sur un enfant (la saisie de texte d'un GtkSearchEntry).
+        if GtkWindowExt::focus(&f).is_some_and(|x| x == w || x.is_ancestor(&w)) {
+            refaire_annonce_focus(&f);
+        }
+    });
 }

@@ -1,6 +1,7 @@
 [
   {"role": "frame", "nom": "~Pupitre"},
   {"role": "page tab list"},
+  {"role": "grouping", "nom": "Onglets"},
   {"role": "page tab", "nom": "!vide", "tous": true, "min": 2},
   {"role": "terminal", "texte": "!vide"},
   {"role": "terminal", "nom": "!vide", "tous": true},

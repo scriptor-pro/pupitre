@@ -1,47 +1,61 @@
 # Liste de contrôle Orca — Pupitre, étape 1
 
-Durée : environ 15 minutes. À faire avant chaque version, avec Orca et la disposition de
-clavier habituelle (fr dvorak).
+## Vérification automatique (à faire avant chaque version)
 
-Pour chaque ligne : faire la manipulation, comparer avec le résultat attendu, cocher
-`[x]` si c'est conforme, sinon écrire ce qui s'est passé dans « Notes ». Une seule
-différence suffit à signaler un défaut.
+```sh
+cd ~/Documents/Projets/pupitre && scripts/test-orca.sh
+```
 
-## Préparation (2 min)
+Durée : environ 4 minutes. **Rien n'est prononcé** et rien ne s'affiche sur l'écran :
+le script ouvre un écran virtuel (Xvfb), y lance un gestionnaire de fenêtres (xfwm4),
+Orca avec une synthèse muette, puis Pupitre. Il tape les touches à votre place
+(xdotool) et compare ce qu'Orca aurait dit (son journal) avec le résultat attendu. Votre
+Orca, votre configuration et vos dossiers ne sont pas touchés (dossiers temporaires).
 
-1. Construire Pupitre depuis les sources :
-   `cd ~/Documents/Projets/pupitre && cargo build --release -p pupitre -p pupitre-fond`
-2. Lancer Orca s'il ne tourne pas : `orca &` (ou Super+Alt+S sous GNOME).
-3. Lancer Pupitre : `./target/release/pupitre`
+Résultat : une ligne par vérification, `OK` ou `ÉCHEC` ; en cas d'échec, la raison et les
+dernières phrases d'Orca. Le rapport (`rapport.txt`) et le journal complet d'Orca
+(`orca.log`) restent dans `target/orca/`. Code de sortie 0 si tout passe.
 
-Rappels Orca (disposition « portable », touche Orca = Verr. Maj) :
-lire la ligne courante = Orca+I ; ligne précédente / suivante en revue = Orca+U / Orca+O ;
-mode apprentissage = Orca+H (Échap pour sortir).
-En disposition « ordinateur de bureau » : pavé numérique 7, 8, 9.
+Refaire une seule vérification (la 1, le lancement, est toujours faite) :
+`scripts/test-orca.sh --seulement 5 12`
 
-## Vérifications
+Outils nécessaires : `orca`, `xvfb-run` (paquet xvfb), `xdotool`, `xfwm4`.
 
-| # | Manipulation | Résultat attendu | OK | Notes |
-|---|---|---|---|---|
-| 1 | Lancer Pupitre. | Orca annonce la fenêtre « Terminal — Pupitre » puis lit l'invite du shell (ex. « baudouin@machine:~$ »). | [ ] | |
-| 2 | Taper `ls` puis Entrée. Lire les lignes avec Orca+U / Orca+O. | La sortie de `ls` est lue ligne par ligne, accents compris. | [ ] | |
-| 3 | Ctrl+Maj+T. | Un second onglet s'ouvre ; Orca annonce le nouvel onglet et lit son invite. | [ ] | |
-| 4 | Alt+1, puis Alt+2 (touches du haut, sans Maj, en fr dvorak). | À chaque fois, Orca annonce l'onglet choisi et son titre. | [ ] | |
-| 5 | Dans un onglet, taper `printf '\e]0;essai\a'` puis Entrée ; puis Ctrl+Tab jusqu'aux onglets. | L'onglet s'appelle « essai » ; Orca le lit en arrivant sur les onglets. Les flèches gauche/droite changent d'onglet et chaque titre est lu. | [ ] | |
-| 6 | Ctrl+Tab jusqu'au bouton du menu, puis Entrée ; parcourir avec les flèches ; Échap. | Orca dit « Menu, bouton bascule » ; dans le menu, chaque entrée est lue avec son raccourci ; Échap ferme le menu. Un nouveau Ctrl+Tab ramène au terminal. | [ ] | |
-| 7 | Taper `sleep 30` puis Entrée ; Ctrl+Maj+W. | Un dialogue s'ouvre ; Orca lit la question « Une commande est en cours dans cet onglet. Fermer quand même ? » puis « Annuler, bouton ». Échap ferme le dialogue sans fermer l'onglet. Ctrl+C arrête `sleep`. | [ ] | |
-| 8 | Dans un onglet, taper `exit` puis Entrée. Puis Entrée. | Orca lit « Le shell s'est terminé (code 0). Appuyez sur Entrée pour en ouvrir un nouveau. » ; Entrée ouvre un nouveau shell dans le même onglet (invite lue). | [ ] | |
-| 9 | Ouvrir `~/.config/pupitre/pupitre.toml`, écrire `historique_lignes = "x"`, enregistrer. Puis remettre `historique_lignes = 10000` et enregistrer. | Orca annonce « Configuration invalide, ligne … » sans que Pupitre ne se ferme ; après correction le message disparaît. | [ ] | |
-| 10 | Ctrl+Maj+F, taper un mot présent à l'écran, Entrée ; puis un mot absent, Entrée ; puis Échap. | La saisie « Rechercher dans l'historique » est annoncée ; le mot trouvé est sélectionné ; pour le mot absent, Orca annonce « Aucun résultat » ; Échap rend le clavier au terminal (l'invite est lue avec Orca+I). | [ ] | |
-| 11 | Ctrl+plus dix fois (zoom 200 %), puis taper `tput cols; tput lines`. Puis Ctrl+0. | Le texte est deux fois plus grand ; rien n'est coupé à droite ni en bas ; `tput` donne une grille plus petite. Ctrl+0 revient à la taille normale. | [ ] | |
-| 12 | Dans l'onglet 1 : `sleep 3; printf '\a'` puis Entrée, et passer tout de suite à l'onglet 2 (Alt+2). Attendre 3 s, puis Ctrl+Tab jusqu'aux onglets. | L'onglet 1 affiche « ● » ; Orca le lit « …, cloche ». Revenir sur l'onglet 1 efface le ●. Aucun son, et pas plus de 3 flashs par seconde. | [ ] | |
-| 13 | Dans un onglet, lancer `mc` (ou `htop`), puis F10. | F10 va au programme (il se ferme) ; le menu de Pupitre ne s'ouvre pas. | [ ] | |
-| 14 | Orca+H (mode apprentissage), quelques touches, Échap ; puis Orca+I. | Les commandes d'Orca fonctionnent normalement dans Pupitre : aucune n'est captée par Pupitre. | [ ] | |
+Fichiers : `tests/a11y/orca/scenario.py` (les vérifications), `lancer_orca.py` (lance
+Orca muet), `pupitre_muet.py` (la synthèse muette).
 
-## Résultat
+## Ce qui est vérifié
 
-Date : ……………… Version (commit) : ……………… Distribution / bureau : ………………
+Orca est réglé en disposition « ordinateur de bureau » (touche Orca = Inser ; lire la
+ligne courante = pavé 8 ; ligne précédente = pavé 7).
 
-Défauts trouvés (numéro de la ligne et ce qui s'est passé) :
+| # | Manipulation | Résultat attendu |
+|---|---|---|
+| 1 | Lancer Pupitre. | Orca annonce « Terminal — Pupitre » puis lit l'invite du shell. |
+| 2 | `printf` d'une ligne accentuée ; pavé 7 (ligne précédente). | La ligne « ligne été à ça » est lue, accents compris. |
+| 3 | Ctrl+Maj+T. | Le nouvel onglet est annoncé (« Page 2 ») et son invite lue. |
+| 4 | Alt+1, puis Alt+2. | Chaque fois, l'onglet choisi est annoncé. |
+| 5 | Titre `printf '\e]0;essai\a'` ; Ctrl+Tab jusqu'aux onglets ; flèches gauche et droite. | « Onglets, groupement, essai, onglet 2 sur 2 » ; chaque flèche change d'onglet, le clavier reste sur les onglets et l'onglet choisi est lu. |
+| 6 | Ctrl+Tab jusqu'au menu, Entrée, flèche bas, Échap ; Ctrl+Tab. | « Menu, bouton à deux états » ; les entrées sont lues avec leur raccourci ; Échap ferme ; Ctrl+Tab ramène au terminal. |
+| 7 | `sleep 30` ; Ctrl+Maj+W ; Échap. | « Fermer ? boîte de dialogue. Une commande est en cours dans cet onglet. Fermer quand même ? » puis « Annuler, bouton » ; Échap ferme le dialogue sans fermer l'onglet. |
+| 8 | `exit`, puis Entrée. | « Le shell s'est terminé (code 0). Appuyez sur Entrée pour en ouvrir un nouveau. » ; Entrée ouvre un shell (invite lue). |
+| 9 | Écrire `historique_lignes = "x"` dans `pupitre.toml`, puis remettre la valeur. | « Configuration invalide, ligne 24 : … » ; Pupitre reste ouvert. |
+| 10 | Ctrl+Maj+F, un mot présent, Entrée ; un mot absent, Entrée ; Échap ; pavé 8. | La saisie « Rechercher dans l'historique » est annoncée ; « Aucun résultat » pour le mot absent ; après Échap, l'invite est lue (clavier rendu au terminal). |
+| 11 | Ctrl+plus dix fois, `tput cols` ; Ctrl+0. | La grille a nettement moins de colonnes ; Ctrl+0 rend le nombre d'origine. |
+| 12 | Cloche dans l'onglet 1 pendant qu'on est sur l'onglet 2 ; Ctrl+Tab jusqu'aux onglets. | « … ; cloche dans : Terminal (onglet 1) ». |
+| 13 | `cat -v`, puis F10. | F10 arrive au programme (`^[[21~`) ; le menu de Pupitre ne s'ouvre pas. |
+| 14 | Orca+H (mode apprentissage), Échap ; pavé 8. | Les commandes d'Orca marchent dans Pupitre : aucune n'est captée. |
+
+Couvert par d'autres tests (`scripts/test-x11.sh`) : cloche sans son et pas plus de
+3 flashs par seconde, focus toujours visible, noms accessibles de tous les boutons.
+
+## Contrôle manuel (facultatif, environ 2 minutes)
+
+Seulement si vous voulez entendre Pupitre avec votre propre réglage d'Orca (voix,
+disposition « portable » avec Verr. Maj) : lancer `./target/release/pupitre` avec Orca
+actif, écouter l'annonce du lancement, taper `ls`, lire une ligne avec Orca+I, puis
+Ctrl+Maj+T. Si l'un des trois diffère de la vérification automatique, le noter ici.
+
+Notes :
 
 -

@@ -125,6 +125,7 @@ impl BarreRecherche {
         *self.posee.borrow_mut() = None;
         self.barre.set_search_mode(true);
         self.entree.grab_focus();
+        crate::messages::annoncer_focus_une_fois_affiche(self.entree.upcast_ref());
         self.appliquer();
     }
 
@@ -190,8 +191,7 @@ impl BarreRecherche {
             Some(m) => {
                 self.entree.add_css_class("error");
                 self.entree.set_tooltip_text(Some(m));
-                self.entree
-                    .announce(m, gtk::AccessibleAnnouncementPriority::Medium);
+                crate::messages::annoncer(&self.entree, m);
             }
             None => {
                 self.entree.remove_css_class("error");
@@ -223,10 +223,7 @@ impl BarreRecherche {
             self.etat.set_text("");
         } else {
             self.etat.set_text("Aucun résultat");
-            self.etat.announce(
-                "Aucun résultat",
-                gtk::AccessibleAnnouncementPriority::Medium,
-            );
+            crate::messages::annoncer(&self.etat, "Aucun résultat");
         }
     }
 }

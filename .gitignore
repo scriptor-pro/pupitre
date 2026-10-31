@@ -6,3 +6,4 @@ essai-jetable/feed/sortie/
 !maquettes/*.png
 !icone-st/png/*.png
 /.superpowers/
+__pycache__/
