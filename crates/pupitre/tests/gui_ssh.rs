@@ -70,6 +70,9 @@ fn main() {
         phrase_non_memorisee(&pupitre, &cle, avec_trousseau)
     });
     ex.lancer("annuler_ne_repond_rien", || annuler(&pupitre, &cle));
+    ex.lancer("annuler_par_bouton_et_fermeture", || {
+        annuler_par_bouton_et_fermeture(&pupitre, &cle)
+    });
     ex.lancer("fenetre_fermee_quand_demande_annulee", || {
         fermee_si_annulee(&pupitre, &cle)
     });
@@ -285,6 +288,24 @@ fn bouton(fenetre: &gtk::Window, etiquette: &str) -> Result<gtk::Button, String>
         .ok_or_else(|| format!("bouton « {etiquette} » absent"))
 }
 
+/// Remet la touche Échap au contrôleur clavier de la fenêtre ; vrai si elle est consommée.
+fn envoyer_echap(f: &gtk::Window) -> bool {
+    let controleurs = f.observe_controllers();
+    (0..controleurs.n_items())
+        .filter_map(|i| controleurs.item(i))
+        .filter_map(|c| c.downcast::<gtk::EventControllerKey>().ok())
+        .any(|c| {
+            c.emit_by_name::<bool>(
+                "key-pressed",
+                &[
+                    &gtk::gdk::Key::Escape,
+                    &0u32,
+                    &gtk::gdk::ModifierType::empty(),
+                ],
+            )
+        })
+}
+
 fn valider(fenetre: &gtk::Window, phrase: &str) -> Resultat {
     let s = saisie(fenetre)?;
     s.set_text(phrase);
@@ -420,10 +441,13 @@ fn annuler(p: &Rc<Pupitre>, cle: &Path) -> Resultat {
         &format!("ssh-add '{}'; echo an1-code-$?", cle.display()),
     );
     let f = attendre_fenetre()?;
-    bouton(&f, "Annuler")?.emit_clicked();
+    // Échap : le contrôleur de touches de la fenêtre reçoit la touche, comme du clavier.
+    verifier(envoyer_echap(&f), || {
+        "Échap non traité par la fenêtre".into()
+    })?;
     let ok = attendre(Duration::from_secs(10), || {
         let t = texte(&o);
-        t.contains("an1-code-1") || t.contains("an1-code-2")
+        t.contains("an1-code-1")
     });
     verifier(ok, || {
         format!("ssh-add ne termine pas en échec : {:?}", texte(&o))
@@ -432,6 +456,31 @@ fn annuler(p: &Rc<Pupitre>, cle: &Path) -> Resultat {
         attendre(Duration::from_secs(2), || fenetre_demande().is_none()),
         || "fenêtre toujours ouverte".into(),
     )
+}
+
+fn annuler_par_bouton_et_fermeture(p: &Rc<Pupitre>, cle: &Path) -> Resultat {
+    for (marque, par_bouton) in [("bt", true), ("wm", false)] {
+        let o = preparer(p, &format!("{marque}0"))?;
+        taper(
+            &o,
+            &format!("ssh-add '{}'; echo {marque}1-code-$?", cle.display()),
+        );
+        let f = attendre_fenetre()?;
+        if par_bouton {
+            bouton(&f, "Annuler")?.emit_clicked();
+        } else {
+            f.close();
+        }
+        let motif = format!("{marque}1-code-1");
+        let ok = attendre(Duration::from_secs(10), || texte(&o).contains(&motif));
+        verifier(ok, || {
+            format!(
+                "{marque} : ssh-add ne termine pas en échec : {:?}",
+                texte(&o)
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn fermee_si_annulee(p: &Rc<Pupitre>, cle: &Path) -> Resultat {
@@ -456,7 +505,9 @@ fn trousseau_absent(p: &Rc<Pupitre>, cle: &Path) -> Resultat {
     let f = attendre_fenetre()?;
     let c = case(&f)?;
     let etiq = etiquettes(&f);
+    let (relations, sortie) = sonder_attendu("tests/a11y/demande-sans-trousseau.json");
     nettoyer(&o);
+    verifier(relations, || sortie)?;
     verifier(!c.is_sensitive() && !c.is_active(), || {
         "la case devrait être inactive et décochée".into()
     })?;

@@ -13,6 +13,8 @@ Fichier d'attentes : liste de règles, chacune avec :
   "role"   rôle AT-SPI (ex. "terminal", "page tab", "push button")       obligatoire
   "nom"    "texte exact", "~contient", "!vide" (non vide)                facultatif
   "texte"  mêmes formes, sur le texte de l'élément                       facultatif
+  "relation"  relation AT-SPI requise (ex. "described-by")                facultatif
+  "description"  mêmes formes, sur la description accessible             facultatif
   "etat"   état AT-SPI requis (ex. "focused", "showing")                 facultatif
   "tous"   true : chaque élément de ce rôle doit respecter la règle      défaut false
   "min"    nombre minimal d'éléments conformes                           défaut 1
@@ -49,7 +51,17 @@ def elements(noeud, prof=0):
             texte = Atspi.Text.get_text(noeud, 0, -1) or ""
     except Exception:
         pass
-    yield {"role": role, "nom": nom, "texte": texte, "etats": etats(noeud)}
+    try:
+        description = noeud.get_description() or ""
+    except Exception:
+        description = ""
+    relations = []
+    try:
+        for r in noeud.get_relation_set():
+            relations.append(Atspi.RelationType(r.get_relation_type()).value_nick)
+    except Exception:
+        pass
+    yield {"role": role, "nom": nom, "description": description, "relations": relations, "texte": texte, "etats": etats(noeud)}
     if prof >= PROFONDEUR_MAX:
         return
     for i in range(noeud.get_child_count()):
@@ -81,6 +93,8 @@ def conforme(e, regle):
     return (
         correspond(e["nom"], regle.get("nom"))
         and correspond(e["texte"], regle.get("texte"))
+        and correspond(e.get("description", ""), regle.get("description"))
+        and (regle.get("relation") is None or regle["relation"] in e.get("relations", []))
         and (regle.get("etat") is None or regle["etat"] in e["etats"])
     )
 

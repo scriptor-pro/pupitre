@@ -115,7 +115,11 @@ pub fn ouvrir_demande(
                     .max_width_chars(56)
                     .xalign(0.0)
                     .build();
+                // Décrit la case (inactive, jamais atteinte au clavier) et la saisie, où
+                // se trouve le focus : c'est là qu'Orca la lit.
                 case.update_relation(&[gtk::accessible::Relation::DescribedBy(&[e.upcast_ref()])]);
+                saisie
+                    .update_relation(&[gtk::accessible::Relation::DescribedBy(&[e.upcast_ref()])]);
                 boite.append(&e);
             }
             let valider = ajouter_annuler_valider(&boutons, &dialogue, &finir);
@@ -143,7 +147,8 @@ pub fn ouvrir_demande(
             saisie
         }
         Genre::HoteInconnu | Genre::Confirmation => {
-            boite.append(&texte_openssh(&d.invite));
+            let texte = texte_openssh(&d.invite);
+            boite.append(&texte);
             let (refus, accord) = if d.genre == Genre::HoteInconnu {
                 ("Refuser", "Faire confiance et se connecter")
             } else {
@@ -153,6 +158,15 @@ pub fn ouvrir_demande(
             let autoriser = gtk::Button::with_label(accord);
             boutons.append(&refuser);
             boutons.append(&autoriser);
+            // Le texte d'OpenSSH (empreinte, usage de la clé) est ce qu'on décide : il est
+            // lu à l'ouverture (description de la fenêtre) et à chaque bouton.
+            let decrit = gtk::accessible::Relation::DescribedBy(&[texte.upcast_ref()]);
+            dialogue.update_relation(&[decrit]);
+            for b in [&refuser, &autoriser] {
+                b.update_relation(&[gtk::accessible::Relation::DescribedBy(
+                    &[texte.upcast_ref()],
+                )]);
+            }
             let f = finir.clone();
             refuser.connect_clicked(move |_| f(Some(Zeroizing::new("no".into())), false));
             let f = finir.clone();
