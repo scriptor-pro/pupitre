@@ -1,0 +1,27 @@
+# Configuration de Pupitre
+#
+# Ce fichier est relu automatiquement dès qu'il est enregistré : pas besoin de redémarrer.
+# En cas d'erreur, Pupitre garde la configuration précédente et indique la ligne fautive.
+# Une ligne qui commence par # est un commentaire. Supprimer une ligne = revenir à la valeur par défaut.
+
+# Police et taille du texte, ex. "B612 Mono 11", "Iosevka 13".
+# Si la police n'est pas installée, Pupitre revient à B612 Mono (fournie).
+police = "B612 Mono 11"
+
+# Thème de couleurs :
+#   "systeme"  suit le réglage clair/sombre du bureau
+#   "sombre"   thème sombre (Catppuccin Mocha ajusté)
+#   "clair"    thème clair (Catppuccin Latte ajusté)
+#   "/chemin/vers/theme.toml" ou "~/chemin/theme.toml"   votre propre thème
+# Tous les thèmes sont vérifiés : contraste d'au moins 4,5:1 pour le texte (WCAG AA).
+theme = "systeme"
+
+# Curseur clignotant : true (oui) ou false (non, recommandé pour l'accessibilité).
+curseur_clignote = false
+
+# Nombre de lignes gardées en mémoire pour remonter dans l'historique (0 à 1 000 000).
+# Rien n'est écrit sur le disque.
+historique_lignes = 10000
+
+# Zoom maximum autorisé avec Ctrl+plus, en pourcentage (100 à 500).
+zoom_max_pourcent = 200

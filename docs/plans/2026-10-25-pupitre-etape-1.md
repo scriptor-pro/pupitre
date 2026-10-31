@@ -151,7 +151,7 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
   - Défauts `Config` : police `"B612 Mono 11"`, thème `Systeme`, curseur non clignotant, historique 10 000 lignes, zoom max 200.
 - Règle de `check_theme` (minimum 4,5 ; curseur 3,0) : texte/fond ; sélection ; curseur/fond ; chaque couleur `Texte` ou `TexteEtFond` contre le fond ; chaque `TexteEtFond` contre chaque `Fond` ; chaque `Fond` sous chaque `Texte`. Description en français, ex. `"couleur 8 (#585b70) sur le fond (#1e1e2e)"`.
 
-- [ ] **Step 1 : Tests** :
+- [x] **Step 1 : Tests** :
 ```rust
 #[test] fn ratios_de_reference() {
     assert!((contrast_ratio("#ffffff".parse()?, "#000000".parse()?) - 21.0).abs() < 0.01);
@@ -170,10 +170,10 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
 #[test] fn toml_invalide_donne_ligne() { /* contenu "police = \"B612 Mono 11\"\nhistorique_lignes = \"beaucoup\"\n" → Err(ErreurConfig { ligne: Some(2), .. }) */ }
 #[test] fn ecriture_atomique_garde_precedent() { /* écrire "a" puis "b" → fichier == "b", <nom>.precedent == "a", aucun fichier temporaire restant */ }
 ```
-- [ ] **Step 2 :** `cargo test -p pupitre-config` → échec.
-- [ ] **Step 3 :** Implémenter `couleur.rs`, `theme.rs`, `fichier.rs`, `atomique.rs` ; `assets/config/pupitre.toml` commenté en français (chaque clé, ses valeurs possibles), inclus via `include_str!`.
-- [ ] **Step 4 :** `cargo test -p pupitre-config` → PASS.
-- [ ] **Step 5 : Commit** — `feat(config): thèmes validés, vérificateur de contraste, configuration TOML`
+- [x] **Step 2 :** `cargo test -p pupitre-config` → échec.
+- [x] **Step 3 :** Implémenter `couleur.rs`, `theme.rs`, `fichier.rs`, `atomique.rs` ; `assets/config/pupitre.toml` commenté en français (chaque clé, ses valeurs possibles), inclus via `include_str!`.
+- [x] **Step 4 :** `cargo test -p pupitre-config` → PASS.
+- [x] **Step 5 : Commit** — `feat(config): thèmes validés, vérificateur de contraste, configuration TOML`
 
 ### Task 4 : Tampon de relecture
 
