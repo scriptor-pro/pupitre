@@ -4,5 +4,6 @@
 
 pub mod agent;
 pub mod askpass;
+pub mod hotes;
 pub mod invite;
 pub mod trousseau;

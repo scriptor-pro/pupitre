@@ -77,10 +77,22 @@ pub fn charger(chemin: &Path) -> Result<Config, ErreurConfig> {
 /// Lit un fichier TOML (taille bornée, UTF-8) et le désérialise ; les erreurs portent le
 /// numéro de ligne et un message en français.
 pub(crate) fn lire_toml<T: de::DeserializeOwned>(chemin: &Path) -> Result<T, ErreurConfig> {
-    let sans_ligne = |message: String| ErreurConfig {
-        ligne: None,
-        message,
-    };
+    lire_toml_avec(chemin, CLES_CONFIG)
+}
+
+/// Comme `lire_toml`, avec la liste des clés citée dans le message « clé inconnue ».
+pub(crate) fn lire_toml_avec<T: de::DeserializeOwned>(
+    chemin: &Path,
+    cles: &str,
+) -> Result<T, ErreurConfig> {
+    let texte = lire_texte(chemin)?;
+    toml::from_str(&texte).map_err(|e| erreur_toml(&texte, &e, cles))
+}
+
+const CLES_CONFIG: &str = "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent";
+
+/// Lit un fichier (ordinaire, taille bornée, UTF-8).
+pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {
     let lire = || -> io::Result<String> {
         let f = std::fs::File::open(chemin)?;
         if !f.metadata()?.is_file() {
@@ -101,26 +113,29 @@ pub(crate) fn lire_toml<T: de::DeserializeOwned>(chemin: &Path) -> Result<T, Err
             io::Error::new(io::ErrorKind::InvalidData, "le fichier n'est pas en UTF-8")
         })
     };
-    let texte =
-        lire().map_err(|e| sans_ligne(format!("impossible de lire {} : {e}", chemin.display())))?;
-    toml::from_str(&texte).map_err(|e| ErreurConfig {
-        ligne: e.span().map(|s| numero_de_ligne(&texte, s.start)),
-        message: traduire(e.message().trim()),
+    lire().map_err(|e| ErreurConfig {
+        ligne: None,
+        message: format!("impossible de lire {} : {e}", chemin.display()),
     })
+}
+
+/// Convertit une erreur toml en erreur française avec numéro de ligne.
+pub(crate) fn erreur_toml(texte: &str, e: &toml::de::Error, cles: &str) -> ErreurConfig {
+    ErreurConfig {
+        ligne: e.span().map(|s| numero_de_ligne(texte, s.start)),
+        message: traduire(e.message().trim(), cles),
+    }
 }
 
 /// Traduit en français les messages courants de toml/serde ; les autres sont donnés tels quels,
 /// précédés de « syntaxe TOML incorrecte ».
-fn traduire(m: &str) -> String {
+fn traduire(m: &str, cles: &str) -> String {
     if let Some(message) = m.strip_prefix(MARQUE) {
         return message.to_owned();
     }
     if let Some(reste) = m.strip_prefix("unknown field `") {
         let cle = reste.split('`').next().unwrap_or(reste);
-        return format!(
-            "clé inconnue « {cle} » ; clés possibles : police, theme, curseur_clignote, \
-             historique_lignes, zoom_max_pourcent"
-        );
+        return format!("clé inconnue « {cle} » ; clés possibles : {cles}");
     }
     for (prefixe, debut) in [
         ("invalid type: ", "type incorrect"),
@@ -174,7 +189,7 @@ fn traduire_attendu(a: &str) -> String {
     }
 }
 
-fn numero_de_ligne(texte: &str, octet: usize) -> usize {
+pub(crate) fn numero_de_ligne(texte: &str, octet: usize) -> usize {
     let fin = octet.min(texte.len());
     texte.as_bytes()[..fin]
         .iter()
@@ -186,14 +201,19 @@ fn numero_de_ligne(texte: &str, octet: usize) -> usize {
 /// `$XDG_CONFIG_HOME/pupitre/pupitre.toml`, sinon `~/.config/pupitre/pupitre.toml`
 /// (une valeur relative de `XDG_CONFIG_HOME` est ignorée, comme le veut la norme XDG).
 pub fn chemin_config() -> PathBuf {
+    dossier_pupitre().join("pupitre.toml")
+}
+
+/// `$XDG_CONFIG_HOME/pupitre`, sinon `~/.config/pupitre`.
+pub(crate) fn dossier_pupitre() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| dossier_personnel().join(".config"));
-    base.join("pupitre").join("pupitre.toml")
+    base.join("pupitre")
 }
 
-fn dossier_personnel() -> PathBuf {
+pub(crate) fn dossier_personnel() -> PathBuf {
     std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 

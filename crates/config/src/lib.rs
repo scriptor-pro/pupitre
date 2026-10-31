@@ -2,12 +2,16 @@
 //! Configuration, couleurs et thèmes de Pupitre.
 
 mod atomique;
+mod connexions;
 mod couleur;
 mod fichier;
 mod theme;
 mod theme_fichier;
 
 pub use atomique::ecrire_atomique;
+pub use connexions::{
+    argv_ssh, charger_connexions, chemin_connexions, enregistrer_connexions, Connexion,
+};
 pub use couleur::{contrast_ratio, ErreurCouleur, Rgb};
 pub use fichier::{
     charger, chemin_config, creer_defaut_si_absent, Config, ErreurConfig, ThemeChoix, CONFIG_DEFAUT,
