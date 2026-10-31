@@ -1,0 +1,26 @@
+--- git sans terminal, SSH_ASKPASS=espion (REQUIRE=force)
+fatal : Échec d'authentification pour 'http://127.0.0.1:18401/x/'
+code=128
+ARGV1=Username for 'http://127.0.0.1:18401': $
+PROMPT=<absent>
+PPID=265782 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7280008]
+---
+ARGV1=Password for 'http://x@127.0.0.1:18401': $
+PROMPT=<absent>
+PPID=265782 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7279539]
+---
+--- idem, sans SSH_ASKPASS_REQUIRE
+fatal : Échec d'authentification pour 'http://127.0.0.1:18401/x/'
+code=128
+ARGV1=Username for 'http://127.0.0.1:18401': $
+PROMPT=<absent>
+PPID=265803 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7277404]
+---
+ARGV1=Password for 'http://x@127.0.0.1:18401': $
+PROMPT=<absent>
+PPID=265803 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7277409]
+---

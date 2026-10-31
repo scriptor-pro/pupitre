@@ -1,0 +1,76 @@
+### A: ssh-add bonne phrase
+Identity added: $T/cle (Baudouin@B612)
+code=0
+--- log askpass
+ARGV1=Enter passphrase for $T/cle: $
+PROMPT=<absent>
+PPID=265606 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7278050]
+---
+All identities removed.
+### B: ssh-add mauvaise puis bonne
+Identity added: $T/cle (Baudouin@B612)
+code=0
+--- log askpass
+ARGV1=Enter passphrase for $T/cle: $
+PROMPT=<absent>
+PPID=265619 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7278058]
+---
+ARGV1=Bad passphrase, try again for $T/cle: $
+PROMPT=<absent>
+PPID=265619 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7279875]
+---
+All identities removed.
+### C: ssh-add reponse vide
+code=1
+--- log askpass
+ARGV1=Enter passphrase for $T/cle: $
+PROMPT=<absent>
+PPID=265642 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7279460]
+---
+### D: ssh-add -c puis usage (agent lancé AVEC SSH_ASKPASS, sinon il refuse)
+exiting on signal 15
+Identity added: $T/cle (Baudouin@B612)
+The user must confirm each use of the key
+code=0
+--- log askpass
+ARGV1=Enter passphrase for $T/cle (will confirm each use): $
+PROMPT=<absent>
+PPID=265655 DISPLAY=<absent> WAYLAND=<absent>
+FD=pipe:[7279892]
+---
+Signing file $T/msg
+Write signature to $T/msg.sig
+code=0
+ARGV1=Allow use of key Baudouin@B612?$
+Key fingerprint SHA256:+puNOuRbTCiaMni0vafFvVMW8QJTOq9z3zcqWNA9dH8.$
+PROMPT=confirm
+PPID=265652 DISPLAY=<absent> WAYLAND=<absent>
+FD=socket:[7277288]
+---
+### D2: confirm refusé (askpass code 1)
+Signing file $T/msg
+Couldn't sign message (signer): agent refused operation
+Signing $T/msg failed: agent refused operation
+code=255
+All identities removed.
+### E: ssh -i cle port fermé
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+ssh: connect to host 127.0.0.1 port 1: Connection refused
+code=255
+--- log askpass
+### E2: ssh localhost:22
+ssh: connect to host localhost port 22: Connection refused
+code=255
+--- log askpass
+### F: ssh-add avec fd 7 non CLOEXEC
+Identity added: $T/cle (Baudouin@B612)
+ARGV1=Enter passphrase for $T/cle: $
+PROMPT=<absent>
+PPID=265691 DISPLAY=<absent> WAYLAND=<absent>
+FD=$T/fd7
+---
+T=$T

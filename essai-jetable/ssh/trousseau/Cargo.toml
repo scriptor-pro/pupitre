@@ -1,0 +1,9 @@
+[package]
+name = "trousseau-essai"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+secret-service = { version = "4", features = ["rt-async-io-crypto-rust"] }
+
+[workspace]

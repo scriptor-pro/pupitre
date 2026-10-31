@@ -1,0 +1,48 @@
+=== bus sans AUCUN service activable (aucun org.freedesktop.secrets)
+connect: ERREUR après 147.688994ms : zbus error: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.secrets was not provided by any .service files / Zbus(MethodError(OwnedErrorName("org.freedesktop.DBus.Error.ServiceUnknown"), Some("The name org.freedesktop.secrets was not provided by any .service files"), Msg { type: Error, serial: 3, sender: UniqueName("org.freedesktop.DBus"), reply-serial: 2, body: Signature("s"), fds: [] }))
+
+real	0m0,157s
+user	0m0,133s
+sys	0m0,016s
+code=0
+=== bus normal, activation automatique de gnome-keyring (sans déverrouillage, HOME neuf)
+dbus-daemon[267981]: [session uid=1000 pid=267981 pidfd=5] Activating service name='org.freedesktop.secrets' requested by ':1.0' (uid=1000 pid=267984 comm="/home/Baudouin/Documents/Projets/pupitre/essai-jet")
+** Message: 20:20:19.546: couldn't access control socket: /tmp/tmp.zawl71fPUB/run/keyring/control: Aucun fichier ou dossier de ce nom
+discover_other_daemon: 0dbus-daemon[267981]: [session uid=1000 pid=267981 pidfd=5] Successfully activated service 'org.freedesktop.secrets'
+connect: ok en 363.764333ms
+
+thread 'main' (267984) panicked at src/main.rs:19:43:
+collection par défaut: NoResult
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+real	0m0,378s
+user	0m0,276s
+sys	0m0,011s
+code=101
+=== gnome-keyring-daemon déverrouillé par mot de passe sur stdin (HOME neuf)
+connect: ok en 540.981486ms
+is_locked = Ok(false) en 6.166968ms
+écriture: ok
+recherche par attributs: 1 résultat(s)
+  secret = Ok("secret1")
+recherche autre clé: 0 résultat(s)
+suppression: ok, restant = 0
+
+real	0m0,654s
+user	0m0,504s
+sys	0m0,023s
+code=0
+=== même HOME, nouveau bus, daemon démarré SANS déverrouillage : collection verrouillée
+connect: ok en 299.727368ms
+is_locked = Ok(true) en 2.576668ms
+
+real	0m0,319s
+user	0m0,266s
+sys	0m0,013s
+code=0
+=== sans bus de session (DBUS_SESSION_BUS_ADDRESS absent)
+connect: ERREUR après 5.179742ms : no secret service provider or dbus session found / Unavailable
+
+real	0m0,029s
+user	0m0,011s
+sys	0m0,012s
