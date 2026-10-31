@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Session : un shell dans un pseudo-terminal, possédé par le processus de fond.
+//! Le tampon de relecture est tenu par le serveur, qui diffuse la sortie (voir `serveur`).
 
-use crate::relecture::{ReplayBuffer, REPLAY_CAPACITY};
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::{Pid, User};
 use portable_pty::{
@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
@@ -21,6 +21,8 @@ use std::time::Duration;
 /// Après la fin du shell, temps laissé à la lecture pour recevoir les derniers octets
 /// (si un processus d'arrière-plan garde le terminal ouvert, on n'attend pas plus).
 const ATTENTE_FIN_LECTURE: Duration = Duration::from_millis(500);
+/// Taille de la file d'événements d'une session (morceaux de 64 Kio au plus).
+const FILE_EVENEMENTS: usize = 64;
 /// Délai entre SIGHUP et SIGKILL quand une session est fermée.
 const DELAI_AVANT_SIGKILL: Duration = Duration::from_secs(2);
 /// Variables héritées qui décriraient mal le terminal de Pupitre.
@@ -68,7 +70,6 @@ pub struct Session {
     /// Le shell est chef de sa session et de son groupe (setsid) : pid = pgid.
     pid: Option<Pid>,
     termine: Arc<AtomicBool>,
-    relecture: Arc<Mutex<ReplayBuffer>>,
 }
 
 /// Un verrou empoisonné (panique d'un autre thread) reste utilisable : les données
@@ -144,22 +145,21 @@ impl Session {
             .and_then(|p| i32::try_from(p).ok())
             .map(Pid::from_raw);
         let termine = Arc::new(AtomicBool::new(false));
-        let relecture = Arc::new(Mutex::new(ReplayBuffer::new(REPLAY_CAPACITY)));
         let fin_envoyee = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = mpsc::channel();
+        // File bornée : si personne ne suit, la lecture ralentit le programme (contre-pression
+        // du PTY) au lieu de remplir la mémoire.
+        let (tx, rx) = mpsc::sync_channel(FILE_EVENEMENTS);
         let (fin_lecture_tx, fin_lecture_rx) = mpsc::channel::<()>();
 
-        // Thread de lecture : PTY → relecture + événements.
+        // Thread de lecture : PTY → événements.
         {
-            let (tx, relecture, fin_envoyee) = (tx.clone(), relecture.clone(), fin_envoyee.clone());
+            let (tx, fin_envoyee) = (tx.clone(), fin_envoyee.clone());
             let mut tueur_lecture = enfant.clone_killer();
             thread::Builder::new()
                 .name("pupitre-lecture".into())
                 .spawn(move || {
-                    let ok = catch_unwind(AssertUnwindSafe(|| {
-                        boucle_lecture(lecteur, &relecture, &tx)
-                    }))
-                    .is_ok();
+                    let ok =
+                        catch_unwind(AssertUnwindSafe(|| boucle_lecture(lecteur, &tx))).is_ok();
                     if !ok {
                         let _ = tueur_lecture.kill();
                         envoyer_fin(&tx, &fin_envoyee, None);
@@ -193,7 +193,6 @@ impl Session {
             tueur: Mutex::new(tueur),
             pid,
             termine,
-            relecture,
         };
         Ok((session, rx))
     }
@@ -226,11 +225,6 @@ impl Session {
             (Some(groupe), Some(pid)) => groupe > 0 && groupe != pid.as_raw(),
             _ => false,
         }
-    }
-
-    /// Contenu récent à rejouer pour une interface qui se (re)connecte.
-    pub fn replay(&self) -> Vec<u8> {
-        verrou(&self.relecture).snapshot()
     }
 
     /// Termine le shell et les processus de son terminal : SIGHUP (comme à la fermeture d'un
@@ -266,18 +260,13 @@ impl Drop for Session {
     }
 }
 
-fn boucle_lecture(
-    mut lecteur: Box<dyn Read + Send>,
-    relecture: &Mutex<ReplayBuffer>,
-    tx: &Sender<SessionEvent>,
-) {
+fn boucle_lecture(mut lecteur: Box<dyn Read + Send>, tx: &SyncSender<SessionEvent>) {
     let mut tampon = vec![0u8; 64 * 1024];
     loop {
         match lecteur.read(&mut tampon) {
             Ok(0) => break,
             Ok(n) => {
                 let donnees = tampon[..n].to_vec();
-                verrou(relecture).push(&donnees);
                 if tx.send(SessionEvent::Output(donnees)).is_err() {
                     break; // Plus personne n'écoute cette session.
                 }
@@ -289,7 +278,7 @@ fn boucle_lecture(
 }
 
 /// Envoie `Exited` une seule fois, quel que soit le thread qui constate la fin.
-fn envoyer_fin(tx: &Sender<SessionEvent>, deja: &AtomicBool, code: Option<i32>) {
+fn envoyer_fin(tx: &SyncSender<SessionEvent>, deja: &AtomicBool, code: Option<i32>) {
     if !deja.swap(true, Ordering::SeqCst) {
         let _ = tx.send(SessionEvent::Exited(code));
     }
@@ -448,13 +437,6 @@ mod tests {
         let (s, rx) = Session::open(&[], None, 80, 24, &[]).unwrap();
         s.write_input(b"echo $((2+3))z\n").unwrap();
         attendre(&rx, "5z");
-    }
-
-    #[test]
-    fn relecture_contient_la_sortie() {
-        let (s, rx) = ouvrir(&["/bin/sh", "-c", "printf trace"]);
-        attendre_fin(&rx);
-        assert!(String::from_utf8_lossy(&s.replay()).contains("trace"));
     }
 
     #[test]

@@ -19,4 +19,8 @@ path = "src/main.rs"
 
 [dependencies]
 portable-pty = "0.9"
-nix = { version = "0.30", features = ["user", "signal", "process"] }
+nix = { version = "0.30", features = ["user", "signal", "process", "fs"] }
+pupitre-proto = { path = "../proto" }
+
+[dev-dependencies]
+tempfile = "3"

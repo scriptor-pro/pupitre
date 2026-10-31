@@ -236,7 +236,9 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
   - Binaire `pupitre-fond [--socket CHEMIN]`.
 - Comportement : poignée de main `Hello{VERSION}` → `Welcome{VERSION}` (version différente → `Error("version")` puis fermeture) ; plusieurs clients ; `Output`/`Exited`/`Busy` diffusés à tous les clients ; `Attach` renvoie `Replay` ; **socket existant** : tenter une connexion — si elle échoue, supprimer le fichier et écouter ; si elle réussit, quitter avec le code 0 (un fond tourne déjà) ; arrêt automatique quand ni session ni client pendant `idle_exit` (5 s en production).
 
-- [ ] **Step 1 : Tests d'intégration** (dossier temporaire comme `XDG_RUNTIME_DIR`) :
+> **Écarts (2026-10-31)** : le tampon de relecture est tenu par le serveur (thread central) et non plus par `Session` (`replay()` retiré) : relecture et diffusion sont ainsi ordonnées, sans octet en double. File d'événements de session bornée (contre-pression du PTY). `socket_path()` calcule le chemin ; `preparer_dossier(socket)` crée/vérifie le dossier. Verrou `fond.lock` (flock) : un seul processus de fond par socket, un second quitte avec le code 0.
+
+- [x] **Step 1 : Tests d'intégration** (dossier temporaire comme `XDG_RUNTIME_DIR`) :
 ```rust
 #[test] fn poignee_de_main() { /* Hello{1} → Welcome{1} ; Hello{99} → Error contenant "version" */ }
 #[test] fn ouvrir_saisir_lire() { /* Open sh → Opened{id} ; Input "echo coucou\n" → Output contenant "coucou" */ }
@@ -246,10 +248,10 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
 #[test] fn arret_si_inactif() { /* idle_exit 200 ms, aucun client → run() retourne Ok en < 2 s */ }
 #[test] fn flux_massif_ne_bloque_pas() { /* session "yes | head -c 50000000" ; un second client envoie List et reçoit Sessions en < 1 s pendant le flux */ }
 ```
-- [ ] **Step 2 :** `cargo test -p pupitre-fond --test serveur` → échec.
-- [ ] **Step 3 :** Implémenter (threads + canaux ; un thread par client ; pas de blocage d'un client lent sur les autres : file d'envoi bornée par client, client trop lent déconnecté).
-- [ ] **Step 4 :** → PASS.
-- [ ] **Step 5 : Commit** — `feat(fond): serveur, multi-clients, arrêt automatique`
+- [x] **Step 2 :** `cargo test -p pupitre-fond --test serveur` → échec.
+- [x] **Step 3 :** Implémenter (threads + canaux ; un thread par client ; pas de blocage d'un client lent sur les autres : file d'envoi bornée par client, client trop lent déconnecté).
+- [x] **Step 4 :** → PASS.
+- [x] **Step 5 : Commit** — `feat(fond): serveur, multi-clients, arrêt automatique`
 
 ### Task 7 : Client côté interface
 

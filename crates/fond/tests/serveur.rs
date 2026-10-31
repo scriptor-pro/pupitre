@@ -1,0 +1,337 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Tests d'intégration du serveur de `pupitre-fond` : un vrai socket, de vrais shells.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use pupitre_fond::serveur::{preparer_dossier, run, socket_path};
+use pupitre_proto::{read_frame, write_frame, ClientMsg, ServerMsg, SessionId, VERSION};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+struct Serveur {
+    _dossier: tempfile::TempDir,
+    socket: PathBuf,
+    fin: mpsc::Receiver<std::io::Result<()>>,
+}
+
+fn demarrer(idle: Duration) -> Serveur {
+    let dossier = tempfile::tempdir().unwrap();
+    let socket = dossier.path().join("pupitre/fond.sock");
+    let (tx, fin) = mpsc::channel();
+    let s = socket.clone();
+    thread::spawn(move || {
+        let _ = tx.send(run(&s, idle));
+    });
+    Serveur {
+        _dossier: dossier,
+        socket,
+        fin,
+    }
+}
+
+struct Client {
+    lecture: UnixStream,
+    ecriture: UnixStream,
+}
+
+impl Client {
+    fn brut(socket: &Path) -> Client {
+        let limite = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(s) = UnixStream::connect(socket) {
+                s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+                return Client {
+                    ecriture: s.try_clone().unwrap(),
+                    lecture: s,
+                };
+            }
+            assert!(Instant::now() < limite, "serveur injoignable");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn connecter(socket: &Path) -> Client {
+        let mut c = Client::brut(socket);
+        c.envoyer(ClientMsg::Hello { version: VERSION });
+        assert_eq!(c.recevoir(), ServerMsg::Welcome { version: VERSION });
+        c
+    }
+
+    fn envoyer(&mut self, m: ClientMsg) {
+        write_frame(&mut self.ecriture, &m).unwrap();
+    }
+
+    fn recevoir(&mut self) -> ServerMsg {
+        read_frame(&mut self.lecture).unwrap()
+    }
+
+    /// Lit jusqu'au premier message accepté par `f`.
+    fn attendre<T>(&mut self, mut f: impl FnMut(&ServerMsg) -> Option<T>) -> T {
+        let limite = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < limite {
+            let m = self.recevoir();
+            if let Some(t) = f(&m) {
+                return t;
+            }
+        }
+        panic!("message attendu non reçu");
+    }
+
+    fn ouvrir(&mut self, argv: &[&str]) -> SessionId {
+        self.envoyer(ClientMsg::Open {
+            argv: Some(argv.iter().map(|s| s.to_string()).collect()),
+            cwd: None,
+            cols: 80,
+            rows: 24,
+        });
+        self.attendre(|m| match m {
+            ServerMsg::Opened { id } => Some(*id),
+            ServerMsg::OpenFailed { error } => panic!("{error}"),
+            _ => None,
+        })
+    }
+
+    /// Lit la sortie d'une session jusqu'à trouver `motif`.
+    fn sortie_contient(&mut self, id: SessionId, motif: &str) {
+        let mut tout = Vec::new();
+        self.attendre(|m| match m {
+            ServerMsg::Output { id: i, data } if *i == id => {
+                tout.extend(data);
+                String::from_utf8_lossy(&tout).contains(motif).then_some(())
+            }
+            _ => None,
+        })
+    }
+}
+
+#[test]
+fn poignee_de_main() {
+    let s = demarrer(Duration::from_secs(30));
+    Client::connecter(&s.socket);
+    let mut c = Client::brut(&s.socket);
+    c.envoyer(ClientMsg::Hello { version: 99 });
+    assert!(matches!(c.recevoir(), ServerMsg::Error(e) if e.contains("version")));
+    assert!(
+        read_frame::<_, ServerMsg>(&mut c.lecture).is_err(),
+        "connexion fermée après l'erreur"
+    );
+}
+
+#[test]
+fn hello_obligatoire() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::brut(&s.socket);
+    c.envoyer(ClientMsg::List);
+    assert!(matches!(c.recevoir(), ServerMsg::Error(_)));
+    assert!(read_frame::<_, ServerMsg>(&mut c.lecture).is_err());
+}
+
+#[test]
+fn ouvrir_saisir_lire() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    let id = c.ouvrir(&["/bin/sh"]);
+    c.envoyer(ClientMsg::Input {
+        id,
+        data: b"echo cou''cou\n".to_vec(),
+    });
+    c.sortie_contient(id, "coucou");
+}
+
+#[test]
+fn ouverture_impossible_signalee() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    c.envoyer(ClientMsg::Open {
+        argv: Some(vec!["/nexiste/pas".into()]),
+        cwd: None,
+        cols: 80,
+        rows: 24,
+    });
+    c.attendre(|m| match m {
+        ServerMsg::OpenFailed { .. } => Some(()),
+        ServerMsg::Opened { .. } => Some(()), // repli possible : Exited suivra
+        _ => None,
+    });
+}
+
+#[test]
+fn fin_de_session_diffusee() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut a = Client::connecter(&s.socket);
+    let mut b = Client::connecter(&s.socket);
+    let id = a.ouvrir(&["/bin/sh", "-c", "exit 4"]);
+    for c in [&mut a, &mut b] {
+        let code = c.attendre(|m| match m {
+            ServerMsg::Exited { id: i, code } if *i == id => Some(*code),
+            _ => None,
+        });
+        assert_eq!(code, Some(4));
+    }
+    a.envoyer(ClientMsg::List);
+    assert_eq!(
+        a.attendre(|m| if let ServerMsg::Sessions(v) = m {
+            Some(v.len())
+        } else {
+            None
+        }),
+        0
+    );
+}
+
+#[test]
+fn session_survit_au_client() {
+    let s = demarrer(Duration::from_secs(30));
+    let id = {
+        let mut a = Client::connecter(&s.socket);
+        let id = a.ouvrir(&["/bin/sh"]);
+        a.envoyer(ClientMsg::Input {
+            id,
+            data: b"echo tra''ce\n".to_vec(),
+        });
+        a.sortie_contient(id, "trace");
+        id
+    }; // a se déconnecte
+    thread::sleep(Duration::from_millis(200));
+    let mut b = Client::connecter(&s.socket);
+    b.envoyer(ClientMsg::List);
+    let v = b.attendre(|m| {
+        if let ServerMsg::Sessions(v) = m {
+            Some(v.clone())
+        } else {
+            None
+        }
+    });
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].id, id);
+    b.envoyer(ClientMsg::Attach { id });
+    let relu = b.attendre(|m| match m {
+        ServerMsg::Replay { id: i, data } if *i == id => Some(data.clone()),
+        _ => None,
+    });
+    assert!(String::from_utf8_lossy(&relu).contains("trace"));
+}
+
+#[test]
+fn fermer_une_session() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    let id = c.ouvrir(&["/bin/sh"]);
+    c.envoyer(ClientMsg::Close { id });
+    c.attendre(|m| matches!(m, ServerMsg::Exited { id: i, .. } if *i == id).then_some(()));
+}
+
+#[test]
+fn session_inconnue_signalee() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    c.envoyer(ClientMsg::Input {
+        id: 12345,
+        data: b"x".to_vec(),
+    });
+    assert!(matches!(c.recevoir(), ServerMsg::Error(_)));
+    c.envoyer(ClientMsg::List); // la connexion reste utilisable
+    assert!(matches!(c.recevoir(), ServerMsg::Sessions(_)));
+}
+
+#[test]
+fn occupation_diffusee() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    let id = c.ouvrir(&["/bin/sh"]);
+    c.envoyer(ClientMsg::Input {
+        id,
+        data: b"sleep 1\n".to_vec(),
+    });
+    c.attendre(|m| matches!(m, ServerMsg::Busy { id: i, busy: true } if *i == id).then_some(()));
+    c.attendre(|m| matches!(m, ServerMsg::Busy { id: i, busy: false } if *i == id).then_some(()));
+}
+
+#[test]
+fn sans_xdg_runtime_dir_repli_sur_tmp() {
+    std::env::remove_var("XDG_RUNTIME_DIR");
+    let uid = nix::unistd::getuid();
+    let attendu = PathBuf::from(format!("/tmp/pupitre-{uid}/fond.sock"));
+    assert_eq!(socket_path(), attendu);
+    preparer_dossier(&attendu).unwrap();
+    let m = std::fs::metadata(attendu.parent().unwrap()).unwrap();
+    assert_eq!(m.permissions().mode() & 0o777, 0o700);
+}
+
+#[test]
+fn dossier_trop_ouvert_refuse() {
+    let d = tempfile::tempdir().unwrap();
+    let dossier = d.path().join("pupitre");
+    std::fs::create_dir(&dossier).unwrap();
+    std::fs::set_permissions(&dossier, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert!(preparer_dossier(&dossier.join("fond.sock")).is_err());
+}
+
+#[test]
+fn socket_perime_est_remplace() {
+    let dossier = tempfile::tempdir().unwrap();
+    let socket = dossier.path().join("pupitre/fond.sock");
+    preparer_dossier(&socket).unwrap();
+    // Un socket abandonné : lié puis fermé, le fichier reste.
+    drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+    assert!(socket.exists());
+    let s = socket.clone();
+    thread::spawn(move || run(&s, Duration::from_secs(30)));
+    Client::connecter(&socket);
+}
+
+#[test]
+fn second_fond_s_arrete_sans_erreur() {
+    let s = demarrer(Duration::from_secs(30));
+    Client::connecter(&s.socket);
+    let debut = Instant::now();
+    run(&s.socket, Duration::from_secs(30)).unwrap();
+    assert!(debut.elapsed() < Duration::from_secs(2));
+    Client::connecter(&s.socket); // le premier tourne toujours
+}
+
+#[test]
+fn arret_si_inactif() {
+    let s = demarrer(Duration::from_millis(200));
+    let r = s
+        .fin
+        .recv_timeout(Duration::from_secs(2))
+        .expect("le serveur ne s'est pas arrêté");
+    r.unwrap();
+    assert!(!s.socket.exists(), "socket supprimé à l'arrêt");
+}
+
+#[test]
+fn pas_d_arret_tant_qu_une_session_vit() {
+    let s = demarrer(Duration::from_millis(200));
+    {
+        let mut c = Client::connecter(&s.socket);
+        c.ouvrir(&["/bin/sh"]);
+    }
+    assert!(
+        s.fin.recv_timeout(Duration::from_secs(1)).is_err(),
+        "arrêté malgré une session"
+    );
+}
+
+#[test]
+fn flux_massif_ne_bloque_pas() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut a = Client::connecter(&s.socket);
+    let id = a.ouvrir(&["/bin/sh", "-c", "yes | head -c 50000000; sleep 5"]);
+    // a ne lit plus rien : il ne doit pas bloquer le serveur.
+    let _ = id;
+    thread::sleep(Duration::from_millis(300));
+    let mut b = Client::connecter(&s.socket);
+    let debut = Instant::now();
+    b.envoyer(ClientMsg::List);
+    b.attendre(|m| matches!(m, ServerMsg::Sessions(_)).then_some(()));
+    assert!(
+        debut.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        debut.elapsed()
+    );
+}
