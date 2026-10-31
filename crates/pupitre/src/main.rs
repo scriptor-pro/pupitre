@@ -9,6 +9,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use pupitre::fenetre::Pupitre;
 use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
+use pupitre::verification;
 use pupitre_config::{charger, chemin_config, creer_defaut_si_absent, Config};
 use pupitre_fond::serveur::socket_path;
 use std::cell::RefCell;
@@ -17,6 +18,22 @@ use std::rc::Rc;
 const ID_APPLICATION: &str = "fr.pupitre.Pupitre";
 
 fn main() -> glib::ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        None => {}
+        Some("check") => {
+            let code = verification::executer(&args[1..], &mut std::io::stdout());
+            return glib::ExitCode::from(u8::try_from(code).unwrap_or(1));
+        }
+        Some("-h" | "--help" | "aide") => {
+            print!("{}", verification::USAGE);
+            return glib::ExitCode::SUCCESS;
+        }
+        Some(autre) => {
+            eprint!("Argument inconnu « {autre} ».\n{}", verification::USAGE);
+            return glib::ExitCode::from(2);
+        }
+    }
     // Avant toute création de widget : les polices doivent être connues de fontconfig.
     match dossier_polices() {
         Some(d) if enregistrer_polices_embarquees(&d) => {}
@@ -34,28 +51,18 @@ fn main() -> glib::ExitCode {
                 p.nouvelle_fenetre();
             }
             None => {
-                *pupitre.borrow_mut() = Some(Pupitre::demarrer(app, socket_path(), lire_config()));
+                let chemin = chemin_config();
+                if let Err(e) = creer_defaut_si_absent(&chemin) {
+                    eprintln!("pupitre: impossible de créer {} : {e}", chemin.display());
+                }
+                let p = Pupitre::demarrer(app, socket_path(), Config::default());
+                // Invalide : valeurs par défaut gardées, message avec la ligne fautive.
+                p.appliquer_config(charger(&chemin));
+                p.surveiller_config(chemin);
+                *pupitre.borrow_mut() = Some(p);
             }
         }
     });
-    // Les arguments seront traités plus tard (`pupitre check`, Task 10).
+    // Arguments déjà traités ci-dessus : GTK n'en reçoit aucun.
     app.run_with_args::<&str>(&[])
-}
-
-/// Configuration de l'utilisateur ; en cas de problème, valeurs par défaut + message.
-fn lire_config() -> Config {
-    let chemin = chemin_config();
-    if let Err(e) = creer_defaut_si_absent(&chemin) {
-        eprintln!("pupitre: impossible de créer {} : {e}", chemin.display());
-    }
-    match charger(&chemin) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!(
-                "pupitre: {} : {e} ; valeurs par défaut utilisées",
-                chemin.display()
-            );
-            Config::default()
-        }
-    }
 }

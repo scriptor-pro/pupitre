@@ -6,6 +6,8 @@
 //! Un seul processus GTK : les tests s'exécutent l'un après l'autre dans `main`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod commun;
+
 use gtk::glib;
 use gtk::prelude::*;
 use pupitre::apparence::{suivre_preference_systeme, theme_systeme, Preference};
@@ -34,6 +36,7 @@ fn main() {
         );
         return;
     }
+    commun::bus_prive();
     let racine = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     compiler(&racine);
 

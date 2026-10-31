@@ -14,6 +14,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use pupitre::client::{connect_or_spawn_at, Client};
 use pupitre::fenetre::{action_pour_touche, FenetrePupitre, Onglet, Pupitre};
+use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
 use pupitre_config::Config;
 use pupitre_proto::{ClientMsg, ServerMsg, SessionInfo};
 use std::path::{Path, PathBuf};
@@ -28,8 +29,10 @@ fn main() {
     if !actives() {
         return;
     }
+    bus_prive();
     compiler();
     let _perso = isoler_dossiers();
+    assert!(enregistrer_polices_embarquees(&dossier_polices().unwrap()));
     glib::set_prgname(Some(NOM_APPLI));
     glib::set_application_name(NOM_APPLI);
     gtk::init().unwrap();

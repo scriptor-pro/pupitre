@@ -6,15 +6,19 @@
 //! fond sont celles d'une interface disparue (l'application est unique par session de
 //! bureau) ; elles sont rattachées et leur tampon de relecture est rejoué.
 
-use crate::apparence::{suivre_preference_systeme, theme_systeme};
+use crate::apparence::{suivre_preference_systeme, theme_systeme, Preference};
 use crate::client::{connect_or_spawn_at, Client, CONNEXION_PERDUE};
+use crate::messages::{ActionMessage, BandeauMessages};
+use crate::rechargement::{surveiller, surveiller_fichiers, Surveillance};
 use crate::taille::{largeur_ecran, taille_ouverture};
 use crate::terminal::TerminalOnglet;
 use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use pupitre_config::{theme_clair, theme_sombre, Config, Theme, ThemeChoix};
+use pupitre_config::{
+    charger_theme, check_theme, theme_clair, theme_sombre, Config, ErreurConfig, Theme, ThemeChoix,
+};
 use pupitre_proto::{ClientMsg, ServerMsg, SessionId};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -29,6 +33,17 @@ const GRILLE_PAR_DEFAUT: (u16, u16) = (80, 24);
 const DELAI_REDESSIN: Duration = Duration::from_millis(150);
 const TITRE_PAR_DEFAUT: &str = "Terminal";
 const GROUPE_ONGLETS: &str = "pupitre-onglets";
+
+/// Clés des messages persistants (un seul message par clé).
+const CLE_PANNE: &str = "panne";
+const CLE_CONFIG: &str = "config";
+const CLE_THEME: &str = "theme";
+const CLE_CONTRASTE: &str = "contraste";
+const CLE_POLICE: &str = "police";
+const CLE_SURVEILLANCE: &str = "surveillance";
+/// Police embarquée, utilisée si celle demandée est introuvable.
+const POLICE_DE_SECOURS: &str = "B612 Mono";
+const TAILLE_DE_SECOURS: i32 = 11;
 
 const MSG_FOND_ARRETE: &str = "Le processus de fond s'est arrêté : les shells ouverts sont perdus.";
 const BOUTON_NOUVEAU_TERMINAL: &str = "Ouvrir un nouveau terminal";
@@ -180,8 +195,16 @@ enum Attente {
 pub struct Pupitre {
     app: gtk::Application,
     socket: PathBuf,
-    config: Config,
+    /// Configuration lue (dernière valide).
+    config: RefCell<Config>,
+    /// Configuration appliquée (police de secours éventuelle).
+    config_effective: RefCell<Config>,
     theme: RefCell<Theme>,
+    preference: Cell<Preference>,
+    /// Messages persistants (clé, texte) montrés dans toutes les fenêtres.
+    messages: RefCell<Vec<(String, String)>>,
+    surveillance_config: RefCell<Option<Surveillance>>,
+    surveillance_theme: RefCell<Option<(PathBuf, Surveillance)>>,
     client: RefCell<Option<Rc<Client>>>,
     /// Numéro de la connexion en cours : les messages d'une connexion remplacée sont ignorés.
     generation: Cell<u64>,
@@ -198,12 +221,16 @@ impl Pupitre {
     /// Se connecte au processus de fond (en le lançant au besoin), puis ouvre la première
     /// fenêtre : avec les sessions orphelines s'il y en a (reprise), sinon avec un shell neuf.
     pub fn demarrer(app: &gtk::Application, socket: PathBuf, config: Config) -> Rc<Pupitre> {
-        let theme = theme_initial(&config.theme);
         let p = Rc::new(Pupitre {
             app: app.clone(),
             socket,
-            config,
-            theme: RefCell::new(theme.clone()),
+            config: RefCell::new(config.clone()),
+            config_effective: RefCell::new(config.clone()),
+            theme: RefCell::new(theme_sombre()),
+            preference: Cell::new(Preference::SansPreference),
+            messages: RefCell::new(Vec::new()),
+            surveillance_config: RefCell::new(None),
+            surveillance_theme: RefCell::new(None),
             client: RefCell::new(None),
             generation: Cell::new(0),
             attend_liste: Cell::new(false),
@@ -212,7 +239,7 @@ impl Pupitre {
             fenetres: RefCell::new(Vec::new()),
             garde: RefCell::new(Some(app.hold())),
         });
-        p.changer_theme(theme);
+        p.appliquer_config(Ok(config));
         // Fenêtre fermée (quelle qu'en soit la raison) : retirée de la liste. Le signal
         // `destroy` ne convient pas : il n'arrive qu'à la dernière référence relâchée.
         let faible = Rc::downgrade(&p);
@@ -227,14 +254,15 @@ impl Pupitre {
                 });
             }
         });
-        if p.config.theme == ThemeChoix::Systeme {
-            let faible = Rc::downgrade(&p);
-            suivre_preference_systeme(move |pref| {
-                if let Some(p) = faible.upgrade() {
+        let faible = Rc::downgrade(&p);
+        suivre_preference_systeme(move |pref| {
+            if let Some(p) = faible.upgrade() {
+                p.preference.set(pref);
+                if p.config.borrow().theme == ThemeChoix::Systeme {
                     p.changer_theme(theme_systeme(pref));
                 }
-            });
-        }
+            }
+        });
         match p.connecter() {
             Ok(()) => {
                 p.attend_liste.set(true);
@@ -249,6 +277,146 @@ impl Pupitre {
             }
         }
         p
+    }
+
+    /// Applique une configuration relue : valide → appliquée à tous les onglets ;
+    /// invalide → la précédente est gardée et un message persistant donne la ligne.
+    pub fn appliquer_config(self: &Rc<Self>, r: Result<Config, ErreurConfig>) {
+        match r {
+            Ok(c) => {
+                self.poser_message(CLE_CONFIG, None);
+                *self.config.borrow_mut() = c;
+            }
+            Err(e) => {
+                self.poser_message(CLE_CONFIG, Some(format!("Configuration invalide, {e}")));
+                return;
+            }
+        }
+        self.reappliquer();
+    }
+
+    /// Relit la configuration `chemin` à chaque enregistrement (et son thème s'il est
+    /// dans un fichier).
+    pub fn surveiller_config(self: &Rc<Self>, chemin: PathBuf) {
+        let faible = Rc::downgrade(self);
+        match surveiller(&chemin, move |r| {
+            if let Some(p) = faible.upgrade() {
+                p.appliquer_config(r);
+            }
+        }) {
+            Ok(s) => {
+                *self.surveillance_config.borrow_mut() = Some(s);
+                self.poser_message(CLE_SURVEILLANCE, None);
+            }
+            Err(e) => self.poser_message(
+                CLE_SURVEILLANCE,
+                Some(format!(
+                    "Rechargement automatique de la configuration indisponible : {e}"
+                )),
+            ),
+        }
+    }
+
+    /// Résout thème et police de la configuration courante, puis applique.
+    fn reappliquer(self: &Rc<Self>) {
+        let config = self.config.borrow().clone();
+        let theme = match &config.theme {
+            ThemeChoix::Sombre => Some(theme_sombre()),
+            ThemeChoix::Clair => Some(theme_clair()),
+            ThemeChoix::Systeme => Some(theme_systeme(self.preference.get())),
+            ThemeChoix::Fichier(chemin) => match charger_theme(chemin) {
+                Ok(t) => {
+                    self.poser_message(CLE_THEME, None);
+                    Some(t)
+                }
+                Err(e) => {
+                    self.poser_message(
+                        CLE_THEME,
+                        Some(format!(
+                            "Thème {} illisible, {e} : thème précédent conservé",
+                            chemin.display()
+                        )),
+                    );
+                    None
+                }
+            },
+        };
+        if !matches!(config.theme, ThemeChoix::Fichier(_)) {
+            self.poser_message(CLE_THEME, None);
+        }
+        self.suivre_fichier_de_theme(&config.theme);
+
+        let mut effective = config.clone();
+        match police_de_secours(&config.police) {
+            Some((famille, remplacement)) => {
+                self.poser_message(
+                    CLE_POLICE,
+                    Some(format!(
+                        "Police « {famille} » introuvable : {POLICE_DE_SECOURS} utilisée."
+                    )),
+                );
+                effective.police = remplacement;
+            }
+            None => self.poser_message(CLE_POLICE, None),
+        }
+        *self.config_effective.borrow_mut() = effective;
+
+        let theme = theme.unwrap_or_else(|| self.theme.borrow().clone());
+        let problemes = check_theme(&theme);
+        self.poser_message(
+            CLE_CONTRASTE,
+            (!problemes.is_empty()).then(|| {
+                let liste: Vec<String> = problemes.iter().map(|p| p.to_string()).collect();
+                format!(
+                    "Thème « {} » : contraste insuffisant — {}",
+                    theme.nom,
+                    liste.join(" ; ")
+                )
+            }),
+        );
+        self.changer_theme(theme);
+    }
+
+    /// Surveille le fichier de thème choisi (et lui seul).
+    fn suivre_fichier_de_theme(self: &Rc<Self>, choix: &ThemeChoix) {
+        let ThemeChoix::Fichier(chemin) = choix else {
+            *self.surveillance_theme.borrow_mut() = None;
+            return;
+        };
+        if self
+            .surveillance_theme
+            .borrow()
+            .as_ref()
+            .is_some_and(|(c, _)| c == chemin)
+        {
+            return;
+        }
+        let faible = Rc::downgrade(self);
+        match surveiller_fichiers(std::slice::from_ref(chemin), move || {
+            if let Some(p) = faible.upgrade() {
+                p.reappliquer();
+            }
+        }) {
+            Ok(s) => *self.surveillance_theme.borrow_mut() = Some((chemin.clone(), s)),
+            Err(e) => {
+                *self.surveillance_theme.borrow_mut() = None;
+                eprintln!("pupitre: {e}");
+            }
+        }
+    }
+
+    /// Pose (ou retire) un message persistant dans toutes les fenêtres, présentes et à venir.
+    fn poser_message(&self, cle: &str, texte: Option<String>) {
+        {
+            let mut m = self.messages.borrow_mut();
+            m.retain(|(c, _)| c != cle);
+            if let Some(t) = &texte {
+                m.push((cle.to_string(), t.clone()));
+            }
+        }
+        for f in self.fenetres() {
+            f.0.bandeau.poser(cle, texte.as_deref());
+        }
     }
 
     /// Fenêtres ouvertes.
@@ -315,8 +483,9 @@ impl Pupitre {
         if let Some(r) = gtk::Settings::default() {
             r.set_gtk_application_prefer_dark_theme(theme.nom != "clair");
         }
+        let config = self.config_effective.borrow();
         for o in self.onglets.borrow().iter() {
-            o.terminal.appliquer(&self.config, &theme);
+            o.terminal.appliquer(&config, &theme);
         }
         *self.theme.borrow_mut() = theme;
     }
@@ -382,7 +551,7 @@ impl Pupitre {
                 match attente {
                     Some(Attente::NouvelOnglet(f)) => {
                         if let Some(f) = f.upgrade() {
-                            FenetrePupitre(f).afficher_message(&message, None);
+                            FenetrePupitre(f).afficher_message(&message);
                         }
                     }
                     Some(Attente::Remplacer(o)) => {
@@ -468,7 +637,7 @@ impl Pupitre {
             self.retirer_onglet(&o);
         }
         for f in self.fenetres() {
-            f.masquer_message();
+            f.masquer_panne();
         }
         fenetre.ouvrir_session();
     }
@@ -494,31 +663,10 @@ impl Pupitre {
     }
 }
 
-fn theme_initial(choix: &ThemeChoix) -> Theme {
-    match choix {
-        ThemeChoix::Sombre | ThemeChoix::Systeme => theme_sombre(),
-        ThemeChoix::Clair => theme_clair(),
-        ThemeChoix::Fichier(chemin) => {
-            // Les thèmes en fichier arrivent avec le rechargement de configuration (Task 10).
-            eprintln!(
-                "pupitre: thème {} pas encore pris en charge ; thème sombre utilisé",
-                chemin.display()
-            );
-            theme_sombre()
-        }
-    }
-}
-
-/// Action du bouton du bandeau de messages.
-pub type ActionMessage = Rc<dyn Fn()>;
-
 pub struct FenetreInterne {
     fenetre: gtk::ApplicationWindow,
     carnet: gtk::Notebook,
-    bandeau: gtk::Box,
-    bandeau_texte: gtk::Label,
-    bandeau_bouton: gtk::Button,
-    bandeau_action: RefCell<Option<ActionMessage>>,
+    bandeau: Rc<BandeauMessages>,
     /// Ne pas fermer la fenêtre quand son dernier onglet part (reconnexion en cours).
     garder_ouverte: Cell<bool>,
     fermee: Cell<bool>,
@@ -549,28 +697,10 @@ impl FenetrePupitre {
         carnet.popup_enable();
         carnet.set_action_widget(&bouton_menu(), gtk::PackType::End);
 
-        let bandeau_texte = gtk::Label::builder()
-            .wrap(true)
-            .selectable(true)
-            .xalign(0.0)
-            .hexpand(true)
-            .build();
-        let bandeau_bouton = gtk::Button::new();
-        let bandeau = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(12)
-            .margin_start(12)
-            .margin_end(12)
-            .margin_top(6)
-            .margin_bottom(6)
-            .visible(false)
-            .accessible_role(gtk::AccessibleRole::Alert)
-            .build();
-        bandeau.append(&bandeau_texte);
-        bandeau.append(&bandeau_bouton);
+        let bandeau = BandeauMessages::new();
 
         let boite = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        boite.append(&bandeau);
+        boite.append(bandeau.widget());
         boite.append(&carnet);
         fenetre.set_child(Some(&boite));
 
@@ -578,23 +708,13 @@ impl FenetrePupitre {
             fenetre,
             carnet,
             bandeau,
-            bandeau_texte,
-            bandeau_bouton,
-            bandeau_action: RefCell::new(None),
             garder_ouverte: Cell::new(false),
             fermee: Cell::new(false),
             pupitre: Rc::downgrade(pupitre),
         }));
-        let faible = Rc::downgrade(&f.0);
-        f.0.bandeau_bouton.connect_clicked(move |_| {
-            // Action copiée avant l'appel : elle peut remplacer ou masquer le message.
-            let action = faible
-                .upgrade()
-                .and_then(|f| f.bandeau_action.borrow().clone());
-            if let Some(a) = action {
-                a();
-            }
-        });
+        for (cle, texte) in pupitre.messages.borrow().iter() {
+            f.0.bandeau.poser(cle, Some(texte));
+        }
         f.installer_actions();
         f.installer_signaux();
         pupitre.fenetres.borrow_mut().push(f.clone());
@@ -686,63 +806,46 @@ impl FenetrePupitre {
         nouvelle.fenetre().present();
     }
 
-    /// Texte du bandeau de messages, s'il est affiché.
+    /// Premier message affiché dans la fenêtre, s'il y en a un.
     pub fn message(&self) -> Option<String> {
-        self.0
-            .bandeau
-            .is_visible()
-            .then(|| self.0.bandeau_texte.text().to_string())
+        self.0.bandeau.textes().into_iter().next()
     }
 
-    /// Équivaut à un clic sur le bouton du bandeau.
+    /// Messages affichés dans la fenêtre.
+    pub fn messages(&self) -> Vec<String> {
+        self.0.bandeau.textes()
+    }
+
+    /// Équivaut à un clic sur « Ouvrir un nouveau terminal » du message de panne.
     pub fn activer_message(&self) {
-        if self.0.bandeau_bouton.is_visible() {
-            self.0.bandeau_bouton.emit_clicked();
-        }
+        self.0.bandeau.activer(CLE_PANNE);
     }
 
-    /// Affiche un message persistant (lu par le lecteur d'écran), avec un bouton éventuel.
-    pub fn afficher_message(&self, texte: &str, bouton: Option<(&str, ActionMessage)>) {
-        self.0.bandeau_texte.set_text(texte);
-        match bouton {
-            Some((etiquette, action)) => {
-                self.0.bandeau_bouton.set_label(etiquette);
-                self.0.bandeau_bouton.set_visible(true);
-                *self.0.bandeau_action.borrow_mut() = Some(action);
-            }
-            None => {
-                self.0.bandeau_bouton.set_visible(false);
-                *self.0.bandeau_action.borrow_mut() = None;
-            }
-        }
-        self.0.bandeau.set_visible(true);
-        self.0
-            .bandeau
-            .announce(texte, gtk::AccessibleAnnouncementPriority::High);
+    /// Affiche un message persistant (lu par le lecteur d'écran).
+    pub fn afficher_message(&self, texte: &str) {
+        self.0.bandeau.afficher(texte, None);
     }
 
-    pub fn masquer_message(&self) {
-        self.0.bandeau.set_visible(false);
-        *self.0.bandeau_action.borrow_mut() = None;
+    fn masquer_panne(&self) {
+        self.0.bandeau.poser(CLE_PANNE, None);
     }
 
     fn signaler_panne(&self, texte: &str) {
         let faible = Rc::downgrade(&self.0);
-        self.afficher_message(
-            texte,
-            Some((
-                BOUTON_NOUVEAU_TERMINAL,
-                Rc::new(move || {
-                    if let Some(f) = faible.upgrade() {
-                        let f = FenetrePupitre(f);
-                        if let Some(p) = f.pupitre() {
-                            p.reconnecter(&f);
-                        }
-                    }
-                }),
-            )),
+        let action: ActionMessage = Rc::new(move || {
+            if let Some(f) = faible.upgrade() {
+                let f = FenetrePupitre(f);
+                if let Some(p) = f.pupitre() {
+                    p.reconnecter(&f);
+                }
+            }
+        });
+        self.0.bandeau.poser_avec_action(
+            CLE_PANNE,
+            Some(texte),
+            Some((BOUTON_NOUVEAU_TERMINAL, action)),
         );
-        self.0.bandeau_bouton.grab_focus();
+        self.0.bandeau.donner_focus(CLE_PANNE);
     }
 
     fn installer_actions(&self) {
@@ -904,7 +1007,7 @@ impl FenetrePupitre {
 }
 
 fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet> {
-    let terminal = TerminalOnglet::new(client, id, &p.config, &p.theme.borrow());
+    let terminal = TerminalOnglet::new(client, id, &p.config_effective.borrow(), &p.theme.borrow());
     let etiquette = gtk::Label::builder()
         .label(TITRE_PAR_DEFAUT)
         .ellipsize(gtk::pango::EllipsizeMode::End)
@@ -1004,6 +1107,34 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
     });
     o.terminal.terminal().add_controller(entree_terminal);
     o
+}
+
+/// Si la famille de `police` est introuvable : `(famille demandée, police de secours à la
+/// même taille)`. `None` si la police est disponible.
+fn police_de_secours(police: &str) -> Option<(String, String)> {
+    let demandee = gtk::pango::FontDescription::from_string(police);
+    let famille = demandee.family().map(|f| f.to_string()).unwrap_or_default();
+    let contexte = gtk::Label::new(None).pango_context();
+    let connue = !famille.is_empty()
+        && famille.split(',').any(|f| {
+            let f = f.trim();
+            contexte
+                .list_families()
+                .iter()
+                .any(|x| x.name().eq_ignore_ascii_case(f))
+        });
+    if connue {
+        return None;
+    }
+    let mut secours = gtk::pango::FontDescription::new();
+    secours.set_family(POLICE_DE_SECOURS);
+    let taille = if demandee.size() > 0 {
+        demandee.size()
+    } else {
+        TAILLE_DE_SECOURS * gtk::pango::SCALE
+    };
+    secours.set_size(taille);
+    Some((famille, secours.to_string()))
 }
 
 fn menu_onglet() -> gio::Menu {

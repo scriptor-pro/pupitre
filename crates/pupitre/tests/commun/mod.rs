@@ -18,6 +18,25 @@ pub fn actives() -> bool {
     false
 }
 
+/// Relance ce programme de test dans son propre bus D-Bus de session (services activés,
+/// noms réservés et bus d'accessibilité ne se mélangent pas d'un programme de test à
+/// l'autre). Ne revient que dans le processus relancé.
+pub fn bus_prive() {
+    const MARQUE: &str = "PUPITRE_TEST_BUS_PRIVE";
+    if std::env::var_os(MARQUE).is_some() {
+        return;
+    }
+    let exe = std::env::current_exe().unwrap();
+    let statut = Command::new("dbus-run-session")
+        .arg("--")
+        .arg(exe)
+        .args(std::env::args_os().skip(1))
+        .env(MARQUE, "1")
+        .status()
+        .expect("dbus-run-session (paquet dbus)");
+    std::process::exit(statut.code().unwrap_or(1));
+}
+
 pub fn racine() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }

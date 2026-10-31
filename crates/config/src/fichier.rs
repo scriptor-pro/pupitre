@@ -71,6 +71,12 @@ impl std::error::Error for ErreurConfig {}
 /// Lit et valide le fichier. Ne panique jamais ; en cas d'erreur, l'appelant garde
 /// la configuration précédente (ou les défauts) et affiche le message.
 pub fn charger(chemin: &Path) -> Result<Config, ErreurConfig> {
+    lire_toml(chemin)
+}
+
+/// Lit un fichier TOML (taille bornée, UTF-8) et le désérialise ; les erreurs portent le
+/// numéro de ligne et un message en français.
+pub(crate) fn lire_toml<T: de::DeserializeOwned>(chemin: &Path) -> Result<T, ErreurConfig> {
     let sans_ligne = |message: String| ErreurConfig {
         ligne: None,
         message,
@@ -138,9 +144,9 @@ fn traduire(m: &str) -> String {
 }
 
 /// Préfixe des messages écrits par Pupitre (déjà en français), retiré par `traduire`.
-const MARQUE: &str = "pupitre: ";
+pub(crate) const MARQUE: &str = "pupitre: ";
 
-fn notre<E: de::Error>(message: String) -> E {
+pub(crate) fn notre<E: de::Error>(message: String) -> E {
     E::custom(format!("{MARQUE}{message}"))
 }
 

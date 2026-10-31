@@ -345,7 +345,9 @@ reprise_apres_plantage               : taper "echo avant-plantage" ; kill -9 de 
   - `pupitre check [--theme CHEMIN]` : affiche chaque `ProblemeContraste` (`"couleur 8 (#585b70) sur le fond (#1e1e2e) : 2,46:1, minimum 4,5:1"`), code de sortie 0 si aucun, 1 sinon.
 - Comportement : configuration valide → appliquée à tous les onglets ; invalide → configuration précédente conservée + message persistant « Configuration invalide, ligne N : … » ; thème avec problèmes de contraste → appliqué + message persistant listant les problèmes ; police introuvable (aucune famille fontconfig correspondante) → B612 Mono + message.
 
-- [ ] **Step 1 : Tests** :
+> **Précisions (2026-10-31)** : **format des fichiers de thème** défini ici (absent de la conception) : `nom`, `base` (« sombre »/« clair », héritée), `fond`, `texte`, `curseur`, `selection_fond`, `selection_texte`, `palette` (16 couleurs), `[couleurs]` (couleur par numéro), `[roles]` (« texte », « fond », « texte et fond ») ; `pupitre_config::charger_theme`. `ProblemeContraste` s'affiche au format demandé (`Display`). `surveiller` renvoie une `Surveillance` à garder ; le fichier de thème choisi est surveillé aussi. `BandeauMessages` : messages à clé (`poser`), temporaires ou persistants (« Fermer »), texte non focalisable (décrit les boutons). `pupitre check` sans `--theme` vérifie la configuration puis son thème (« systeme » : sombre et clair), sans rien écrire ; code 2 si arguments incorrects. Tests : `crates/pupitre/tests/{check.rs,gui_configuration.rs}` ; chaque programme de test graphique se relance dans son propre bus D-Bus (`commun::bus_prive`).
+
+- [x] **Step 1 : Tests** :
 ```text
 check_themes_integres_ok          : `pupitre check` → code 0.
 check_theme_mocha_echoue          : thème fichier avec 8 = #585b70 → code 1, sortie contient "2,46:1".
@@ -353,8 +355,8 @@ rechargement_change_les_couleurs  : écrire theme = "clair" → couleur de fond 
 config_invalide_garde_l_ancienne  : écrire "historique_lignes = \"x\"" → fond inchangé, message contenant "ligne 1" dans l'arbre AT-SPI.
 police_inconnue_replie_sur_b612   : police = "Nexiste Pas 11" → famille effective "B612 Mono", message présent.
 ```
-- [ ] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** → PASS.
-- [ ] **Step 5 : Commit** — `feat(pupitre): configuration à chaud, messages, pupitre check`
+- [x] **Step 2 :** → échec. **Step 3 :** Implémenter. **Step 4 :** → PASS.
+- [x] **Step 5 : Commit** — `feat(pupitre): configuration à chaud, messages, pupitre check`
 
 ### Task 11 : Clavier, zoom, recherche, copie, liens, cloche
 

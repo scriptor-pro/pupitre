@@ -35,6 +35,33 @@ pub struct ProblemeContraste {
     pub minimum: f64,
 }
 
+impl std::fmt::Display for ProblemeContraste {
+    /// Ex. « couleur 8 (#585b70) sur le fond (#1e1e2e) : 2,46:1, minimum 4,5:1 ».
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} : {}:1, minimum {}:1",
+            self.description,
+            nombre_fr(self.ratio, 2),
+            nombre_fr(self.minimum, 1)
+        )
+    }
+}
+
+/// Nombre à virgule décimale (écriture française), sans « ,0 » final inutile.
+fn nombre_fr(v: f64, decimales: usize) -> String {
+    let mut s = format!("{v:.decimales$}");
+    if s.contains('.') {
+        while s.ends_with('0') {
+            s.pop();
+        }
+        if s.ends_with('.') {
+            s.pop();
+        }
+    }
+    s.replace('.', ",")
+}
+
 /// Contraste minimum du texte (WCAG AA, 1.4.3).
 const MIN_TEXTE: f64 = 4.5;
 /// Contraste minimum du curseur (élément non textuel, WCAG 1.4.11).

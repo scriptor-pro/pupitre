@@ -16,6 +16,7 @@ async-channel = "2"
 pupitre-proto = { path = "../proto" }
 pupitre-fond = { path = "../fond" }
 pupitre-config = { path = "../config" }
+notify = "8"
 
 [dev-dependencies]
 tempfile = "3"
@@ -26,4 +27,8 @@ harness = false
 
 [[test]]
 name = "gui_onglets"
+harness = false
+
+[[test]]
+name = "gui_configuration"
 harness = false
