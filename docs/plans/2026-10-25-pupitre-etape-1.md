@@ -407,11 +407,16 @@ messages_annonces            : un message du bandeau produit un événement d'an
 - [x] **Step 5 :** Rédiger `docs/orca-liste-de-controle.md` : 10 à 15 vérifications concrètes (Orca lit l'invite ; lit la sortie d'une commande ; annonce le changement d'onglet et son titre ; lit le dialogue de fermeture ; lit un message de configuration invalide ; zoom 200 % sans perte de contenu ; recherche utilisable à l'oreille…), chacune avec la manipulation et le résultat attendu.
 - [x] **Step 6 : Commit** — `test(a11y): sonde AT-SPI, liste de contrôle Orca`
 
+> **Ajout (2026-10-31)** : la liste de contrôle Orca est automatisée (`scripts/test-orca.sh` :
+> Xvfb + xfwm4 + Orca avec une synthèse muette ; xdotool tape les touches ; le journal d'Orca
+> est comparé à l'attendu). Le porteur n'a plus à l'écouter ; contrôle manuel facultatif de
+> 2 minutes. Sept défauts trouvés et corrigés (voir `docs/verifications/etape-1.md`).
+
 ### Task 13 : Vérification de fin d'étape
 
-- [ ] **Step 1 :** `cargo clippy --workspace --all-targets` → 0 avertissement ; `./scripts/test-x11.sh` et `./scripts/test-wayland.sh` → PASS ; `cargo +nightly fuzz run trame -- -max_total_time=300` → aucun crash.
-- [ ] **Step 2 :** Vérifier l'absence de connexion réseau : lancer Pupitre sous `unshare -n` (ou `strace -f -e trace=connect`) pendant une session type → aucun `connect` hors socket Unix.
-- [ ] **Step 3 :** Vérifier que rien n'est écrit hors `$XDG_CONFIG_HOME/pupitre` et `$XDG_STATE_HOME/pupitre` (`strace -f -e trace=openat,rename` filtré sur `O_WRONLY|O_CREAT`).
-- [ ] **Step 4 :** Machines virtuelles GNOME/Wayland, KDE/Wayland, Sway : lancer Pupitre, ouvrir 3 onglets, `kill -9` de l'interface, relancer → sessions retrouvées. Consigner dans `docs/verifications/etape-1.md`.
-- [ ] **Step 5 :** Remettre au porteur : instructions de lancement (`cargo run --release -p pupitre`), la liste de contrôle Orca, et le résumé des vérifications. Mettre à jour `suivi-tokens.md`.
-- [ ] **Step 6 : Commit** — `docs: vérifications de l'étape 1`
+- [x] **Step 1 :** `cargo clippy --workspace --all-targets` → 0 avertissement ; `./scripts/test-x11.sh` et `./scripts/test-wayland.sh` → PASS ; `cargo +nightly fuzz run trame -- -max_total_time=300` → aucun crash.
+- [x] **Step 2 :** (`scripts/verifier-isolement.sh`) Vérifier l'absence de connexion réseau : lancer Pupitre sous `unshare -n` (ou `strace -f -e trace=connect`) pendant une session type → aucun `connect` hors socket Unix.
+- [x] **Step 3 :** (même script) Vérifier que rien n'est écrit hors `$XDG_CONFIG_HOME/pupitre` et `$XDG_STATE_HOME/pupitre` (`strace -f -e trace=openat,rename` filtré sur `O_WRONLY|O_CREAT`).
+- [ ] **Step 4 :** *(reste à faire : pas de VM disponible ; scénario couvert sur X11 et Weston par `reprise_apres_plantage`)* Machines virtuelles GNOME/Wayland, KDE/Wayland, Sway : lancer Pupitre, ouvrir 3 onglets, `kill -9` de l'interface, relancer → sessions retrouvées. Consigner dans `docs/verifications/etape-1.md`.
+- [x] **Step 5 :** Remettre au porteur : instructions de lancement (`cargo run --release -p pupitre`), la liste de contrôle Orca, et le résumé des vérifications. Mettre à jour `suivi-tokens.md`.
+- [x] **Step 6 : Commit** — `docs: vérifications de l'étape 1`

@@ -17,3 +17,56 @@ désactiver ») : l'atténuation est **désactivée pour tout thème où une cou
 passe sous 4,5:1** — aujourd'hui le thème sombre. Le paramètre `2` est retiré des séquences SGR
 avant `feed()` (`crates/pupitre/src/attenuation.rs`) ; le texte s'affiche dans sa couleur normale.
 Le thème clair garde l'atténuation. Les thèmes de l'utilisateur sont jugés par le même calcul.
+
+## Fin d'étape — Task 13, 2026-10-31
+
+Machine : Debian 13 (trixie), GTK 4.18.6, VTE 0.80, Orca 48.1, écrans virtuels Xvfb
+(X11, avec xfwm4) et Weston sans écran (Wayland).
+
+| Vérification | Commande | Résultat |
+|---|---|---|
+| Lints | `cargo clippy --workspace --all-targets` | 0 avertissement |
+| Tests X11 | `scripts/test-x11.sh` | tout réussi (5 groupes de tests graphiques) |
+| Tests Wayland | `scripts/test-wayland.sh` | tout réussi (5 groupes de tests graphiques) |
+| Fuzzing du protocole | `cargo +nightly fuzz run trame -- -max_total_time=300` | 1 294 029 essais en 301 s, aucun plantage |
+| Lecteur d'écran | `scripts/test-orca.sh` (Orca muet, 14 vérifications) | 14/14, trois passages de suite |
+| Réseau | `scripts/verifier-isolement.sh` (strace) | aucune connexion hors sockets Unix (16 connexions, toutes Unix) |
+| Écritures | `scripts/verifier-isolement.sh` (strace) | rien hors `~/.config/pupitre`, `~/.local/state/pupitre` et le socket dans `$XDG_RUNTIME_DIR/pupitre` |
+| Reprise après plantage | test `reprise_apres_plantage` (SIGKILL de l'interface, relance) | réussi sous X11 et sous Weston |
+
+**Écritures tolérées** : au premier lancement, deux bibliothèques chargées par GTK
+remplissent leur cache dans `~/.cache` : Mesa (`mesa_shader_cache`, `mesa_shader_cache_db`)
+et fontconfig (`fontconfig`). Ce n'est pas le code de Pupitre ; le script les signale à
+part, sans échec.
+
+**Non fait** : l'essai sur machines virtuelles GNOME/Wayland, KDE/Wayland et Sway (aucune
+de ces sessions n'est installée ici). Le scénario « 3 onglets, `kill -9`, relance » est
+couvert par le test automatique ci-dessus sur X11 et Weston.
+
+### Défauts trouvés par le test Orca automatisé, et corrigés
+
+1. **Rien n'était annoncé au lancement.** GTK 4.18 signale l'activation de la fenêtre
+   avant d'avoir fini de s'inscrire sur le bus d'accessibilité : Orca cherche la fenêtre,
+   ne la trouve pas et l'ignore. Correction : 500 ms après la première activation,
+   Pupitre retire puis redonne le focus (`reannoncer_au_lancement`).
+2. **Nouvel onglet, barre de recherche : rien n'était annoncé.** Un widget qui reçoit le
+   focus juste après sa création n'est pas encore publié ; l'événement « focus » se perd.
+   Correction : l'annonce est refaite 100 ms plus tard (`annoncer_focus_une_fois_affiche`).
+3. **Messages (configuration invalide) et « Aucun résultat » non lus.** L'annonce partait
+   d'un widget qui venait d'apparaître. Correction : toutes les annonces partent de la
+   fenêtre (`messages::annoncer`).
+4. **Ctrl+Tab vers les onglets : Orca disait seulement « groupement ».** Le carnet
+   d'onglets n'avait pas de nom. Correction : nom « Onglets » et description
+   « essai, onglet 2 sur 3 ; cloche dans : … ». Les flèches gauche et droite gardent
+   maintenant le clavier sur les onglets (avant, chaque flèche renvoyait au terminal).
+5. **Orca se figeait pendant la lecture ligne par ligne** (pavé 7/8/9). Le champ caché
+   qui sert à renommer un onglet (enfant caché d'une GtkStack) était publié avec une
+   largeur aberrante (−727 874 992) ; Orca calcule les intersections point par point et
+   ne finissait jamais. Correction : boîte simple, champ vraiment masqué.
+6. **« [0m » lu dans « Le shell s'est terminé ».** Le code de couleur passait dans
+   l'annonce. Correction : annonce en texte simple.
+7. **Question du dialogue de fermeture lue deux fois.** Relation « décrit par » retirée.
+
+Reste connu : sur la barre d'onglets, Orca lit parfois la description deux fois
+(« essai, onglet 2 sur 2, groupement, essai, onglet 2 sur 2 ») ; c'est sa façon de
+présenter un groupement.
