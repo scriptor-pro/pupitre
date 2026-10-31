@@ -183,17 +183,17 @@ But : confirmer que VTE 0.80 fonctionne sans PTY propre (§4.1 de la spec). **Po
 - Produces : `pub struct ReplayBuffer` ; `pub const REPLAY_CAPACITY: usize = 8 * 1024 * 1024;` ; `pub fn new(capacity: usize) -> Self` ; `pub fn push(&mut self, data: &[u8])` ; `pub fn snapshot(&self) -> Vec<u8>` ; `pub fn len(&self) -> usize`.
 - Comportement : anneau d'octets ; au-delà de la capacité, les plus anciens octets sont écartés ; `snapshot` commence au premier début de ligne (`\n` + 1) suivant le point de coupe, pour ne pas rejouer une séquence d'échappement tronquée (si aucun `\n`, tout le contenu).
 
-- [ ] **Step 1 : Tests** :
+- [x] **Step 1 : Tests** :
 ```rust
 #[test] fn conserve_tout_sous_la_capacite() { /* capacité 16, push "abc\n" → snapshot == "abc\n" */ }
 #[test] fn tampon_reste_borne() { /* capacité 1024, push 10 Mio d'octets → len() <= 1024 */ }
 #[test] fn reprend_au_debut_de_ligne() { /* capacité 8, push "aaaa\nbbbb\ncc" → snapshot == "cc" ou commence après un '\n' */ }
 #[test] fn tampon_coupe_sans_paniquer() { /* push de "é" (2 octets) répétés pour forcer une coupe au milieu → snapshot ne panique pas */ }
 ```
-- [ ] **Step 2 :** `cargo test -p pupitre-fond relecture` → échec.
-- [ ] **Step 3 :** Implémenter (`VecDeque<u8>` ou anneau maison).
-- [ ] **Step 4 :** → PASS.
-- [ ] **Step 5 : Commit** — `feat(fond): tampon de relecture borné`
+- [x] **Step 2 :** `cargo test -p pupitre-fond relecture` → échec.
+- [x] **Step 3 :** Implémenter (`VecDeque<u8>` ou anneau maison).
+- [x] **Step 4 :** → PASS.
+- [x] **Step 5 : Commit** — `feat(fond): tampon de relecture borné`
 
 ### Task 5 : Session (PTY + shell)
 
