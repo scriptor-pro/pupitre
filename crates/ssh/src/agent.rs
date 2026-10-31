@@ -13,6 +13,11 @@ use std::time::{Duration, Instant};
 /// Délai accordé à un agent pour répondre lors d'une sonde.
 pub const DELAI_SONDE: Duration = Duration::from_millis(300);
 
+/// Durée maximale d'une recherche d'agent complète.
+pub const DELAI_RECHERCHE: Duration = Duration::from_secs(1);
+/// Nombre maximal de sockets `ssh-*/agent.*` examinés.
+const MAX_CANDIDATS_TMP: usize = 8;
+
 /// Taille maximale acceptée pour une réponse d'agent (256 Kio).
 const TAILLE_MAX: u32 = 256 * 1024;
 /// `SSH_AGENTC_REQUEST_IDENTITIES`, avec son préfixe de longueur.
@@ -69,6 +74,7 @@ pub fn candidats_agent(runtime: &Path, tmp: &Path) -> Vec<PathBuf> {
         if let Ok(chemins) = glob::glob(motif) {
             let mut trouves: Vec<PathBuf> = chemins.flatten().collect();
             trouves.sort();
+            trouves.truncate(MAX_CANDIDATS_TMP);
             liste.extend(trouves);
         }
     }
@@ -77,26 +83,53 @@ pub fn candidats_agent(runtime: &Path, tmp: &Path) -> Vec<PathBuf> {
 }
 
 /// Agent de l'environnement s'il répond, sinon premier candidat joignable.
+/// `delai` borne chaque sonde ; la recherche entière est bornée par [`DELAI_RECHERCHE`].
 pub fn chercher_agent(
     env_sock: Option<&Path>,
     runtime: &Path,
     tmp: &Path,
     delai: Duration,
 ) -> Option<PathBuf> {
+    let limite = Instant::now() + DELAI_RECHERCHE;
+    let sonde = |s: &Path| {
+        let reste = limite.saturating_duration_since(Instant::now());
+        !reste.is_zero() && agent_joignable(s, delai.min(reste))
+    };
     if let Some(s) = env_sock {
-        if agent_joignable(s, delai) {
+        if sonde(s) {
             return Some(s.to_path_buf());
         }
     }
-    candidats_agent(runtime, tmp)
-        .into_iter()
-        .find(|c| agent_joignable(c, delai))
+    candidats_agent(runtime, tmp).into_iter().find(|c| sonde(c))
 }
 
 /// Agent `ssh-agent` lancé par Pupitre ; tué et nettoyé à la destruction.
 pub struct AgentPupitre {
     socket: PathBuf,
     enfant: Child,
+    /// Petit script qui tue l'agent si le processus qui l'a lancé disparaît sans le
+    /// faire proprement (plantage, SIGKILL). `PR_SET_PDEATHSIG` ne convient pas :
+    /// `ssh-agent` est souvent setgid, ce qui annule le signal à l'`exec`.
+    veilleur: Option<Child>,
+}
+
+/// Lance le veilleur de l'agent `agent` (voir [`AgentPupitre`]). Il surveille le processus
+/// courant (et non un thread), s'arrête dès que l'agent a disparu et ne tue que si le
+/// processus parent est mort.
+fn veiller(agent: u32) -> Option<Child> {
+    const SCRIPT: &str = r#"while kill -0 "$1" 2>/dev/null && kill -0 "$2" 2>/dev/null; do sleep 1; done
+kill -0 "$1" 2>/dev/null || kill "$2" 2>/dev/null; exit 0"#;
+    Command::new("sh")
+        .arg("-c")
+        .arg(SCRIPT)
+        .arg("pupitre-veilleur")
+        .arg(std::process::id().to_string())
+        .arg(agent.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()
 }
 
 impl AgentPupitre {
@@ -147,9 +180,11 @@ impl AgentPupitre {
         let limite = Instant::now() + Duration::from_secs(2);
         loop {
             if agent_joignable(socket, DELAI_SONDE) {
+                let veilleur = veiller(enfant.id());
                 return Ok(AgentPupitre {
                     socket: socket.to_path_buf(),
                     enfant,
+                    veilleur,
                 });
             }
             let fini = matches!(enfant.try_wait(), Ok(Some(_)) | Err(_));
@@ -182,6 +217,11 @@ impl AgentPupitre {
 
 impl Drop for AgentPupitre {
     fn drop(&mut self) {
+        // Le veilleur d'abord : il ne doit pas viser un numéro de processus libéré.
+        if let Some(v) = &mut self.veilleur {
+            let _ = v.kill();
+            let _ = v.wait();
+        }
         let _ = self.enfant.kill();
         let _ = self.enfant.wait();
         let _ = fs::remove_file(&self.socket);
@@ -214,6 +254,33 @@ mod tests {
     }
 
     const D: Duration = Duration::from_millis(500);
+
+    #[test]
+    fn recherche_bornee_et_limitee() {
+        let t = tempfile::tempdir().unwrap();
+        let tmp = t.path().join("tmp");
+        let mut gardes = Vec::new();
+        for i in 0..20 {
+            let c = tmp.join(format!("ssh-{i:02}/agent.1"));
+            std::fs::create_dir_all(c.parent().unwrap()).unwrap();
+            let l = UnixListener::bind(&c).unwrap();
+            // Agents muets : ils acceptent sans répondre.
+            std::thread::spawn(move || {
+                let mut v = Vec::new();
+                for s in l.incoming().flatten() {
+                    v.push(s);
+                }
+            });
+            gardes.push(c);
+        }
+        assert_eq!(candidats_agent(&t.path().join("rt"), &tmp).len(), 8);
+        let debut = Instant::now();
+        assert_eq!(
+            chercher_agent(None, &t.path().join("rt"), &tmp, DELAI_SONDE),
+            None
+        );
+        assert!(debut.elapsed() < Duration::from_millis(1500));
+    }
 
     #[test]
     fn faux_agent_reconnu() {

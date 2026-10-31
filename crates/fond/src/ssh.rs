@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 /// Intervalle minimal entre deux sondes d'agent.
 const INTERVALLE_SONDE: Duration = Duration::from_secs(10);
+/// Intervalle entre deux recherches complètes quand aucun agent n'est possible.
+const INTERVALLE_SANS_AGENT: Duration = Duration::from_secs(60);
 /// Dossier inexistant utilisé quand `XDG_RUNTIME_DIR` est absent : aucun candidat n'y existe.
 const SANS_RUNTIME: &str = "/nonexistent-pupitre-runtime";
 
@@ -143,10 +145,15 @@ impl EtatSsh {
                 urgent = true;
             }
         }
+        let intervalle = if self.courant.is_none() {
+            INTERVALLE_SANS_AGENT
+        } else {
+            INTERVALLE_SONDE
+        };
         let du = urgent
             || self
                 .derniere_sonde
-                .is_none_or(|t| t.elapsed() >= INTERVALLE_SONDE);
+                .is_none_or(|t| t.elapsed() >= intervalle);
         if !du {
             return;
         }
@@ -173,6 +180,15 @@ impl EtatSsh {
         ) {
             self.adopter(trouve);
             return;
+        }
+        // Un socket de Pupitre resté d'un fond précédent et qui répond encore : repris tel quel
+        // (il n'est pas à nous, donc jamais tué).
+        if let Some(d) = self.socket_fond.parent() {
+            let reste = d.join("agent.sock");
+            if agent_joignable(&reste, DELAI_SONDE) {
+                self.adopter(reste);
+                return;
+            }
         }
         match self.lancer_propre() {
             Some(a) => {
@@ -253,6 +269,44 @@ mod tests {
         assert!(!v.iter().any(|(k, _)| k == "SSH_AUTH_SOCK"));
         assert!(!e.agent_change());
         assert!(e.message_a_envoyer().is_some());
+        assert!(e.message_a_envoyer().is_none());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests_reprise {
+    use super::*;
+    use std::io::{Read, Write};
+
+    #[test]
+    fn agent_sock_restant_est_repris() {
+        let t = tempfile::tempdir().unwrap();
+        let reste = t.path().join("agent.sock");
+        let l = std::os::unix::net::UnixListener::bind(&reste).unwrap();
+        std::thread::spawn(move || {
+            for mut s in l.incoming().flatten() {
+                let mut r = [0u8; 5];
+                if s.read_exact(&mut r).is_ok() {
+                    let _ = s.write_all(&[0, 0, 0, 5, 12, 0, 0, 0, 0]);
+                }
+            }
+        });
+        let tmp = t.path().join("tmp");
+        std::fs::create_dir(&tmp).unwrap();
+        let entrees = EntreesSsh {
+            env_sock: None,
+            runtime: None,
+            tmp,
+            askpass: None,
+            programme_agent: "/nonexistent/ssh-agent".into(),
+        };
+        let mut e = EtatSsh::avec_entrees(&t.path().join("fond.sock"), entrees);
+        let v = e.variables(1);
+        assert!(v.contains(&(
+            "SSH_AUTH_SOCK".to_string(),
+            reste.to_string_lossy().into_owned()
+        )));
         assert!(e.message_a_envoyer().is_none());
     }
 }

@@ -2,7 +2,7 @@
 //! Tests d'intégration du serveur de `pupitre-fond` : un vrai socket, de vrais shells.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use pupitre_fond::serveur::{preparer_dossier, run, run_avec, socket_path};
+use pupitre_fond::serveur::{preparer_dossier, run_avec, socket_path};
 use pupitre_fond::ssh::EntreesSsh;
 use pupitre_proto::{read_frame, write_frame, ClientMsg, ServerMsg, SessionId, VERSION};
 use std::os::unix::fs::PermissionsExt;
@@ -344,7 +344,8 @@ fn socket_perime_est_remplace() {
     drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
     assert!(socket.exists());
     let s = socket.clone();
-    thread::spawn(move || run(&s, Duration::from_secs(30)));
+    let entrees = entrees_isolees(dossier.path());
+    thread::spawn(move || run_avec(&s, Duration::from_secs(30), entrees));
     Client::connecter(&socket);
 }
 
@@ -353,8 +354,8 @@ fn second_fond_s_arrete_sans_erreur() {
     let s = demarrer(Duration::from_secs(30));
     Client::connecter(&s.socket);
     let debut = Instant::now();
-    let _garde = &s.dossier;
-    run(&s.socket, Duration::from_secs(30)).unwrap();
+    let entrees = entrees_isolees(s.dossier.path());
+    run_avec(&s.socket, Duration::from_secs(30), entrees).unwrap();
     assert!(debut.elapsed() < Duration::from_secs(2));
     Client::connecter(&s.socket); // le premier tourne toujours
 }
@@ -518,7 +519,8 @@ fn agent_relance_apres_mort_et_tue_a_la_fin() {
     };
     assert!(tuer(), "ssh-agent de Pupitre introuvable");
     let limite = Instant::now() + Duration::from_secs(5);
-    while agent_repond(&agent) {
+    // Mort pour de bon (plus de ligne de commande : zombie au pire) avant la session suivante.
+    while agent_repond(&agent) || presente() {
         assert!(Instant::now() < limite);
         thread::sleep(Duration::from_millis(50));
     }
