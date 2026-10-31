@@ -9,9 +9,22 @@ use secret_service::EncryptionType;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Garde : ces tests écrivent dans le trousseau, on refuse de les lancer hors
+/// du trousseau jetable de `scripts/trousseau-test.sh`.
+fn jetable() -> bool {
+    let ok = std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_some();
+    if !ok {
+        println!("ignoré : trousseau jetable absent");
+    }
+    ok
+}
+
 #[test]
 #[ignore = "demande un Secret Service jetable (scripts/trousseau-test.sh)"]
 fn cycle_complet() {
+    if !jetable() {
+        return;
+    }
     let coffre = CoffreSecretService::ouvrir();
     assert_eq!(coffre.etat(), EtatTrousseau::Disponible);
     let cle = Path::new("/tmp/pupitre-test/cle-cycle");
@@ -37,10 +50,14 @@ fn cycle_complet() {
 #[test]
 #[ignore = "demande un Secret Service jetable (scripts/trousseau-test.sh)"]
 fn element_d_une_autre_application_intact() {
+    if !jetable() {
+        return;
+    }
     let coffre = CoffreSecretService::ouvrir();
     let cle = Path::new("/tmp/pupitre-test/cle-etrangere");
     let ss = SecretService::connect(EncryptionType::Dh).unwrap();
     let col = ss.get_default_collection().unwrap();
+    assert!(!col.is_locked().unwrap(), "trousseau verrouillé");
     let mut attrs: HashMap<&str, &str> = HashMap::new();
     attrs.insert("application", "autre-programme");
     attrs.insert("type", "phrase-cle-ssh");

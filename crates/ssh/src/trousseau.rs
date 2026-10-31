@@ -15,7 +15,8 @@ use secret_service::EncryptionType;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
+use std::time::Duration;
 use zeroize::Zeroizing;
 
 pub use pupitre_proto::ssh::EtatTrousseau;
@@ -73,7 +74,7 @@ pub fn chemin_lisible(p: &Path) -> String {
 /// Coffre en mémoire, pour les tests.
 #[derive(Default)]
 pub struct CoffreMemoire {
-    phrases: Mutex<BTreeMap<PathBuf, String>>,
+    phrases: Mutex<BTreeMap<PathBuf, Zeroizing<String>>>,
 }
 
 impl Coffre for CoffreMemoire {
@@ -82,11 +83,12 @@ impl Coffre for CoffreMemoire {
     }
     fn lire(&self, cle: &Path) -> Option<Zeroizing<String>> {
         let m = self.phrases.lock().ok()?;
-        m.get(cle).map(|p| Zeroizing::new(p.clone()))
+        m.get(cle).map(|p| Zeroizing::new(p.to_string()))
     }
     fn ecrire(&self, cle: &Path, phrase: &str) -> Result<(), ErreurTrousseau> {
         let mut m = self.phrases.lock().map_err(|_| ErreurTrousseau::Absent)?;
-        m.insert(cle.to_path_buf(), phrase.to_string());
+        // L'ancienne valeur éventuelle est effacée à sa destruction.
+        m.insert(cle.to_path_buf(), Zeroizing::new(phrase.to_string()));
         Ok(())
     }
     fn oublier(&self, cle: &Path) -> Result<(), ErreurTrousseau> {
@@ -102,15 +104,8 @@ impl Coffre for CoffreMemoire {
     }
 }
 
-impl Drop for CoffreMemoire {
-    fn drop(&mut self) {
-        if let Ok(mut m) = self.phrases.lock() {
-            for v in m.values_mut() {
-                zeroize::Zeroize::zeroize(v);
-            }
-        }
-    }
-}
+/// Délai maximal accordé à une opération du Secret Service.
+pub const DELAI_TROUSSEAU: Duration = Duration::from_secs(2);
 
 /// Coffre adossé au Secret Service (collection par défaut).
 pub struct CoffreSecretService {
@@ -130,7 +125,27 @@ impl CoffreSecretService {
         Self { _prive: () }
     }
 
-    fn avec_collection<T>(&self, f: impl FnOnce(&Acces<'_>) -> T) -> T {
+    /// Exécute `f` sur un fil à part et attend au plus `DELAI_TROUSSEAU` ;
+    /// passé ce délai (ou si le fil plante), rend `defaut`. Le fil en retard
+    /// est abandonné : il finira de lui-même.
+    fn avec_collection<T: Send + 'static>(
+        &self,
+        defaut: T,
+        f: impl FnOnce(&Acces<'_>) -> T + Send + 'static,
+    ) -> T {
+        let (tx, rx) = mpsc::channel();
+        let lance = std::thread::Builder::new()
+            .name("pupitre-trousseau".into())
+            .spawn(move || {
+                let _ = tx.send(Self::acceder(f));
+            });
+        if lance.is_err() {
+            return defaut;
+        }
+        rx.recv_timeout(DELAI_TROUSSEAU).unwrap_or(defaut)
+    }
+
+    fn acceder<T>(f: impl FnOnce(&Acces<'_>) -> T) -> T {
         let Ok(service) = SecretService::connect(EncryptionType::Dh) else {
             return f(&Acces::Absent);
         };
@@ -152,7 +167,7 @@ fn attributs(cle: &str) -> HashMap<&str, &str> {
 
 impl Coffre for CoffreSecretService {
     fn etat(&self) -> EtatTrousseau {
-        self.avec_collection(|a| match a {
+        self.avec_collection(EtatTrousseau::Absent, |a| match a {
             Acces::Pret(_) => EtatTrousseau::Disponible,
             Acces::Verrouille => EtatTrousseau::Verrouille,
             Acces::Absent => EtatTrousseau::Absent,
@@ -160,48 +175,56 @@ impl Coffre for CoffreSecretService {
     }
 
     fn lire(&self, cle: &Path) -> Option<Zeroizing<String>> {
-        let cle = cle.to_str()?;
-        self.avec_collection(|a| {
+        let cle = cle.to_str()?.to_string();
+        self.avec_collection(None, move |a| {
             let Acces::Pret(col) = a else { return None };
-            let items = col.search_items(attributs(cle)).ok()?;
+            let items = col.search_items(attributs(&cle)).ok()?;
             let secret = Zeroizing::new(items.first()?.get_secret().ok()?);
-            // UTF-8 invalide : traité comme absent.
-            String::from_utf8(secret.to_vec()).ok().map(Zeroizing::new)
+            // UTF-8 invalide : traité comme absent (octets effacés).
+            match String::from_utf8(secret.to_vec()) {
+                Ok(s) => Some(Zeroizing::new(s)),
+                Err(e) => {
+                    drop(Zeroizing::new(e.into_bytes()));
+                    None
+                }
+            }
         })
     }
 
     fn ecrire(&self, cle: &Path, phrase: &str) -> Result<(), ErreurTrousseau> {
         let chemin = cle
             .to_str()
-            .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?;
-        self.avec_collection(|a| match a {
+            .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?
+            .to_string();
+        let libelle = format!("Pupitre — phrase de passe de {}", chemin_lisible(cle));
+        let phrase = Zeroizing::new(phrase.to_string());
+        self.avec_collection(Err(ErreurTrousseau::Absent), move |a| match a {
             Acces::Absent => Err(ErreurTrousseau::Absent),
             Acces::Verrouille => Err(ErreurTrousseau::Verrouille),
-            Acces::Pret(col) => {
-                let libelle = format!("Pupitre — phrase de passe de {}", chemin_lisible(cle));
-                col.create_item(
+            Acces::Pret(col) => col
+                .create_item(
                     &libelle,
-                    attributs(chemin),
+                    attributs(&chemin),
                     phrase.as_bytes(),
                     true,
                     "text/plain",
                 )
                 .map(|_| ())
-                .map_err(|e| ErreurTrousseau::Autre(e.to_string()))
-            }
+                .map_err(|e| ErreurTrousseau::Autre(e.to_string())),
         })
     }
 
     fn oublier(&self, cle: &Path) -> Result<(), ErreurTrousseau> {
         let chemin = cle
             .to_str()
-            .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?;
-        self.avec_collection(|a| match a {
+            .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?
+            .to_string();
+        self.avec_collection(Err(ErreurTrousseau::Absent), move |a| match a {
             Acces::Absent => Err(ErreurTrousseau::Absent),
             Acces::Verrouille => Err(ErreurTrousseau::Verrouille),
             Acces::Pret(col) => {
                 let items = col
-                    .search_items(attributs(chemin))
+                    .search_items(attributs(&chemin))
                     .map_err(|e| ErreurTrousseau::Autre(e.to_string()))?;
                 for item in items {
                     item.delete()
@@ -213,7 +236,7 @@ impl Coffre for CoffreSecretService {
     }
 
     fn cles(&self) -> Vec<PathBuf> {
-        self.avec_collection(|a| {
+        self.avec_collection(Vec::new(), |a| {
             let Acces::Pret(col) = a else {
                 return Vec::new();
             };

@@ -20,22 +20,25 @@ nettoyer() {
 trap nettoyer EXIT
 
 mkdir -p "$TMP/run" "$TMP/data" "$TMP/cfg" "$TMP/cache"; chmod 700 "$TMP/run"
-# --daemonize n'imprime rien ici : on n'exporte rien, le démon est trouvé via le bus.
+# Démon au premier plan, mis en arrière-plan : son PID ($!) est connu tout de
+# suite et le trap le tue quoi qu'il arrive. Le mot de passe passe par stdin.
 echo -n test | HOME="$TMP" XDG_DATA_HOME="$TMP/data" XDG_RUNTIME_DIR="$TMP/run" \
   XDG_CONFIG_HOME="$TMP/cfg" XDG_CACHE_HOME="$TMP/cache" \
-  gnome-keyring-daemon --unlock --components=secrets --daemonize >/dev/null
+  gnome-keyring-daemon --foreground --unlock --components=secrets >/dev/null 2>&1 &
+DEMON=$!
 
-# Le propriétaire de org.freedesktop.secrets sur ce bus doit être CE démon
-# (reconnu à son HOME temporaire), jamais un autre trousseau.
+# Le propriétaire de org.freedesktop.secrets sur ce bus doit être CE démon,
+# jamais un autre trousseau.
 PROPRIETAIRE=""
 for _ in $(seq 50); do
   PROPRIETAIRE="$(busctl --user status org.freedesktop.secrets 2>/dev/null | sed -n 's/^PID=//p')" || true
   [ -n "$PROPRIETAIRE" ] && break
   sleep 0.1
 done
-if [ -z "$PROPRIETAIRE" ] || ! tr '\0' '\n' <"/proc/$PROPRIETAIRE/environ" 2>/dev/null | grep -qx "HOME=$TMP"; then
-  echo "trousseau-test.sh : le Secret Service du bus n'est pas le démon jetable" >&2
+if [ "$PROPRIETAIRE" != "$DEMON" ]; then
+  echo "trousseau-test.sh : le Secret Service du bus n'est pas le démon jetable (bus=$PROPRIETAIRE démon=$DEMON)" >&2
   exit 1
 fi
-DEMON="$PROPRIETAIRE"
+# Marqueur : les tests réels refusent de tourner sans lui.
+export PUPITRE_TROUSSEAU_JETABLE=1
 "$@"
