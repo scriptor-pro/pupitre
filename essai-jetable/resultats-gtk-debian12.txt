@@ -1,0 +1,16 @@
+GTK 4.8.3
+VTE 0.70.6
+signal notification-received: non
+signal shell-precmd: non
+signal shell-preexec: non
+signal termprop-changed: non
+signal termprops-changed: non
+signal current-directory-uri-changed: OUI
+signal bell: OUI
+signal hyperlink-hover-uri-changed: OUI
+rôle accessible GTK: Widget
+statut du script: 0
+cloche reçue (signal bell): OUI
+titre via OSC 0/2: "titre-osc-ok"
+répertoire courant via OSC 7: Some("file://b612/home/Baudouin/Documents/Projets/pupitre/essai-jetable")
+lien OSC 8 détecté: Some("https://example.org/pupitre")

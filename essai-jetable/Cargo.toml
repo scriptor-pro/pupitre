@@ -1,0 +1,13 @@
+[package]
+name = "essai_vte"
+version = "0.0.0"
+edition = "2021"
+publish = false
+# ESSAI JETABLE : vérifie les capacités de VTE 0.70 / GTK 4.8 (Debian 12). Ne pas réutiliser.
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.10" }
+vte4 = { version = "0.9", features = ["v0_70"] }
+
+[features]
+recent = ["gtk/v4_18"]

@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["crates/proto", "crates/config", "crates/fond", "crates/pupitre"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+rust-version = "1.85"
+publish = false
+
+[workspace.dependencies]
+# Paire gtk4/vte4 vérifiée compatible (voir docs/plans, Task 1).
+gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
+vte4 = { version = "0.10", features = ["v0_80"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+# Robustesse : pas de plantage volontaire hors tests (voir clippy.toml).
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

@@ -1,0 +1,17 @@
+GTK 4.18.6
+VTE 0.80.1
+signal notification-received: non
+signal shell-precmd: non
+signal shell-preexec: non
+signal termprop-changed: OUI
+signal termprops-changed: OUI
+signal current-directory-uri-changed: OUI
+signal bell: OUI
+signal hyperlink-hover-uri-changed: OUI
+rôle accessible GTK: Terminal
+dispositions clavier (API GTK): ["English (US)"], active n°0
+statut du script: 0
+cloche reçue (signal bell): OUI
+titre via OSC 0/2: "titre-osc-ok"
+répertoire courant via OSC 7: Some("file://e9278fb1949d/work")
+lien OSC 8 détecté: Some("https://example.org/pupitre")

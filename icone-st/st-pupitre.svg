@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Icône st : logo en blocs (S et T soudés), couleurs Shades of Purple -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="fond" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d2b55"/>
+      <stop offset="1" stop-color="#1e1e3f"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="url(#fond)"/>
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="none" stroke="#6d42a5" stroke-width="6"/>
+  <!-- grille : 1 unité = 28 px ; glyphe de 6 x 3 unités -->
+  <g fill="#ffffff" shape-rendering="crispEdges">
+    <rect x="72"  y="86"  width="140" height="28"/> <!-- barre haute (colonnes 1 à 5) -->
+    <rect x="72"  y="114" width="28"  height="28"/> <!-- jambage du S -->
+    <rect x="44"  y="142" width="56"  height="28"/> <!-- pied du S (colonnes 0 et 1) -->
+    <rect x="156" y="114" width="28"  height="56"/> <!-- fût du T -->
+  </g>
+</svg>

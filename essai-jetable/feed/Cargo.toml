@@ -1,0 +1,12 @@
+[package]
+name = "essai_feed"
+version = "0.0.0"
+edition = "2021"
+publish = false
+# ESSAI JETABLE (Task 0) : VTE alimenté par feed(), PTY géré par le programme. Ne pas réutiliser.
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.10", features = ["v4_18"] }
+vte4 = { version = "0.9", features = ["v0_78"] }
+portable-pty = "0.9"
+async-channel = "2"

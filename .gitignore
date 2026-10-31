@@ -1,0 +1,7 @@
+/target/
+essai-jetable/target*
+essai-jetable/.cargo-trixie
+essai-jetable/feed/sortie/
+*.png
+!maquettes/*.png
+!icone-st/png/*.png

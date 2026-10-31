@@ -1,0 +1,18 @@
+[package]
+name = "pupitre-fond"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "pupitre_fond"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pupitre-fond"
+path = "src/main.rs"

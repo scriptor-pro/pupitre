@@ -1,0 +1,24 @@
+DA2 (version)                      $'n\E[>65;7006;1c'
+XTVERSION                          ''
+sync output DECRQM 2026            $'\E[?2026;4$y'
+bracketed paste DECRQM 2004        $'\E[?2004;2$y'
+focus events DECRQM 1004           $'\E[?1004;2$y'
+graphemes DECRQM 2027              $'\E[?2027;0$y'
+souris SGR DECRQM 1006             $'\E[?1006;2$y'
+protocole clavier kitty CSI ?u     ''
+modifyOtherKeys XTQMODKEYS         ''
+OSC 52 lecture presse-papiers      ''
+OSC 10 couleur texte               $'\E]10;rgb:cdcd/d6d6/f4f4\a'
+OSC 11 couleur fond                $'\E]11;rgb:1e1e/1e1e/2e2e\a'
+OSC 4 couleur 8                    $'\E]4;8;rgb:8a8a/8e8e/a6a6\a'
+truecolor DECRQSS après SGR       $'\EP0$r\E\\'
+sixel (DA1 attribut 4 ?)           ''
+kitty graphics                     ''
+presse-papiers après OSC 52 écriture :  Sitting Tenant
+/home/Baudouin/Documents/Projets/pupitre/essai-jetable/sonde_a11y.py:11: DeprecationWarning: Atspi.Accessible.get_text_iface is deprecated
+  t = n.get_text_iface()
+application AT-SPI trouvée : essai_vte
+  a11y application «essai_vte» texte=aucune interface Text
+  a11y   frame «Essai VTE» texte=aucune interface Text
+  a11y     filler «VteTerminal» texte=aucune interface Text
+texte du terminal lisible par un lecteur d'écran : NON
