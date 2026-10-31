@@ -121,6 +121,16 @@ impl EtatSsh {
         v
     }
 
+    /// Socket de l'agent à indiquer aux shells, s'il y en a un.
+    pub fn agent(&self) -> Option<&Path> {
+        self.courant.as_deref()
+    }
+
+    /// Programme `pupitre-askpass`, s'il existe.
+    pub fn askpass(&self) -> Option<&Path> {
+        self.entrees.askpass.as_deref()
+    }
+
     /// Vrai une fois après chaque nouvel agent adopté ou lancé.
     pub fn agent_change(&mut self) -> bool {
         std::mem::take(&mut self.changement)

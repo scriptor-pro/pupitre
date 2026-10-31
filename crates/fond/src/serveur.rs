@@ -9,6 +9,7 @@
 //! (relais des événements, envoi de la saisie). Le thread central n'attend jamais un client :
 //! chaque client a une file d'envoi bornée ; s'il ne suit plus, il est déconnecté.
 
+use crate::chargement::{self, Rapport, Travail};
 use crate::relecture::{ReplayBuffer, REPLAY_CAPACITY};
 use crate::session::{Session, SessionEvent};
 use crate::ssh::{EntreesSsh, EtatSsh};
@@ -18,6 +19,7 @@ use pupitre_proto::{
     read_frame, write_frame, ClientMsg, DemandeId, ServerMsg, SessionId, SessionInfo, VERSION,
     VERSION_MIN,
 };
+use pupitre_ssh::trousseau::{Coffre, CoffreMemoire, CoffreSecretService};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io;
@@ -30,6 +32,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryS
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+use zeroize::Zeroizing;
 
 /// Délai d'arrêt sans client ni session, en production.
 pub const ARRET_SI_INACTIF: Duration = Duration::from_secs(5);
@@ -89,11 +92,35 @@ pub fn preparer_dossier(socket: &Path) -> io::Result<()> {
 /// pendant `idle_exit`. Si un autre processus de fond tient déjà ce socket, retourne
 /// aussitôt `Ok(())`. Un socket abandonné (processus de fond disparu) est remplacé.
 pub fn run(socket: &Path, idle_exit: Duration) -> io::Result<()> {
-    run_avec(socket, idle_exit, EntreesSsh::depuis_env())
+    run_avec_coffre(
+        socket,
+        idle_exit,
+        EntreesSsh::depuis_env(),
+        Arc::new(CoffreSecretService::ouvrir()),
+    )
 }
 
-/// Comme [`run`], avec les entrées de la recherche d'agent SSH fournies (tests).
+/// Dépôt des phrases de passe partagé avec les fils de chargement.
+pub type CoffreCommun = Arc<dyn Coffre + Send + Sync>;
+
+/// Comme [`run`], avec les entrées de la recherche d'agent SSH fournies (tests). Le
+/// trousseau est un coffre en mémoire vide : les tests n'approchent jamais le vrai.
 pub fn run_avec(socket: &Path, idle_exit: Duration, entrees: EntreesSsh) -> io::Result<()> {
+    run_avec_coffre(
+        socket,
+        idle_exit,
+        entrees,
+        Arc::new(CoffreMemoire::default()),
+    )
+}
+
+/// Comme [`run_avec`], avec le dépôt des phrases de passe choisi.
+pub fn run_avec_coffre(
+    socket: &Path,
+    idle_exit: Duration,
+    entrees: EntreesSsh,
+    coffre: CoffreCommun,
+) -> io::Result<()> {
     preparer_dossier(socket)?;
     // Verrou de démarrage : un seul processus de fond par socket, même lancés ensemble.
     let fichier_verrou = OpenOptions::new()
@@ -132,6 +159,8 @@ pub fn run_avec(socket: &Path, idle_exit: Duration, entrees: EntreesSsh) -> io::
         prochaine_demande: 1,
         evt_tx,
         ssh: EtatSsh::avec_entrees(socket, entrees),
+        coffre,
+        chargement: ChargementEtat::default(),
     };
     etat.boucle(&evt_rx, idle_exit);
     arret.store(true, Ordering::SeqCst);
@@ -146,6 +175,8 @@ enum Evt {
     Message(ClientId, ClientMsg),
     Depart(ClientId),
     Session(SessionId, SessionEvent),
+    /// Fin d'un travail de chargement de clés.
+    Chargement(Rapport),
 }
 
 fn accepter(ecoute: &UnixListener, evt_tx: &SyncSender<Evt>, arret: &AtomicBool) {
@@ -244,10 +275,25 @@ struct Etat {
     prochaine_demande: DemandeId,
     evt_tx: SyncSender<Evt>,
     ssh: EtatSsh,
+    coffre: CoffreCommun,
+    chargement: ChargementEtat,
+}
+
+/// Suivi du chargement des clés mémorisées (un seul fil à la fois).
+#[derive(Default)]
+struct ChargementEtat {
+    en_cours: bool,
+    /// Demandes arrivées pendant un chargement ou en attente d'un agent.
+    attente: Travail,
+    /// Trousseau verrouillé au dernier essai : on réessaie à la prochaine ouverture.
+    reessai: bool,
+    /// Le message « trousseau verrouillé » a été montré à une interface.
+    verrouille_signale: bool,
 }
 
 impl Etat {
     fn boucle(&mut self, evt_rx: &Receiver<Evt>, idle_exit: Duration) {
+        self.verifier_chargement();
         let mut inactif_depuis: Option<Instant> = None;
         let mut dernier_controle = Instant::now();
         loop {
@@ -297,6 +343,7 @@ impl Etat {
                     self.diffuser(&ServerMsg::Output { id: sid, data });
                 }
             }
+            Evt::Chargement(rapport) => self.fin_chargement(rapport),
             Evt::Session(sid, SessionEvent::Exited(code)) => {
                 if let Some(s) = self.sessions.remove(&sid) {
                     // Termine aussi ce qui tiendrait encore le terminal.
@@ -401,9 +448,77 @@ impl Etat {
                 reponse,
                 memoriser,
             } => self.repondre(cid, demande, reponse, memoriser),
-            // Traité à la Task 7.
-            ClientMsg::ChargerCle { .. } => {}
+            // Envoyé par `pupitre-askpass` (un demandeur) après avoir mémorisé une phrase.
+            ClientMsg::ChargerCle { cle } => {
+                if self.clients.get(&cid).is_some_and(|c| c.demandeur) {
+                    self.chargement.attente.fusionner(Travail {
+                        toutes: false,
+                        cles: vec![cle],
+                    });
+                    self.lancer_chargement();
+                }
+            }
         }
+    }
+
+    /// Prend en compte un nouvel agent (démarrage, agent relancé) puis lance le chargement.
+    fn verifier_chargement(&mut self) {
+        if self.ssh.agent_change() {
+            self.chargement.attente.toutes = true;
+        }
+        self.lancer_chargement();
+    }
+
+    /// Lance, sur un fil à part, le chargement des clés en attente (une seule fois à la fois ;
+    /// les demandes qui arrivent entre-temps sont regroupées).
+    fn lancer_chargement(&mut self) {
+        if self.chargement.en_cours || self.chargement.attente.est_vide() {
+            return;
+        }
+        let (Some(agent), Some(askpass)) = (self.ssh.agent(), self.ssh.askpass()) else {
+            self.chargement.attente = Travail::default();
+            return;
+        };
+        let (agent, askpass) = (agent.to_path_buf(), askpass.to_path_buf());
+        let travail = std::mem::take(&mut self.chargement.attente);
+        let coffre = self.coffre.clone();
+        let evt_tx = self.evt_tx.clone();
+        self.chargement.en_cours = true;
+        let lance = thread::Builder::new()
+            .name("pupitre-chargement".into())
+            .spawn(move || {
+                let r = chargement::executer(coffre.as_ref(), &agent, &askpass, &travail);
+                let _ = evt_tx.send(Evt::Chargement(r));
+            });
+        if lance.is_err() {
+            self.chargement.en_cours = false;
+        }
+    }
+
+    fn fin_chargement(&mut self, rapport: Rapport) {
+        self.chargement.en_cours = false;
+        self.chargement.reessai = rapport.verrouille;
+        let interfaces = self.interfaces();
+        if rapport.verrouille {
+            // Une seule fois, et seulement si quelqu'un a pu le lire.
+            if !self.chargement.verrouille_signale && !interfaces.is_empty() {
+                self.chargement.verrouille_signale = true;
+                for i in &interfaces {
+                    self.envoyer(
+                        *i,
+                        ServerMsg::Message(chargement::MESSAGE_VERROUILLE.into()),
+                    );
+                }
+            }
+        } else {
+            self.chargement.verrouille_signale = false;
+        }
+        for texte in rapport.messages {
+            for i in &interfaces {
+                self.envoyer(*i, ServerMsg::Message(texte.clone()));
+            }
+        }
+        self.lancer_chargement();
     }
 
     /// Interfaces : clients accueillis en version 2 qui ne sont pas demandeurs.
@@ -466,7 +581,7 @@ impl Etat {
         &mut self,
         cid: ClientId,
         demande: DemandeId,
-        reponse: Option<String>,
+        reponse: Option<Zeroizing<String>>,
         memoriser: bool,
     ) {
         // Seule une interface répond ; une demande inconnue ou déjà réglée est ignorée.
@@ -515,6 +630,10 @@ impl Etat {
 
     fn ouvrir(&mut self, cid: ClientId, argv: &[String], cwd: Option<&Path>, cols: u16, rows: u16) {
         let env = self.ssh.variables(self.prochain_id);
+        if self.chargement.reessai {
+            self.chargement.attente.toutes = true;
+        }
+        self.verifier_chargement();
         let (session, evenements) = match Session::open(argv, cwd, cols, rows, &env) {
             Ok(r) => r,
             Err(e) => {

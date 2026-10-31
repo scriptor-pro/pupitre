@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use zeroize::Zeroizing;
 
 pub mod ssh;
 pub mod trame;
@@ -68,7 +69,7 @@ pub enum ClientMsg {
     /// `Confirmation` et `HoteInconnu` : `Some("yes")` ou `Some("no")`.
     Repondre {
         demande: DemandeId,
-        reponse: Option<String>,
+        reponse: Option<Zeroizing<String>>,
         memoriser: bool,
     },
     /// Charge une clé SSH dans l'agent.
@@ -122,7 +123,7 @@ pub enum ServerMsg {
     },
     /// Réponse transmise à `pupitre-askpass`.
     Reponse {
-        reponse: Option<String>,
+        reponse: Option<Zeroizing<String>>,
         memoriser: bool,
     },
     /// Texte à montrer dans le bandeau de toutes les fenêtres.
@@ -130,7 +131,7 @@ pub enum ServerMsg {
 }
 
 /// Réponse d'un utilisateur pour `Debug` : jamais son contenu (phrase de passe).
-struct Masque<'a>(&'a Option<String>);
+struct Masque<'a>(&'a Option<Zeroizing<String>>);
 
 impl std::fmt::Debug for Masque<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -363,7 +364,7 @@ mod tests {
         });
         ar(ClientMsg::Repondre {
             demande: 9,
-            reponse: Some("yes".into()),
+            reponse: Some("yes".to_string().into()),
             memoriser: true,
         });
         ar(ClientMsg::Repondre {
@@ -383,7 +384,7 @@ mod tests {
         });
         ar(ServerMsg::DemandeClose { demande: 1 });
         ar(ServerMsg::Reponse {
-            reponse: Some("x".into()),
+            reponse: Some("x".to_string().into()),
             memoriser: false,
         });
         ar(ServerMsg::Message("texte".into()));
@@ -402,11 +403,11 @@ mod tests {
     fn debug_ne_montre_pas_la_phrase() {
         let r = ClientMsg::Repondre {
             demande: 1,
-            reponse: Some("PHRASE-SECRETE".into()),
+            reponse: Some("PHRASE-SECRETE".to_string().into()),
             memoriser: false,
         };
         let a = ServerMsg::Reponse {
-            reponse: Some("PHRASE-SECRETE".into()),
+            reponse: Some("PHRASE-SECRETE".to_string().into()),
             memoriser: true,
         };
         for t in [format!("{r:?}"), format!("{a:?}"), format!("{r:#?}")] {

@@ -2,16 +2,19 @@
 //! Tests d'intégration du serveur de `pupitre-fond` : un vrai socket, de vrais shells.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use pupitre_fond::serveur::{preparer_dossier, run_avec, socket_path};
+use pupitre_fond::serveur::{
+    preparer_dossier, run_avec, run_avec_coffre, socket_path, CoffreCommun,
+};
 use pupitre_fond::ssh::EntreesSsh;
 use pupitre_proto::{
     read_frame, write_frame, ClientMsg, DemandeId, EtatTrousseau, Genre, ServerMsg, SessionId,
     VERSION,
 };
+use pupitre_ssh::trousseau::{Coffre, CoffreMemoire, CoffreSecretService};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -22,6 +25,17 @@ struct Serveur {
 }
 
 /// Entrées SSH isolées : ni l'agent ni le `/tmp` de l'utilisateur ne sont consultés.
+impl Drop for Serveur {
+    /// Le serveur tourne dans un fil que la fin du processus de test interrompt sans le
+    /// laisser nettoyer : l'agent qu'il a lancé (propre à ce dossier de test) est tué ici.
+    fn drop(&mut self) {
+        let motif = format!("ssh-agent -D -a {}", self.dossier.path().display());
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", &motif])
+            .status();
+    }
+}
+
 fn entrees_isolees(dossier: &Path) -> EntreesSsh {
     let tmp = dossier.join("tmp");
     std::fs::create_dir_all(&tmp).unwrap();
@@ -40,6 +54,15 @@ fn demarrer(idle: Duration) -> Serveur {
 
 /// Démarre un serveur dont les entrées SSH sont isolées puis ajustées par `regler`.
 fn demarrer_avec(idle: Duration, regler: impl FnOnce(&mut EntreesSsh)) -> Serveur {
+    demarrer_coffre(idle, regler, Arc::new(CoffreMemoire::default()))
+}
+
+/// Comme [`demarrer_avec`], avec le dépôt des phrases de passe choisi.
+fn demarrer_coffre(
+    idle: Duration,
+    regler: impl FnOnce(&mut EntreesSsh),
+    coffre: CoffreCommun,
+) -> Serveur {
     // Un shell de test ne doit pas hériter de l'agent ou de l'askpass de l'utilisateur.
     static NETTOYAGE: std::sync::Once = std::sync::Once::new();
     NETTOYAGE.call_once(|| {
@@ -54,7 +77,7 @@ fn demarrer_avec(idle: Duration, regler: impl FnOnce(&mut EntreesSsh)) -> Serveu
     let (tx, fin) = mpsc::channel();
     let s = socket.clone();
     thread::spawn(move || {
-        let _ = tx.send(run_avec(&s, idle, entrees));
+        let _ = tx.send(run_avec_coffre(&s, idle, entrees, coffre));
     });
     Serveur {
         dossier,
@@ -169,7 +192,7 @@ impl Client {
     fn repondre(&mut self, demande: DemandeId, texte: &str) {
         self.envoyer(ClientMsg::Repondre {
             demande,
-            reponse: Some(texte.into()),
+            reponse: Some(texte.to_string().into()),
             memoriser: false,
         });
     }
@@ -637,7 +660,9 @@ fn demandeur(socket: &Path) -> Client {
 
 fn attendre_reponse(c: &mut Client) -> (Option<String>, bool) {
     c.attendre(|m| match m {
-        ServerMsg::Reponse { reponse, memoriser } => Some((reponse.clone(), *memoriser)),
+        ServerMsg::Reponse { reponse, memoriser } => {
+            Some((reponse.as_ref().map(|r| r.to_string()), *memoriser))
+        }
         _ => None,
     })
 }
@@ -650,7 +675,7 @@ fn demande_relayee_puis_reponse() {
     let d = ui.attendre_demande();
     ui.envoyer(ClientMsg::Repondre {
         demande: d,
-        reponse: Some("secret".into()),
+        reponse: Some("secret".to_string().into()),
         memoriser: true,
     });
     assert_eq!(attendre_reponse(&mut ask), (Some("secret".into()), true));
@@ -733,4 +758,275 @@ fn demandeur_ne_retient_pas_le_fond() {
         .recv_timeout(Duration::from_secs(3))
         .expect("le fond reste vivant à cause d'un demandeur")
         .unwrap();
+}
+
+// ---------------------------------------------------------------------------------------
+// Chargement des clés mémorisées dans l'agent
+// ---------------------------------------------------------------------------------------
+
+/// Garde : ces tests écrivent dans le trousseau, ils ne tournent que sous le trousseau
+/// jetable de `scripts/trousseau-test.sh` (voir `scripts/test-x11.sh`).
+fn jetable() -> bool {
+    let ok = std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_some();
+    if !ok {
+        println!("ignoré : trousseau jetable absent");
+    }
+    ok
+}
+
+/// Les tests du trousseau partagent un seul trousseau, et chaque fond charge TOUTES les clés
+/// qui y sont : on les exécute l'un après l'autre, sur un trousseau vidé.
+fn exclusif() -> Option<std::sync::MutexGuard<'static, ()>> {
+    static VERROU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    if !jetable() {
+        return None;
+    }
+    let garde = VERROU.lock().unwrap_or_else(|e| e.into_inner());
+    let coffre = CoffreSecretService::ouvrir();
+    for c in coffre.cles() {
+        let _ = coffre.oublier(&c);
+    }
+    Some(garde)
+}
+
+/// `pupitre-askpass` compilé (une fois) dans le dossier `target/debug` du dépôt.
+fn binaire_askpass() -> PathBuf {
+    static COMPILATION: std::sync::Once = std::sync::Once::new();
+    let racine = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    COMPILATION.call_once(|| {
+        let ok = std::process::Command::new(env!("CARGO"))
+            .args([
+                "build",
+                "-q",
+                "-p",
+                "pupitre-ssh",
+                "--bin",
+                "pupitre-askpass",
+            ])
+            .current_dir(&racine)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "compilation de pupitre-askpass");
+    });
+    racine.join("target/debug/pupitre-askpass")
+}
+
+/// Clé jetable chiffrée. Le `-N` met la phrase (sans valeur) de test sur la ligne de
+/// commande d'`ssh-keygen` : toléré dans un test, interdit dans le code de production.
+fn cle_chiffree(dossier: &Path, phrase: &str) -> PathBuf {
+    let cle = dossier.join("cle-test");
+    let ok = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", phrase, "-f"])
+        .arg(&cle)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "ssh-keygen");
+    cle
+}
+
+fn lister(agent: &Path) -> String {
+    let s = std::process::Command::new("ssh-add")
+        .arg("-l")
+        .env("SSH_AUTH_SOCK", agent)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&s.stdout).into_owned()
+}
+
+/// Fond avec le vrai (jetable) Secret Service, l'askpass compilé et un agent à lui.
+fn demarrer_reel(coffre: &Arc<CoffreSecretService>) -> Serveur {
+    let askpass = binaire_askpass();
+    demarrer_coffre(
+        Duration::from_secs(2),
+        |e| e.askpass = Some(askpass),
+        coffre.clone(),
+    )
+}
+
+fn attendre_chargee(s: &Serveur) -> bool {
+    let agent = s.dossier.path().join("pupitre/agent.sock");
+    let limite = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < limite {
+        if lister(&agent).contains("ED25519") {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    false
+}
+
+/// Fin du fond (et donc de son agent) : l'inactivité l'arrête.
+fn arreter(s: Serveur) {
+    s.fin
+        .recv_timeout(Duration::from_secs(20))
+        .expect("fond arrêté")
+        .unwrap();
+}
+
+#[test]
+fn cle_memorisee_chargee_au_demarrage() {
+    let Some(_exclusif) = exclusif() else {
+        return;
+    };
+    let t = tempfile::tempdir().unwrap();
+    let cle = cle_chiffree(t.path(), "phrase-de-test");
+    let coffre = Arc::new(CoffreSecretService::ouvrir());
+    coffre.ecrire(&cle, "phrase-de-test").unwrap();
+    let s = demarrer_reel(&coffre);
+    let chargee = attendre_chargee(&s);
+    let _ = coffre.oublier(&cle);
+    assert!(chargee, "la clé mémorisée aurait dû être chargée");
+    arreter(s);
+}
+
+#[test]
+fn phrase_memorisee_fausse_est_oubliee() {
+    let Some(_exclusif) = exclusif() else {
+        return;
+    };
+    let t = tempfile::tempdir().unwrap();
+    let cle = cle_chiffree(t.path(), "la-bonne");
+    let coffre = Arc::new(CoffreSecretService::ouvrir());
+    coffre.ecrire(&cle, "la-fausse").unwrap();
+    let debut = Instant::now();
+    let s = demarrer_reel(&coffre);
+    // L'interface arrive après le chargement possible : elle se connecte tout de suite et
+    // ouvre un onglet pour recevoir les messages (le bandeau n'est envoyé qu'aux interfaces).
+    let mut ui = Client::connecter(&s.socket);
+    let texte = ui.attendre(|m| match m {
+        ServerMsg::Message(t) if t.contains("ne fonctionne plus") => Some(t.clone()),
+        _ => None,
+    });
+    let attendu = format!(
+        "La phrase de passe mémorisée pour {} ne fonctionne plus ; elle a été oubliée. Elle sera redemandée.",
+        pupitre_ssh::trousseau::chemin_lisible(&cle)
+    );
+    assert_eq!(texte, attendu);
+    assert!(coffre.lire(&cle).is_none(), "entrée oubliée");
+    assert!(debut.elapsed() < Duration::from_secs(20));
+    assert!(!lister(&s.dossier.path().join("pupitre/agent.sock")).contains("ED25519"));
+    drop(ui);
+    arreter(s);
+}
+
+#[test]
+fn cle_deja_dans_l_agent_pas_rechargee() {
+    let Some(_exclusif) = exclusif() else {
+        return;
+    };
+    let t = tempfile::tempdir().unwrap();
+    let cle = cle_chiffree(t.path(), "la-bonne");
+    // Notre propre agent, où la clé est déjà chargée (phrase fournie par un faux askpass).
+    let agent_sock = t.path().join("a.sock");
+    let _agent = pupitre_ssh::agent::AgentPupitre::lancer(&agent_sock, &[]).unwrap();
+    let faux = t.path().join("faux.sh");
+    std::fs::write(&faux, "#!/bin/sh\necho la-bonne\n").unwrap();
+    std::fs::set_permissions(&faux, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let ok = std::process::Command::new("ssh-add")
+        .arg("--")
+        .arg(&cle)
+        .env("SSH_AUTH_SOCK", &agent_sock)
+        .env("SSH_ASKPASS", &faux)
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok);
+    // Une phrase FAUSSE est mémorisée : si le fond rechargeait la clé, elle serait oubliée.
+    let coffre = Arc::new(CoffreSecretService::ouvrir());
+    coffre.ecrire(&cle, "la-fausse").unwrap();
+    let askpass = binaire_askpass();
+    let s = demarrer_coffre(
+        Duration::from_secs(2),
+        |e| {
+            e.askpass = Some(askpass);
+            e.env_sock = Some(agent_sock.clone());
+        },
+        coffre.clone(),
+    );
+    let mut ui = Client::connecter(&s.socket);
+    ui.envoyer(ClientMsg::List);
+    ui.attendre(|m| matches!(m, ServerMsg::Sessions(_)).then_some(()));
+    thread::sleep(Duration::from_secs(3));
+    let encore = coffre.lire(&cle).is_some();
+    let _ = coffre.oublier(&cle);
+    assert!(encore, "la clé déjà chargée a été rechargée");
+    drop(ui);
+    arreter(s);
+}
+
+/// Coffre verrouillé, pour le message unique.
+struct CoffreVerrouille;
+
+impl Coffre for CoffreVerrouille {
+    fn etat(&self) -> EtatTrousseau {
+        EtatTrousseau::Verrouille
+    }
+    fn lire(&self, _: &Path) -> Option<zeroize::Zeroizing<String>> {
+        None
+    }
+    fn ecrire(&self, _: &Path, _: &str) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
+        Err(pupitre_ssh::trousseau::ErreurTrousseau::Verrouille)
+    }
+    fn oublier(&self, _: &Path) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
+        Ok(())
+    }
+    fn cles(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn trousseau_verrouille_message_unique() {
+    let s = demarrer_coffre(
+        Duration::from_secs(2),
+        |e| e.askpass = Some("/bin/true".into()),
+        Arc::new(CoffreVerrouille),
+    );
+    let mut ui = Client::connecter(&s.socket);
+    let attendu = "Trousseau verrouillé : les clés mémorisées n'ont pas été chargées.";
+    // Le premier onglet relance le chargement : le message arrive à l'interface.
+    ui.ouvrir(&["sh", "-c", "sleep 2"]);
+    ui.attendre(|m| matches!(m, ServerMsg::Message(t) if t == attendu).then_some(()));
+    // Un deuxième onglet réessaie mais ne répète pas le message.
+    ui.ouvrir(&["sh", "-c", "sleep 2"]);
+    thread::sleep(Duration::from_secs(1));
+    ui.envoyer(ClientMsg::List);
+    ui.attendre(|m| {
+        assert!(
+            !matches!(m, ServerMsg::Message(t) if t == attendu),
+            "message répété"
+        );
+        matches!(m, ServerMsg::Sessions(_)).then_some(())
+    });
+    drop(ui);
+    arreter(s);
+}
+
+#[test]
+fn charger_cle_demande_par_l_askpass() {
+    let Some(_exclusif) = exclusif() else {
+        return;
+    };
+    let t = tempfile::tempdir().unwrap();
+    let cle = cle_chiffree(t.path(), "phrase-de-test");
+    let coffre = Arc::new(CoffreSecretService::ouvrir());
+    // Fond démarré avec un trousseau vide : rien à charger au départ.
+    let s = demarrer_reel(&coffre);
+    let agent = s.dossier.path().join("pupitre/agent.sock");
+    thread::sleep(Duration::from_secs(1));
+    assert!(!lister(&agent).contains("ED25519"));
+    // L'askpass vient de mémoriser la phrase puis demande le chargement.
+    coffre.ecrire(&cle, "phrase-de-test").unwrap();
+    let mut ask = demandeur(&s.socket);
+    ask.envoyer(ClientMsg::ChargerCle { cle: cle.clone() });
+    let chargee = attendre_chargee(&s);
+    let _ = coffre.oublier(&cle);
+    assert!(chargee);
+    drop(ask);
+    arreter(s);
 }

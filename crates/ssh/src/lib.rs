@@ -3,5 +3,6 @@
 //! tard) trousseau, analyse des invites OpenSSH et lecture de `~/.ssh/config`.
 
 pub mod agent;
+pub mod askpass;
 pub mod invite;
 pub mod trousseau;
