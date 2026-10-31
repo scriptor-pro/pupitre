@@ -180,6 +180,14 @@ fn rechargement(f: &FenetrePupitre, config: &Path) -> Resultat {
         format!("fond initial {}", fond(f))
     })?;
     let clair = theme_clair().fond;
+    let sombre = theme_sombre().fond;
+    // Échauffement non chronométré : sans écran et avec un cache vide, les premiers
+    // affichages peuvent occuper la boucle GTK plus d'une seconde (vu une fois : 1,8 s).
+    ecrire_et_attendre(config, "theme = \"clair\"\n", || fond(f) == clair)
+        .ok_or("échauffement : thème clair non appliqué")?;
+    ecrire_et_attendre(config, "theme = \"sombre\"\n", || fond(f) == sombre)
+        .ok_or("échauffement : thème sombre non appliqué")?;
+    patienter(Duration::from_millis(500));
     let d = ecrire_et_attendre(config, "theme = \"clair\"\n", || fond(f) == clair)
         .ok_or_else(|| format!("fond {} au lieu de {clair}", fond(f)))?;
     println!("  appliqué en {} ms", d.as_millis());
