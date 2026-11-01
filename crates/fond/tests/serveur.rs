@@ -86,10 +86,14 @@ fn demarrer_coffre(
     }
 }
 
-/// Faux agent SSH : répond à chaque connexion par une liste d'identités vide.
+/// Faux agent SSH : répond à chaque connexion par une liste d'identités vide. Son dossier
+/// est en `0700`, comme `XDG_RUNTIME_DIR` ou ceux de `ssh-agent` (un dossier modifiable
+/// par le groupe serait refusé).
 fn faux_agent(chemin: &Path) {
     use std::io::{Read, Write};
-    std::fs::create_dir_all(chemin.parent().unwrap()).unwrap();
+    let dossier = chemin.parent().unwrap();
+    std::fs::create_dir_all(dossier).unwrap();
+    std::fs::set_permissions(dossier, std::fs::Permissions::from_mode(0o700)).unwrap();
     let l = std::os::unix::net::UnixListener::bind(chemin).unwrap();
     thread::spawn(move || {
         for mut s in l.incoming().flatten() {

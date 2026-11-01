@@ -32,8 +32,59 @@ pub fn agent_joignable(socket: &Path, delai: Duration) -> bool {
     sonder(socket, delai).unwrap_or(false)
 }
 
+/// Connexion à `socket` bornée par `delai` : un socket dont la file d'attente est pleine
+/// ne bloque pas l'appelant (le fil central du processus de fond).
+fn connecter(socket: &Path, delai: Duration) -> io::Result<UnixStream> {
+    use nix::errno::Errno;
+    use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
+    use nix::sys::socket::{
+        connect, getsockopt, socket as nouveau_socket, sockopt, AddressFamily, SockFlag, SockType,
+        UnixAddr,
+    };
+    use std::os::fd::{AsFd, AsRawFd};
+
+    let limite = Instant::now() + delai;
+    let adresse = UnixAddr::new(socket)?;
+    loop {
+        let fd = nouveau_socket(
+            AddressFamily::Unix,
+            SockType::Stream,
+            SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+            None,
+        )?;
+        match connect(fd.as_raw_fd(), &adresse) {
+            Ok(()) => {}
+            Err(Errno::EINPROGRESS) => {
+                let reste = limite.saturating_duration_since(Instant::now());
+                let ms = u16::try_from(reste.as_millis()).unwrap_or(u16::MAX);
+                let mut attente = [PollFd::new(fd.as_fd(), PollFlags::POLLOUT)];
+                if poll(&mut attente, PollTimeout::from(ms))? == 0 {
+                    return Err(io::ErrorKind::TimedOut.into());
+                }
+                let erreur = getsockopt(&fd, sockopt::SocketError)?;
+                if erreur != 0 {
+                    return Err(io::Error::from_raw_os_error(erreur));
+                }
+            }
+            // File d'attente pleine (Linux répond EAGAIN aux sockets Unix) : nouvel essai
+            // jusqu'au délai.
+            Err(Errno::EAGAIN) => {
+                if Instant::now() >= limite {
+                    return Err(io::ErrorKind::TimedOut.into());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        }
+        let flux = UnixStream::from(fd);
+        flux.set_nonblocking(false)?;
+        return Ok(flux);
+    }
+}
+
 fn sonder(socket: &Path, delai: Duration) -> io::Result<bool> {
-    let mut flux = UnixStream::connect(socket)?;
+    let mut flux = connecter(socket, delai)?;
     flux.set_read_timeout(Some(delai))?;
     flux.set_write_timeout(Some(delai))?;
     flux.write_all(&REQUETE_IDENTITES)?;
@@ -48,13 +99,40 @@ fn sonder(socket: &Path, delai: Duration) -> io::Result<bool> {
     Ok(genre[0] == REPONSE_IDENTITES)
 }
 
-/// Vrai si `chemin` est un socket (liens suivis) appartenant à l'utilisateur
-/// courant.
+fn mon_uid() -> u32 {
+    nix::unistd::getuid().as_raw()
+}
+
+/// Vrai si `chemin` est un socket (liens suivis) appartenant à `uid`.
+fn socket_de(chemin: &Path, uid: u32) -> bool {
+    fs::metadata(chemin).is_ok_and(|m| m.file_type().is_socket() && m.uid() == uid)
+}
+
+/// Vrai si `chemin` est un socket (liens suivis) appartenant à l'utilisateur courant.
 fn socket_a_moi(chemin: &Path) -> bool {
-    match fs::metadata(chemin) {
-        Ok(m) => m.file_type().is_socket() && m.uid() == nix::unistd::getuid().as_raw(),
-        Err(_) => false,
+    socket_de(chemin, mon_uid())
+}
+
+/// Chemin canonique de `chemin` s'il peut servir d'agent à `uid` sans qu'un autre compte
+/// puisse le détourner : le socket n'est pas un lien et appartient à `uid` ; son dossier
+/// n'est pas un lien, appartient à `uid` et n'est pas modifiable par le groupe ni les
+/// autres (sinon le socket pourrait y être remplacé). Sous `/tmp`, n'importe qui peut
+/// créer `ssh-XXX/agent.N` : sans ces contrôles, Pupitre adopterait l'agent d'un autre
+/// et lui confierait les clés déchiffrées.
+fn candidat_sur(chemin: &Path, uid: u32) -> Option<PathBuf> {
+    let m = fs::symlink_metadata(chemin).ok()?;
+    if !m.file_type().is_socket() || m.uid() != uid {
+        return None;
     }
+    let dossier = fs::symlink_metadata(chemin.parent()?).ok()?;
+    if !dossier.is_dir() || dossier.uid() != uid || dossier.mode() & 0o022 != 0 {
+        return None;
+    }
+    // Les dossiers au-dessus (`/tmp`, `XDG_RUNTIME_DIR`) peuvent être des liens : on adopte
+    // le chemin réel, à condition qu'il désigne bien le même socket.
+    let canonique = fs::canonicalize(chemin).ok()?;
+    let c = fs::symlink_metadata(&canonique).ok()?;
+    (c.dev() == m.dev() && c.ino() == m.ino()).then_some(canonique)
 }
 
 /// Sockets d'agent plausibles, par ordre de préférence.
@@ -78,12 +156,14 @@ pub fn candidats_agent(runtime: &Path, tmp: &Path) -> Vec<PathBuf> {
             liste.extend(trouves);
         }
     }
-    liste.retain(|c| socket_a_moi(c));
-    liste
+    let uid = mon_uid();
+    liste.iter().filter_map(|c| candidat_sur(c, uid)).collect()
 }
 
 /// Agent de l'environnement s'il répond, sinon premier candidat joignable.
 /// `delai` borne chaque sonde ; la recherche entière est bornée par [`DELAI_RECHERCHE`].
+/// `SSH_AUTH_SOCK` est une variable de l'utilisateur : un lien y est permis (tmux,
+/// `~/.ssh/agent.sock`…), mais le socket désigné doit lui appartenir.
 pub fn chercher_agent(
     env_sock: Option<&Path>,
     runtime: &Path,
@@ -96,7 +176,7 @@ pub fn chercher_agent(
         !reste.is_zero() && agent_joignable(s, delai.min(reste))
     };
     if let Some(s) = env_sock {
-        if sonde(s) {
+        if socket_a_moi(s) && sonde(s) {
             return Some(s.to_path_buf());
         }
     }
@@ -239,9 +319,17 @@ mod tests {
 
     const REPONSE: [u8; 9] = [0, 0, 0, 5, 12, 0, 0, 0, 0];
 
+    /// Dossier en `0700`, comme ceux que crée `ssh-agent` (le masque de création de
+    /// l'utilisateur peut donner `0775`).
+    fn dossier_prive(d: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(d).unwrap();
+        std::fs::set_permissions(d, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
     /// Faux agent : répond à chaque connexion par une liste d'identités vide.
     fn faux_agent(chemin: &Path) {
-        std::fs::create_dir_all(chemin.parent().unwrap()).unwrap();
+        dossier_prive(chemin.parent().unwrap());
         let l = UnixListener::bind(chemin).unwrap();
         std::thread::spawn(move || {
             for mut s in l.incoming().flatten() {
@@ -262,7 +350,7 @@ mod tests {
         let mut gardes = Vec::new();
         for i in 0..20 {
             let c = tmp.join(format!("ssh-{i:02}/agent.1"));
-            std::fs::create_dir_all(c.parent().unwrap()).unwrap();
+            dossier_prive(c.parent().unwrap());
             let l = UnixListener::bind(&c).unwrap();
             // Agents muets : ils acceptent sans répondre.
             std::thread::spawn(move || {
@@ -280,6 +368,117 @@ mod tests {
             None
         );
         assert!(debut.elapsed() < Duration::from_millis(1500));
+    }
+
+    /// Prépare `tmp/<dossier>/agent.1` avec un faux agent qui répond.
+    fn candidat_tmp(tmp: &Path, dossier: &str) -> PathBuf {
+        let c = tmp.join(dossier).join("agent.1");
+        faux_agent(&c);
+        c
+    }
+
+    #[test]
+    fn lien_symbolique_refuse() {
+        let t = tempfile::tempdir().unwrap();
+        let rt = t.path().join("rt");
+        let tmp = t.path().join("tmp");
+        // Un vrai agent à moi, ailleurs, et un lien vers lui posé dans /tmp par un tiers.
+        let vrai = candidat_tmp(&t.path().join("ailleurs"), "ssh-vrai");
+        dossier_prive(&tmp.join("ssh-0000"));
+        std::os::unix::fs::symlink(&vrai, tmp.join("ssh-0000/agent.1")).unwrap();
+        assert!(candidats_agent(&rt, &tmp).is_empty());
+        assert_eq!(chercher_agent(None, &rt, &tmp, D), None);
+        // Même chose avec un dossier `ssh-*` qui est un lien.
+        std::fs::remove_dir_all(tmp.join("ssh-0000")).unwrap();
+        std::os::unix::fs::symlink(vrai.parent().unwrap(), tmp.join("ssh-0001")).unwrap();
+        assert!(candidats_agent(&rt, &tmp).is_empty());
+    }
+
+    #[test]
+    fn dossier_ouvert_a_tous_refuse() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let rt = t.path().join("rt");
+        let tmp = t.path().join("tmp");
+        let c = candidat_tmp(&tmp, "ssh-ouvert");
+        let dossier = c.parent().unwrap();
+        for mode in [0o777, 0o770, 0o702] {
+            std::fs::set_permissions(dossier, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(candidats_agent(&rt, &tmp).is_empty(), "{mode:o}");
+        }
+        // Le mode que crée `ssh-agent` (mkdtemp) est accepté.
+        std::fs::set_permissions(dossier, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(candidats_agent(&rt, &tmp), vec![c.clone()]);
+        // Dans le dossier d'exécution aussi.
+        let r = rt.join("gcr/ssh");
+        faux_agent(&r);
+        std::fs::set_permissions(rt.join("gcr"), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(candidats_agent(&rt, &tmp), vec![c]);
+    }
+
+    #[test]
+    fn autre_proprietaire_refuse() {
+        let t = tempfile::tempdir().unwrap();
+        let c = candidat_tmp(&t.path().join("tmp"), "ssh-x");
+        let moi = nix::unistd::getuid().as_raw();
+        assert!(candidat_sur(&c, moi).is_some());
+        // Vu d'un autre utilisateur, ni le socket ni son dossier ne sont à lui.
+        assert!(candidat_sur(&c, moi + 1).is_none());
+        assert!(!socket_de(&c, moi + 1));
+    }
+
+    #[test]
+    fn env_qui_n_est_pas_un_socket_a_moi_ignore() {
+        let t = tempfile::tempdir().unwrap();
+        let rt = t.path().join("rt");
+        let env = t.path().join("env");
+        std::fs::write(&env, b"x").unwrap();
+        assert_eq!(chercher_agent(Some(&env), &rt, t.path(), D), None);
+        // Un lien vers un socket à moi (tmux, ~/.ssh/agent.sock…) reste accepté.
+        let vrai = t.path().join("vrai");
+        faux_agent(&vrai);
+        let lien = t.path().join("lien");
+        std::os::unix::fs::symlink(&vrai, &lien).unwrap();
+        assert_eq!(chercher_agent(Some(&lien), &rt, t.path(), D), Some(lien));
+    }
+
+    #[test]
+    fn connexion_bornee_si_la_file_est_pleine() {
+        use nix::sys::socket::{bind, listen, socket, AddressFamily, Backlog, SockFlag};
+        use nix::sys::socket::{SockType, UnixAddr};
+        let t = tempfile::tempdir().unwrap();
+        let s = t.path().join("plein");
+        // Socket qui écoute avec une file minuscule et n'accepte jamais.
+        let fd = socket(
+            AddressFamily::Unix,
+            SockType::Stream,
+            SockFlag::SOCK_CLOEXEC,
+            None,
+        )
+        .unwrap();
+        bind(
+            std::os::fd::AsRawFd::as_raw_fd(&fd),
+            &UnixAddr::new(&s).unwrap(),
+        )
+        .unwrap();
+        listen(&fd, Backlog::new(0).unwrap()).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let chemin = s.clone();
+        std::thread::spawn(move || {
+            for _ in 0..6 {
+                let debut = Instant::now();
+                let ok = agent_joignable(&chemin, Duration::from_millis(200));
+                let _ = tx.send((ok, debut.elapsed()));
+            }
+        });
+        for _ in 0..6 {
+            let (ok, duree) = rx
+                .recv_timeout(Duration::from_secs(3))
+                .expect("sonde bloquée sur une file pleine");
+            assert!(!ok);
+            assert!(duree < Duration::from_secs(1), "{duree:?}");
+        }
+        drop(fd);
     }
 
     #[test]
