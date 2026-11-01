@@ -77,7 +77,9 @@ fn main() {
     ex.lancer("onglet_cache_puis_navigation", onglet_cache_puis_navigation);
     ex.lancer("largeur_changee_garde_la_navigation", largeur_changee);
     ex.lancer("reponse_tardive_pas_envoyee", reponse_tardive);
-    ex.lancer("sortie_sans_c_non_lue", sortie_sans_c);
+    ex.lancer("entree_vide_et_ctrl_c", entree_vide_et_ctrl_c);
+    ex.lancer("ecran_alternatif_pendant_un_zoom", ecran_alternatif);
+    ex.lancer("cout_borne_du_redimensionnement", cout_borne);
     ex.lancer("raccourcis_sans_conflit", raccourcis_sans_conflit);
     ex.conclure();
 }
@@ -791,29 +793,114 @@ fn reponse_tardive() -> Resultat {
     res
 }
 
-/// La marque C a été perdue : seul le texte saisi est lu, pas la sortie qui suit.
-fn sortie_sans_c() -> Resultat {
+/// Entrée vide puis Ctrl+C à l'invite (bash, zsh : D sans C) : aucune entrée navigable, aucune
+/// annonce, même avec « toutes ».
+fn entree_vide_et_ctrl_c() -> Resultat {
+    let b = Banc::nouveau(config_annonce(AnnonceFin::Toutes), None);
+    let d = |code| Fin {
+        code: Some(code),
+        duree_ms: None,
+    };
+    for code in [0, 130] {
+        b.fond.marque(1, Invite, false);
+        b.fond.octets(1, "$ ");
+        b.fond.marque(1, Saisie, false);
+        b.fond.octets(1, "\r\n");
+        b.fond.marque(1, d(code), false);
+    }
+    b.fond.marque(1, Invite, false);
+    b.fond.octets(1, "$ ");
+    b.fond.marque(1, Saisie, false);
+    let res = b.attendre_commandes(1).and_then(|()| {
+        patienter(Duration::from_millis(700));
+        verifier(b.o.nombre_commandes() == 1, || {
+            format!("{} entrées pour une invite", b.o.nombre_commandes())
+        })?;
+        verifier(b.o.annonces().is_empty(), || {
+            format!("annonces : {:?}", b.o.annonces())
+        })?;
+        attendu(b.naviguer(true), "Aucune commande avant.")
+    });
+    b.fermer();
+    res
+}
+
+/// Écran alternatif (vim, less) affiché pendant un zoom : la navigation n'est pas effacée.
+fn ecran_alternatif() -> Resultat {
     let b = Banc::nouveau(Config::default(), None);
-    b.fond.marque(1, Invite, false);
-    b.fond.octets(1, "$ ");
-    b.fond.marque(1, Saisie, false);
-    b.fond.octets(1, "ls -l\r\n");
-    let sortie: String = (0..40).map(|i| format!("fichier {i}\r\n")).collect();
-    b.fond.octets(1, &sortie);
-    b.fond.marque(
-        1,
-        Fin {
-            code: Some(0),
-            duree_ms: None,
-        },
-        false,
-    );
-    b.fond.marque(1, Invite, false);
-    b.fond.octets(1, "$ ");
-    b.fond.marque(1, Saisie, false);
-    let res = b
-        .attendre_commandes(2)
-        .and_then(|()| attendu(b.naviguer(true), "Commande : ls -l"));
+    let res = (|| {
+        trois_commandes(&b)?;
+        b.fond.octets(1, "\x1b[?1049h\x1b[H\x1b[2Jvim");
+        patienter(Duration::from_millis(400));
+        b.o.terminal().zoomer(Some(-3), 200);
+        patienter(Duration::from_millis(800));
+        b.o.terminal().zoomer(Some(2), 200);
+        patienter(Duration::from_millis(800));
+        b.fond.octets(1, "\x1b[?1049l");
+        patienter(Duration::from_millis(500));
+        verifier(b.o.nombre_commandes() >= 3, || {
+            format!(
+                "{} commandes après l'écran alternatif",
+                b.o.nombre_commandes()
+            )
+        })?;
+        attendu(b.naviguer(true), "Commande : echo trois")?;
+        attendu(b.naviguer(true), "Commande : echo deux")?;
+        attendu(b.naviguer(true), "Commande : echo un")
+    })();
+    b.fermer();
+    res
+}
+
+/// Historique de 10 000 lignes, environ 500 commandes notées, 20 changements de largeur
+/// d'un même geste : le coût des conversions est mesuré et borné, la navigation reste juste.
+fn cout_borne() -> Resultat {
+    let config = Config {
+        historique_lignes: 10_000,
+        ..Config::default()
+    };
+    let b = Banc::nouveau(config, None);
+    let total = 480;
+    let res = (|| {
+        for i in 0..total {
+            b.fond.commande(1, &format!("echo {i}"), 19, 0, Some(10));
+        }
+        // Chaque marque attend VTE : quelques dizaines de secondes pour 480 commandes.
+        verifier(
+            attendre(Duration::from_secs(120), || b.o.nombre_commandes() >= total),
+            || format!("{} commandes sur {total}", b.o.nombre_commandes()),
+        )?;
+        patienter(Duration::from_millis(600));
+        let (t0, n0, _) = b.o.terminal().conversions();
+        let debut = std::time::Instant::now();
+        for i in 0..20 {
+            b.o.terminal()
+                .zoomer(Some(if i % 2 == 0 { -1 } else { 1 }), 200);
+            patienter(Duration::from_millis(30));
+        }
+        patienter(Duration::from_millis(900));
+        let ecoule = debut.elapsed();
+        let (t, n, imprecis) = b.o.terminal().conversions();
+        println!(
+            "  mesure : {} conversions en {:?} (20 changements de largeur, {ecoule:?} de geste), {imprecis} non suivi(s)",
+            n - n0,
+            t - t0
+        );
+        verifier(imprecis == 0, || {
+            format!("{imprecis} réagencements non suivis")
+        })?;
+        verifier(n - n0 <= 4, || {
+            format!("{} conversions pour un geste", n - n0)
+        })?;
+        verifier(t - t0 < Duration::from_millis(200), || {
+            format!("conversions : {:?} (200 ms au plus)", t - t0)
+        })?;
+        attendu(b.naviguer(true), &format!("Commande : echo {}", total - 1))?;
+        attendu(b.naviguer(true), &format!("Commande : echo {}", total - 2))?;
+        verifier(b.haut_visible() == format!("$ echo {}", total - 2), || {
+            format!("haut de la vue : « {} »", b.haut_visible())
+        })
+    })();
     b.fermer();
     res
 }

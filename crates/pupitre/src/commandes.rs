@@ -20,7 +20,7 @@ use pupitre_proto::MarqueCommande;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use vte4::prelude::*;
 
 /// Durée à partir de laquelle une commande est « longue » (réglage `longues`).
@@ -28,6 +28,14 @@ pub const SEUIL_LONGUE_MS: u64 = 5_000;
 /// Délai après lequel une attente de VTE est abandonnée (VTE ne répond jamais : on ne
 /// bloque pas pour autant les octets qui suivent).
 const DELAI_ATTENTE: Duration = Duration::from_millis(1000);
+/// Silence qui met fin à un geste de redimensionnement (les positions sont alors
+/// reconverties), et durée maximale d'un geste.
+const CALME: Duration = Duration::from_millis(200);
+const GESTE_MAX: Duration = Duration::from_secs(2);
+/// Silence après lequel on vérifie que VTE a tout lu (pour pouvoir suivre un réagencement).
+const REPOS: Duration = Duration::from_millis(80);
+/// Une demande de position sans réponse est oubliée après ce délai.
+const OUBLI_DEMANDE: Duration = Duration::from_secs(5);
 /// Octets en attente au-delà desquels les marques sont abandonnées pour ne pas retenir la
 /// sortie (mémoire bornée).
 const FILE_MAX_OCTETS: usize = 8 * 1024 * 1024;
@@ -260,17 +268,10 @@ impl MarquesOnglet {
                         c.fin = Some(code);
                         Some((code, duree_ms))
                     }
-                    // Fin sans exécution connue (marque C perdue) : l'invite affichée a bien
-                    // été validée, la commande est close pour que l'invite suivante en
-                    // ouvre une autre. Annoncée si le fond a mesuré une durée ; sinon c'est
-                    // l'invite initiale d'un shell (D sans commande), rien à dire.
-                    None => {
-                        self.courant = None;
-                        if let Some(c) = self.commandes.back_mut().filter(|c| c.en_saisie()) {
-                            c.fin = Some(code);
-                        }
-                        duree_ms.map(|d| (code, Some(d)))
-                    }
+                    // Fin sans exécution : Entrée vide ou Ctrl+C à l'invite (bash et zsh
+                    // envoient D sans C), ou marque C perdue. Aucune entrée n'est créée ;
+                    // annoncée seulement si le fond a mesuré une durée.
+                    None => duree_ms.map(|d| (code, Some(d))),
                 }
             }
         }
@@ -396,63 +397,166 @@ struct Calibrage {
     premiere: i64,
 }
 
-/// Rangée (`g`) de la ligne logique d'une position, comptée à partir de celle du curseur, et
-/// décalage en cellules dans cette ligne logique : ne dépend pas de la largeur.
+/// Rangée (`g`) de la ligne logique d'une position (0 : celle du curseur, 1, 2… : les
+/// précédentes, -1, -2… : les suivantes) et décalage en cellules dans cette ligne logique :
+/// ne dépend pas de la largeur.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PosLogique {
-    g: usize,
+    g: i64,
     decalage: i64,
 }
 
-/// Positions notées avant un réagencement de VTE (changement de largeur).
+/// Positions notées avant un réagencement de VTE (changement de largeur), gardées sous
+/// forme logique le temps d'un geste de redimensionnement.
 struct Instantane {
     positions: Vec<Option<PosLogique>>,
     g_max: usize,
+    k_max: usize,
+    /// Début du geste.
+    debut: Instant,
+    /// Dernière allocation de largeur vue.
+    derniere: Instant,
 }
 
-/// Première ligne de chaque ligne logique en remontant du curseur : `debuts[g]` pour la
-/// ligne logique du curseur (`g = 0`), la précédente (`g = 1`)… `dur(r)` dit si un vrai retour
-/// à la ligne sépare les lignes `r - 1` et `r`. S'arrête à la ligne `borne` ou quand
-/// `debuts[g_max]` est complet.
-fn debuts_logiques(curseur: i64, borne: i64, g_max: usize, dur: &dyn Fn(i64) -> bool) -> Vec<i64> {
-    let mut debuts = vec![curseur];
+/// Première ligne de chaque ligne logique autour du curseur.
+#[derive(Debug, PartialEq, Eq)]
+struct Carte {
+    /// `haut[g]` : première ligne de la ligne logique `g` (0 : celle du curseur).
+    haut: Vec<i64>,
+    /// `bas[k - 1]` : première ligne de la ligne logique `-k` (sous celle du curseur).
+    bas: Vec<i64>,
+}
+
+/// Construit la carte autour de `curseur`. `dur(r)` dit si un vrai retour à la ligne sépare
+/// les lignes `r - 1` et `r`. Vers le haut, on s'arrête à `borne_haut` ou quand la ligne
+/// logique `g_max` est complète ; vers le bas, à `borne_bas` ou après `k_max` lignes.
+fn construire_carte(
+    curseur: i64,
+    borne_haut: i64,
+    g_max: usize,
+    borne_bas: i64,
+    k_max: usize,
+    dur: &dyn Fn(i64) -> bool,
+) -> Carte {
+    let mut haut = vec![curseur];
     let mut r = curseur;
-    while r > borne.max(0) {
+    while r > borne_haut.max(0) {
         let p = r - 1;
         if dur(r) {
-            if debuts.len() > g_max {
+            if haut.len() > g_max {
                 break;
             }
-            debuts.push(p);
-        } else if let Some(d) = debuts.last_mut() {
+            haut.push(p);
+        } else if let Some(d) = haut.last_mut() {
             *d = p;
         }
         r = p;
     }
-    debuts
+    let mut bas = Vec::new();
+    let mut r = curseur;
+    while r < borne_bas && bas.len() < k_max {
+        r += 1;
+        if dur(r) {
+            bas.push(r);
+        }
+    }
+    Carte { haut, bas }
 }
 
-/// Position logique de `pos`, ou `None` si elle est hors de la zone connue.
-fn vers_logique(pos: Pos, curseur: i64, debuts: &[i64], colonnes: i64) -> Option<PosLogique> {
-    if pos.ligne > curseur {
-        return None;
+impl Carte {
+    fn debut(&self, g: i64) -> Option<i64> {
+        if g >= 0 {
+            self.haut.get(usize::try_from(g).ok()?).copied()
+        } else {
+            self.bas.get(usize::try_from(-g - 1).ok()?).copied()
+        }
     }
-    // La plus petite rangée dont la première ligne ne dépasse pas la position.
-    let g = debuts.iter().position(|&d| d <= pos.ligne)?;
-    let debut = *debuts.get(g)?;
+}
+
+/// Position logique de `pos`, ou `None` si elle est plus haut que ce qui est connu.
+fn vers_logique(pos: Pos, curseur: i64, carte: &Carte, colonnes: i64) -> Option<PosLogique> {
+    let g = if pos.ligne <= curseur {
+        // La plus petite rangée dont la première ligne ne dépasse pas la position.
+        i64::try_from(carte.haut.iter().position(|&d| d <= pos.ligne)?).ok()?
+    } else {
+        // Sous le curseur : autant de lignes logiques que de débuts jusqu'à la position.
+        -i64::try_from(carte.bas.iter().take_while(|&&d| d <= pos.ligne).count()).ok()?
+    };
+    let debut = carte.debut(g)?;
     Some(PosLogique {
         g,
         decalage: (pos.ligne - debut) * colonnes + pos.col,
     })
 }
 
-fn depuis_logique(l: PosLogique, debuts: &[i64], colonnes: i64) -> Option<Pos> {
-    let debut = *debuts.get(l.g)?;
+fn depuis_logique(l: PosLogique, carte: &Carte, colonnes: i64) -> Option<Pos> {
+    let debut = carte.debut(l.g)?;
     let colonnes = colonnes.max(1);
     Some(Pos {
         ligne: debut + l.decalage / colonnes,
         col: l.decalage % colonnes,
     })
+}
+
+/// Suit les séquences `CSI ? 47/1047/1049 h/l` du flux : vrai quand l'écran alternatif (vim,
+/// less, htop…) est affiché. Les séquences coupées entre deux morceaux sont recollées.
+#[derive(Debug, Default)]
+struct SuiviEcran {
+    alterne: bool,
+    reste: Vec<u8>,
+}
+
+impl SuiviEcran {
+    fn suivre(&mut self, data: &[u8]) {
+        let mut tout = std::mem::take(&mut self.reste);
+        tout.extend_from_slice(data);
+        let mut i = 0;
+        while i < tout.len() {
+            if tout[i] != 0x1b {
+                i += 1;
+                continue;
+            }
+            // ESC [ ? params final
+            let mut j = i + 1;
+            if tout.get(j).is_some_and(|&c| c != b'[') {
+                i += 1;
+                continue;
+            }
+            j += 1;
+            if tout.get(j).is_some_and(|&c| c != b'?') {
+                i += 1;
+                continue;
+            }
+            j += 1;
+            let debut = j;
+            while tout
+                .get(j)
+                .is_some_and(|&c| c.is_ascii_digit() || c == b';')
+            {
+                j += 1;
+            }
+            match tout.get(j) {
+                // Séquence coupée : on la reprend avec le morceau suivant.
+                None => {
+                    if tout.len() - i <= 32 {
+                        self.reste = tout[i..].to_vec();
+                    }
+                    return;
+                }
+                Some(&f @ (b'h' | b'l')) => {
+                    let modes = &tout[debut..j];
+                    let concerne = modes
+                        .split(|&c| c == b';')
+                        .any(|m| matches!(m, b"47" | b"1047" | b"1049"));
+                    if concerne {
+                        self.alterne = f == b'h';
+                    }
+                    i = j + 1;
+                }
+                Some(_) => i = j.max(i + 1),
+            }
+        }
+    }
 }
 
 type RappelCalibrage = Box<dyn FnOnce(&Flux, Option<Calibrage>)>;
@@ -469,6 +573,8 @@ enum Travail {
 enum Genre {
     Marque(MarqueCommande, bool),
     Calibrage(RappelCalibrage),
+    /// Aucune marque : seulement confirmer que VTE a lu tout ce qu'on lui a donné.
+    Repos,
 }
 
 struct Attente {
@@ -488,9 +594,19 @@ struct Etat {
     /// Des octets sont arrivés depuis la dernière position relevée.
     octets_depuis_pos: bool,
     /// Demandes de position du curseur dont la réponse n'est pas encore revenue (repères,
-    /// dans l'ordre) : la réponse est gardée pour soi même si l'attente a expiré.
-    reponses_attendues: VecDeque<u32>,
+    /// dans l'ordre) : la réponse est gardée pour soi même si l'attente a expiré. Une
+    /// demande perdue est oubliée au bout de `OUBLI_DEMANDE`.
+    reponses_attendues: VecDeque<(u32, Instant)>,
     reponses_gardees: u32,
+    /// Une confirmation de repos est programmée.
+    confirmation_programmee: bool,
+    /// Un minuteur attend la fin du geste de redimensionnement.
+    calme_programme: bool,
+    /// Temps passé à convertir les positions (réagencements), et nombre de conversions.
+    temps_conversions: Duration,
+    conversions: u32,
+    /// Réagencements pour lesquels les positions n'ont pas pu être suivies.
+    reagencements_imprecis: u32,
 }
 
 /// File ordonnée des octets et des marques d'un onglet, avec les lignes des commandes.
@@ -502,6 +618,7 @@ pub struct Flux {
     sur_fin: RefCell<Option<RappelFin>>,
     delai: Cell<Duration>,
     instantane: RefCell<Option<Instantane>>,
+    suivi_ecran: RefCell<SuiviEcran>,
     soi: RefCell<Weak<Flux>>,
 }
 
@@ -516,6 +633,7 @@ impl Flux {
             sur_fin: RefCell::new(None),
             delai: Cell::new(DELAI_ATTENTE),
             instantane: RefCell::new(None),
+            suivi_ecran: RefCell::new(SuiviEcran::default()),
             soi: RefCell::new(Weak::new()),
         });
         *f.soi.borrow_mut() = Rc::downgrade(&f);
@@ -557,48 +675,216 @@ impl Flux {
         t.is_some_and(|t| t.contains('\n'))
     }
 
-    /// À appeler juste avant que VTE réagence ses lignes (largeur de la grille changée) :
-    /// note les positions en lignes logiques.
+    /// Nombre de retours à la ligne durs entre le début de la ligne `de` et celui de `a`.
+    fn retours_durs(&self, de: i64, a: i64) -> i64 {
+        let (t, _) = self
+            .terminal
+            .text_range_format(vte4::Format::Text, de, 0, a, 0);
+        t.map_or(-1, |t| t.matches('\n').count() as i64)
+    }
+
+    /// Carte des lignes logiques autour du curseur. Quand aucune ligne n'est repliée (cas
+    /// courant : une seule lecture du texte suffit à le savoir), chaque ligne est sa propre
+    /// ligne logique et rien d'autre n'est lu ; sinon on lit ligne par ligne, au plus
+    /// jusqu'à `borne_haut` et `borne_bas`.
+    fn carte(
+        &self,
+        curseur: i64,
+        borne_haut: i64,
+        g_max: usize,
+        borne_bas: i64,
+        k_max: usize,
+    ) -> Carte {
+        let haut = borne_haut.clamp(0, curseur);
+        let bas = borne_bas.max(curseur);
+        if self.retours_durs(haut, curseur) == curseur - haut
+            && self.retours_durs(curseur, bas) == bas - curseur
+        {
+            let g_utiles = usize::try_from(curseur - haut).unwrap_or(0).min(g_max);
+            let k_utiles = usize::try_from(bas - curseur).unwrap_or(0).min(k_max);
+            return Carte {
+                haut: (0..=g_utiles).map(|g| curseur - g as i64).collect(),
+                bas: (1..=k_utiles).map(|k| curseur + k as i64).collect(),
+            };
+        }
+        construire_carte(curseur, borne_haut, g_max, borne_bas, k_max, &|r| {
+            self.retour_dur(r)
+        })
+    }
+
+    /// Première ligne absolue qui peut encore être dans l'historique de VTE : l'ajustement
+    /// compte les lignes conservées, le curseur en fait partie.
+    fn premiere_ligne(&self, curseur: i64) -> i64 {
+        let conservees = self
+            .terminal
+            .vadjustment()
+            .map_or(i64::MAX / 2, |a| a.upper() as i64);
+        (curseur - (conservees - 1).max(0)).max(0)
+    }
+
+    /// Écran alternatif affiché (vim, less…) d'après le flux donné à VTE.
+    pub fn ecran_alterne(&self) -> bool {
+        self.suivi_ecran.borrow().alterne
+    }
+
+    /// À appeler juste avant que VTE réagence ses lignes (largeur de la grille changée).
+    ///
+    /// Au début d'un geste, les positions sont notées en lignes logiques (une fois) et la
+    /// sortie des programmes est retenue ; les changements de largeur suivants ne coûtent
+    /// rien. Le retour aux lignes absolues se fait au calme (`CALME` sans changement), à la
+    /// prochaine navigation, ou au bout de `GESTE_MAX`, et reste exact : VTE ne reçoit rien
+    /// entre-temps, donc le curseur est resté sur la même ligne logique.
+    ///
+    /// Si ce n'est pas possible (écran alternatif affiché, ou octets donnés à VTE et pas
+    /// encore confirmés lus), les positions sont gardées telles quelles, jamais effacées ;
+    /// elles ne sont alors imprécises que pour les lignes repliées.
     pub fn avant_reagencement(&self) {
-        let positions = self.marques.borrow().positions();
+        if let Some(i) = self.instantane.borrow_mut().as_mut() {
+            i.derniere = Instant::now();
+            return;
+        }
+        if self.marques.borrow().is_empty() {
+            return;
+        }
+        let repos = {
+            let e = self.etat.borrow();
+            e.attente.is_none() && !e.octets_depuis_pos
+        };
+        if self.ecran_alterne() || !repos || !self.terminal.is_mapped() {
+            self.etat.borrow_mut().reagencements_imprecis += 1;
+            return;
+        }
+        let debut = Instant::now();
         let colonnes = self.terminal.column_count();
         let (_, curseur) = self.terminal.cursor_position();
+        // D'abord oublier ce qui est sorti de l'historique : rien à convertir pour cela.
+        let premiere = self.premiere_ligne(curseur);
+        self.marques
+            .borrow_mut()
+            .remplacer_positions(|p| (p.ligne >= premiere).then_some(p));
+        let positions = self.marques.borrow().positions();
         if positions.is_empty() || colonnes <= 0 {
-            *self.instantane.borrow_mut() = None;
             return;
         }
         let haut = positions.iter().map(|p| p.ligne).min().unwrap_or(curseur);
-        let debuts = debuts_logiques(curseur, haut, usize::MAX, &|r| self.retour_dur(r));
+        let bas = positions.iter().map(|p| p.ligne).max().unwrap_or(curseur);
+        let carte = self.carte(curseur, haut, usize::MAX, bas, usize::MAX);
         let logiques: Vec<Option<PosLogique>> = positions
             .iter()
-            .map(|&p| vers_logique(p, curseur, &debuts, colonnes))
+            .map(|&p| vers_logique(p, curseur, &carte, colonnes))
             .collect();
-        let g_max = logiques.iter().flatten().map(|l| l.g).max().unwrap_or(0);
+        let g_max = logiques
+            .iter()
+            .flatten()
+            .filter_map(|l| usize::try_from(l.g).ok())
+            .max()
+            .unwrap_or(0);
+        let k_max = logiques
+            .iter()
+            .flatten()
+            .filter_map(|l| usize::try_from(-l.g).ok())
+            .max()
+            .unwrap_or(0);
         *self.instantane.borrow_mut() = Some(Instantane {
             positions: logiques,
             g_max,
+            k_max,
+            debut: Instant::now(),
+            derniere: Instant::now(),
         });
-        // Les positions relevées plus tard ne dépendent pas de celles-ci.
         let mut e = self.etat.borrow_mut();
         e.derniere_pos = None;
+        e.temps_conversions += debut.elapsed();
+        e.conversions += 1;
     }
 
-    /// À appeler juste après le réagencement : retrouve les lignes des positions notées.
+    /// À appeler juste après l'allocation : attend le calme pour reconvertir les positions.
     pub fn apres_reagencement(&self) {
+        if self.instantane.borrow().is_none() || self.etat.borrow().calme_programme {
+            return;
+        }
+        self.etat.borrow_mut().calme_programme = true;
+        self.armer_calme(CALME);
+    }
+
+    fn armer_calme(&self, delai: Duration) {
+        let faible = self.soi.borrow().clone();
+        gtk::glib::timeout_add_local_once(delai, move || {
+            if let Some(f) = faible.upgrade() {
+                f.calme_ecoule();
+            }
+        });
+    }
+
+    fn calme_ecoule(&self) {
+        let reste = {
+            let i = self.instantane.borrow();
+            match i.as_ref() {
+                None => {
+                    self.etat.borrow_mut().calme_programme = false;
+                    return;
+                }
+                Some(i) => {
+                    let calme = i.derniere.elapsed();
+                    let geste = i.debut.elapsed();
+                    if calme >= CALME || geste >= GESTE_MAX {
+                        None
+                    } else {
+                        Some(CALME - calme)
+                    }
+                }
+            }
+        };
+        match reste {
+            Some(d) => self.armer_calme(d),
+            None => {
+                self.etat.borrow_mut().calme_programme = false;
+                self.restaurer();
+            }
+        }
+    }
+
+    /// Reconvertit les positions en lignes absolues (fin du geste) puis reprend la file.
+    fn restaurer(&self) {
         let Some(inst) = self.instantane.borrow_mut().take() else {
             return;
         };
+        let debut = Instant::now();
         let colonnes = self.terminal.column_count();
         let (_, curseur) = self.terminal.cursor_position();
-        let debuts = debuts_logiques(curseur, 0, inst.g_max, &|r| self.retour_dur(r));
+        let carte = self.carte(
+            curseur,
+            self.premiere_ligne(curseur),
+            inst.g_max,
+            curseur + self.terminal.row_count(),
+            inst.k_max,
+        );
         let mut suivantes = inst.positions.iter();
         self.marques.borrow_mut().remplacer_positions(|_| {
             suivantes
                 .next()
                 .copied()
                 .flatten()
-                .and_then(|l| depuis_logique(l, &debuts, colonnes))
+                .and_then(|l| depuis_logique(l, &carte, colonnes))
         });
+        {
+            let mut e = self.etat.borrow_mut();
+            e.temps_conversions += debut.elapsed();
+            e.derniere_pos = None;
+        }
+        self.avancer();
+    }
+
+    /// Temps passé à convertir les positions et nombre de conversions (tests).
+    #[doc(hidden)]
+    pub fn conversions(&self) -> (Duration, u32, u32) {
+        let e = self.etat.borrow();
+        (e.temps_conversions, e.conversions, e.reagencements_imprecis)
+    }
+
+    /// Retient la sortie tant qu'un geste de redimensionnement n'est pas fini.
+    fn en_geste(&self) -> bool {
+        self.instantane.borrow().is_some()
     }
 
     /// Octets reçus du shell, dans l'ordre.
@@ -609,7 +895,7 @@ impl Flux {
         let direct = {
             let e = self.etat.borrow();
             e.attente.is_none() && e.file.is_empty()
-        };
+        } && !self.en_geste();
         if direct {
             self.donner_octets(data);
             return;
@@ -632,8 +918,33 @@ impl Flux {
     }
 
     fn donner_octets(&self, data: &[u8]) {
-        self.etat.borrow_mut().octets_depuis_pos = true;
+        self.suivi_ecran.borrow_mut().suivre(data);
+        let programmer = {
+            let mut e = self.etat.borrow_mut();
+            e.octets_depuis_pos = true;
+            !std::mem::replace(&mut e.confirmation_programmee, true)
+        };
         (self.donner)(data);
+        if programmer {
+            let faible = self.soi.borrow().clone();
+            gtk::glib::timeout_add_local_once(REPOS, move || {
+                if let Some(f) = faible.upgrade() {
+                    f.confirmer_repos();
+                }
+            });
+        }
+    }
+
+    /// Un moment après les derniers octets : un repère pour savoir que VTE a tout lu.
+    fn confirmer_repos(&self) {
+        let utile = {
+            let mut e = self.etat.borrow_mut();
+            e.confirmation_programmee = false;
+            e.octets_depuis_pos && e.attente.is_none() && e.file.is_empty()
+        };
+        if utile && !self.en_geste() && self.terminal.is_mapped() {
+            self.attendre(Genre::Repos, b"");
+        }
     }
 
     /// Trop d'octets attendent : on cesse d'attendre VTE, les octets passent et les marques
@@ -662,7 +973,7 @@ impl Flux {
         loop {
             let travail = {
                 let mut e = self.etat.borrow_mut();
-                if e.attente.is_some() {
+                if e.attente.is_some() || self.instantane.borrow().is_some() {
                     return;
                 }
                 let t = e.file.pop_front();
@@ -718,7 +1029,10 @@ impl Flux {
         let mut data = avant.to_vec();
         data.extend_from_slice(format!("\x1b]666;{REPERE}={repere}\x1b\\").as_bytes());
         if avant.starts_with(b"\x1b[6n") {
-            self.etat.borrow_mut().reponses_attendues.push_back(repere);
+            self.etat
+                .borrow_mut()
+                .reponses_attendues
+                .push_back((repere, Instant::now()));
         }
         self.terminal.feed(&data);
         self.armer_delai(repere);
@@ -800,6 +1114,12 @@ impl Flux {
                 let calibrage = a.reponse.and_then(|r| self.calibrer_avec(r));
                 f(self, calibrage);
             }
+            Genre::Repos => {
+                let (col, ligne) = self.terminal.cursor_position();
+                let mut e = self.etat.borrow_mut();
+                e.derniere_pos = Some(Pos { ligne, col });
+                e.octets_depuis_pos = false;
+            }
         }
         self.avancer();
     }
@@ -839,7 +1159,15 @@ impl Flux {
         let mut e = self.etat.borrow_mut();
         // Les réponses reviennent dans l'ordre des demandes ; une réponse tardive (attente
         // expirée) est gardée aussi, sans quoi elle partirait au programme comme une frappe.
-        let Some(repere) = e.reponses_attendues.pop_front() else {
+        // Une demande restée sans réponse ne doit pas avaler une réponse du programme.
+        while e
+            .reponses_attendues
+            .front()
+            .is_some_and(|(_, t)| t.elapsed() > OUBLI_DEMANDE)
+        {
+            e.reponses_attendues.pop_front();
+        }
+        let Some((repere, _)) = e.reponses_attendues.pop_front() else {
             return false;
         };
         e.reponses_gardees += 1;
@@ -854,6 +1182,13 @@ impl Flux {
     /// Va à la commande précédente ou suivante : défile pour mettre sa ligne en haut puis
     /// appelle `fini` avec ce qu'il faut annoncer (`None` : navigation impossible).
     pub fn naviguer(&self, sens: Sens, fini: impl FnOnce(Option<Navigation>) + 'static) {
+        // Écran alternatif : les lignes lues seraient celles du programme, pas les nôtres.
+        if self.ecran_alterne() {
+            fini(None);
+            return;
+        }
+        // Un geste de redimensionnement en cours est terminé d'abord.
+        self.restaurer();
         let rappel: RappelCalibrage = Box::new(move |flux, calibrage| {
             fini(calibrage.map(|c| flux.aller(sens, c)));
         });
@@ -1108,23 +1443,22 @@ mod tests {
     }
 
     #[test]
-    fn fin_sans_c_ferme_la_commande() {
-        // A B (C perdue) sortie D A : deux commandes, la première close.
+    fn entree_vide_et_ctrl_c_ne_creent_rien() {
+        // bash et zsh : D sans C à chaque Entrée vide ou Ctrl+C, puis une nouvelle invite.
         let mut m = MarquesOnglet::new(100);
-        m.appliquer(Invite, p(0, 0));
-        m.appliquer(Saisie, p(0, 2));
-        m.appliquer(
-            Fin {
-                code: Some(0),
-                duree_ms: None,
-            },
-            p(40, 0),
-        );
-        m.appliquer(Invite, p(41, 0));
-        assert_eq!(m.len(), 2);
-        let n = m.deplacer(Sens::Precedente).unwrap();
-        // Sans C, le texte s'arrête au début de la commande suivante (puis à sa ligne).
-        assert_eq!(m.plage_texte(n.numero), Some((p(0, 2), Some(p(41, 0)))));
+        let d = |code| Fin {
+            code: Some(code),
+            duree_ms: None,
+        };
+        for (l, code) in [(0, 0), (2, 130)] {
+            m.appliquer(Invite, p(l, 0));
+            m.appliquer(Saisie, p(l, 2));
+            assert_eq!(m.appliquer(d(code), p(l + 1, 0)), None);
+        }
+        m.appliquer(Invite, p(4, 0));
+        m.appliquer(Saisie, p(4, 2));
+        assert_eq!(m.len(), 1, "une seule invite en saisie");
+        assert!(m.deplacer(Sens::Precedente).is_none());
     }
 
     #[test]
@@ -1132,10 +1466,9 @@ mod tests {
         // Avant : 80 colonnes. Lignes 0-1 : une ligne logique repliée (100 caractères) ;
         // 2 : une ligne ; 3-4 : une ligne repliée ; curseur ligne 5.
         let dur_avant = |r: i64| matches!(r, 2 | 3 | 5);
-        let debuts = debuts_logiques(5, 0, usize::MAX, &dur_avant);
-        assert_eq!(debuts, [5, 3, 2, 0]);
-        let marque = p(1, 20); // 100e cellule de la première ligne logique : 80 + 20
-        let l = vers_logique(marque, 5, &debuts, 80).unwrap();
+        let carte = construire_carte(5, 0, usize::MAX, 5, usize::MAX, &dur_avant);
+        assert_eq!(carte.haut, [5, 3, 2, 0]);
+        let l = vers_logique(p(1, 20), 5, &carte, 80).unwrap();
         assert_eq!(
             l,
             PosLogique {
@@ -1143,28 +1476,73 @@ mod tests {
                 decalage: 100
             }
         );
-        let l2 = vers_logique(p(4, 10), 5, &debuts, 80).unwrap();
+        let l2 = vers_logique(p(4, 10), 5, &carte, 80).unwrap();
         assert_eq!(l2, PosLogique { g: 1, decalage: 90 });
-        // Après : 120 colonnes, plus de repli : la première ligne logique tient sur une ligne.
-        // Lignes 0 : première ; 1 : deuxième ; 2 : troisième (3-4 réunies) ; curseur 3.
+        // Après : 120 colonnes, plus de repli. Curseur ligne 3.
         let dur_apres = |r: i64| (1..=3).contains(&r);
-        let debuts2 = debuts_logiques(3, 0, 3, &dur_apres);
-        assert_eq!(debuts2, [3, 2, 1, 0]);
+        let carte2 = construire_carte(3, 0, 3, 3, usize::MAX, &dur_apres);
+        assert_eq!(carte2.haut, [3, 2, 1, 0]);
         assert_eq!(
-            depuis_logique(l, &debuts2, 120),
+            depuis_logique(l, &carte2, 120),
             Some(Pos { ligne: 0, col: 100 })
         );
         assert_eq!(
-            depuis_logique(l2, &debuts2, 120),
+            depuis_logique(l2, &carte2, 120),
             Some(Pos { ligne: 2, col: 90 })
         );
         // Ligne logique plus ancienne que ce qui est connu : perdue.
         assert_eq!(
-            depuis_logique(PosLogique { g: 9, decalage: 0 }, &debuts2, 120),
+            depuis_logique(PosLogique { g: 9, decalage: 0 }, &carte2, 120),
             None
         );
-        // Position après le curseur : pas de ligne logique.
-        assert_eq!(vers_logique(p(9, 0), 5, &debuts, 80), None);
+    }
+
+    #[test]
+    fn positions_sous_le_curseur_gardees() {
+        // Curseur ligne 2 ; dessous : lignes 3 (début d'une ligne logique), 4-5 repliées.
+        let dur = |r: i64| matches!(r, 3 | 4);
+        let carte = construire_carte(2, 0, usize::MAX, 6, usize::MAX, &dur);
+        assert_eq!(carte.bas, [3, 4]);
+        let l = vers_logique(p(5, 7), 2, &carte, 80).unwrap();
+        assert_eq!(
+            l,
+            PosLogique {
+                g: -2,
+                decalage: 87
+            }
+        );
+        // Même position après un réagencement : les deux lignes ne se replient plus.
+        let dur2 = |r: i64| matches!(r, 3 | 4);
+        let carte2 = construire_carte(2, 0, 0, 6, 2, &dur2);
+        assert_eq!(
+            depuis_logique(l, &carte2, 200),
+            Some(Pos { ligne: 4, col: 87 })
+        );
+        // Sur la ligne logique du curseur mais sous lui (curseur au milieu d'un repli).
+        let l0 = vers_logique(p(2, 5), 2, &carte, 80).unwrap();
+        assert_eq!(l0.g, 0);
+    }
+
+    #[test]
+    fn suivi_de_l_ecran_alternatif() {
+        let mut s = SuiviEcran::default();
+        s.suivre(b"abc\x1b[?1049hvim");
+        assert!(s.alterne);
+        s.suivre(b"\x1b[?25h"); // curseur visible : sans rapport
+        assert!(s.alterne);
+        // Séquence coupée entre deux morceaux.
+        s.suivre(b"fin\x1b[?10");
+        assert!(s.alterne);
+        s.suivre(b"49l\r\n");
+        assert!(!s.alterne);
+        s.suivre(b"\x1b[?1;47h");
+        assert!(s.alterne);
+        s.suivre(b"\x1b[?1047l");
+        assert!(!s.alterne);
+        s.suivre(b"\x1b[?2004h\x1b[?47");
+        assert!(!s.alterne);
+        s.suivre(b"h");
+        assert!(s.alterne);
     }
 
     #[test]

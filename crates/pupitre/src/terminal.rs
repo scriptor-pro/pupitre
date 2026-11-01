@@ -133,7 +133,9 @@ mod imp {
 
         fn size_allocate(&self, largeur: i32, hauteur: i32, ligne_de_base: i32) {
             let t = &self.terminal;
-            let change = largeur != self.largeur.replace(largeur) || self.probable.replace(false);
+            let largeur_changee = largeur != self.largeur.replace(largeur);
+            let probable = self.probable.replace(false);
+            let change = largeur_changee || probable;
             if change {
                 if let Some((avant, _)) = self.autour_largeur.borrow().as_ref() {
                     avant();
@@ -209,6 +211,8 @@ pub struct TerminalOnglet {
     /// Octets et marques de commandes dans l'ordre, et lignes des commandes.
     flux: Rc<Flux>,
     zoom: Cell<u16>,
+    /// Police appliquée en dernier (un changement réagence les lignes).
+    police: RefCell<String>,
     /// Clignotement demandé par la configuration (appliqué si les animations sont permises).
     clignote: Rc<Cell<bool>>,
     lanceur: Rc<RefCell<Lanceur>>,
@@ -365,6 +369,7 @@ impl TerminalOnglet {
             attenuation,
             flux,
             zoom: Cell::new(100),
+            police: RefCell::new(String::new()),
             clignote,
             lanceur,
             flashs,
@@ -390,8 +395,9 @@ impl TerminalOnglet {
                 u16::try_from(v).unwrap_or(100)
             }
         };
-        self.zoom.set(z);
-        self.cadre.reagencement_probable();
+        if z != self.zoom.replace(z) {
+            self.cadre.reagencement_probable();
+        }
         self.terminal().set_font_scale(f64::from(z) / 100.0);
     }
 
@@ -541,6 +547,13 @@ impl TerminalOnglet {
         self.flux.reponses_gardees()
     }
 
+    /// Temps passé à convertir les positions, nombre de conversions et de réagencements non
+    /// suivis (tests).
+    #[doc(hidden)]
+    pub fn conversions(&self) -> (Duration, u32, u32) {
+        self.flux.conversions()
+    }
+
     /// Nombre de commandes repérées dans le flux.
     pub fn nombre_commandes(&self) -> usize {
         self.flux.nombre_commandes()
@@ -571,7 +584,10 @@ impl TerminalOnglet {
         t.set_color_cursor_foreground(Some(&rgba(theme.fond)));
         t.set_color_highlight(Some(&rgba(theme.selection_fond)));
         t.set_color_highlight_foreground(Some(&rgba(theme.selection_texte)));
-        self.cadre.reagencement_probable();
+        if *self.police.borrow() != config.police {
+            self.police.replace(config.police.clone());
+            self.cadre.reagencement_probable();
+        }
         t.set_font(Some(&pango::FontDescription::from_string(&config.police)));
         self.clignote.set(config.curseur_clignote);
         t.set_cursor_blink_mode(mode_curseur(config.curseur_clignote));
