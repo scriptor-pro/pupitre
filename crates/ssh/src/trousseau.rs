@@ -2,9 +2,10 @@
 //! Phrases de passe des clés SSH dans le trousseau du système (Secret Service).
 //!
 //! Règles : on ne déverrouille jamais le trousseau, on ne crée jamais de
-//! collection, et toute erreur D-Bus se traduit par « absent » (jamais de
-//! panique). Le service est cherché à chaque appel : il peut apparaître ou
-//! disparaître pendant la vie de Pupitre.
+//! collection, et aucune erreur D-Bus ne fait paniquer : service ou collection
+//! introuvables donnent « absent », les autres échecs une [`ErreurTrousseau`].
+//! Le service est cherché à chaque appel : il peut apparaître ou disparaître
+//! pendant la vie de Pupitre.
 //!
 //! Temps borné : la bibliothèque n'offre pas de délai. Chaque opération tourne
 //! donc sur un fil à part, attendu au plus [`DELAI_TROUSSEAU`] ; au-delà, elle
