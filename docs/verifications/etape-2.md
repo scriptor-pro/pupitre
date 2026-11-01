@@ -127,5 +127,36 @@ SSH) :
 
 Résultat conforme.
 
+## Relecture finale — 2026-11-01
+
+Relecture de toute l'étape (0123944..1338c5a), puis une passe de corrections
+(1338c5a..718111c), relue et approuvée :
+
+- C1 : plantage de l'interface à chaque relance quand une demande restait ouverte, à cause
+  d'un `RefMut` gardé pendant `destroy()`. Les demandes en double sont maintenant ignorées.
+- I1 : messages gardés pour la première interface perdus (par exemple « Trousseau
+  verrouillé »).
+- I2 : message « … elle a été oubliée » affiché à tort quand le trousseau dépassait son délai.
+  Le délai dépassé est désormais distinct d'une entrée absente.
+- I3 : un agent SSH d'un autre utilisateur pouvait être adopté. Sont maintenant refusés : les
+  liens, les propriétaires étrangers, les dossiers ouverts en écriture au groupe ou aux autres.
+- M1 à M8 : délai d'accueil du fond de 5 s ; nouvel essai après « verrouillé » conservé ;
+  garde du trousseau jetable vérifiée par le PID du démon ; bandeau retiré à la perte du
+  fond ; `PUPITRE_ASKPASS_MODE` retiré des shells ; connexion aux agents candidats bornée ;
+  documentation.
+
+Après les corrections : clippy et fmt propres ; X11 277 tests réussis, Wayland 274 ;
+isolement propre ; Orca 16/16.
+
+**Restes connus, reportés :**
+
+- Un trousseau qui dépasse son délai est présenté dans la fenêtre de demande comme « Aucun
+  trousseau disponible ». `EtatTrousseau` passe par le protocole, et lui ajouter une
+  variante casserait un fond plus ancien resté en marche : correction prévue avec un
+  protocole v3. Aucun oubli ni faux message n'en découle.
+- Un client qui a dit `Hello` compte déjà comme interface (`serveur.rs`, `interfaces()`) :
+  un message gardé pourrait partir vers un askpass au lieu d'une fenêtre. Défaut mineur,
+  déjà présent avant l'étape.
+
 **Non fait** : l'essai sur machines virtuelles GNOME/Wayland, KDE/Wayland et Sway (reporté
 depuis l'étape 1).
