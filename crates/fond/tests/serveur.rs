@@ -1027,6 +1027,33 @@ fn trousseau_verrouille_message_unique() {
 }
 
 #[test]
+fn message_garde_livre_apres_la_reponse() {
+    // Le message gardé pour la première interface arrive après la réponse à sa première
+    // requête (`Sessions`), qui crée la première fenêtre : jamais avant.
+    let s = demarrer_coffre(
+        Duration::from_secs(2),
+        |e| e.askpass = Some("/bin/true".into()),
+        Arc::new(CoffreVerrouille),
+    );
+    // Laisse le chargement constater le verrou avant l'arrivée de l'interface.
+    thread::sleep(Duration::from_millis(800));
+    let mut ui = Client::connecter(&s.socket);
+    ui.envoyer(ClientMsg::List);
+    let mut sessions_vues = false;
+    ui.attendre(|m| match m {
+        ServerMsg::Sessions(_) => {
+            sessions_vues = true;
+            None
+        }
+        ServerMsg::Message(_) => Some(()),
+        _ => None,
+    });
+    assert!(sessions_vues, "message livré avant la réponse Sessions");
+    drop(ui);
+    arreter(s);
+}
+
+#[test]
 fn charger_cle_demande_par_l_askpass() {
     let Some(_exclusif) = exclusif() else {
         return;

@@ -290,7 +290,7 @@ struct ChargementEtat {
     /// Le message « trousseau verrouillé » a été émis (montré ou gardé pour une interface).
     verrouille_signale: bool,
     /// Messages du chargement qu'aucune interface n'a encore pu recevoir : remis à la
-    /// première interface qui parle.
+    /// première interface qui parle, après la réponse à sa requête.
     messages_en_attente: Vec<String>,
 }
 
@@ -393,9 +393,11 @@ impl Etat {
             }
             // Un client qui parle sans être demandeur est une interface : elle reçoit ce
             // que le chargement n'a pu dire plus tôt (le demandeur, lui, ne reçoit rien).
+            // Après la réponse à sa requête : la réponse à `List` (`Sessions`) crée la
+            // première fenêtre, où le message doit apparaître.
             _ if !matches!(m, ClientMsg::Demander { .. } | ClientMsg::ChargerCle { .. }) => {
-                self.livrer_messages_en_attente(cid);
                 self.message_accueilli(cid, m);
+                self.livrer_messages_en_attente(cid);
             }
             _ => self.message_accueilli(cid, m),
         }
