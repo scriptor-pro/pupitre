@@ -321,6 +321,7 @@ le chemin du fichier.
 | `shell` (à venir) | `""` (shell de connexion) | nom ou chemin, ex. `"fish"` |
 | `invite` (à venir) | `"starship"` | `"starship"` ou `"shell"` |
 | `annonce_fin_commande` (à venir) | `"longues"` | `"longues"`, `"toutes"`, `"aucune"` |
+| `langue` (à venir) | `""` (langue du système) | `"fr"`, `"en"`, `"es"`, `"it"`, `"de"`, `"nl"` ; appliqué au prochain lancement |
 
 Exemple de shells déclarés (à venir) :
 
@@ -441,3 +442,4 @@ l'enregistrement ne laisse jamais un fichier à moitié écrit.
 - Fenêtre de réglages (police, taille, thème, shell, invite, annonces), accessible au
   clavier et avec Orca.
 - Paquet `.deb`.
+- Pupitre en anglais, espagnol, italien, allemand et néerlandais, selon la langue du système.
