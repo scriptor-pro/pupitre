@@ -39,8 +39,8 @@ remplissent leur cache dans `~/.cache` : Mesa (`mesa_shader_cache`, `mesa_shader
 et fontconfig (`fontconfig`). Ce n'est pas le code de Pupitre ; le script les signale à
 part, sans échec.
 
-**Non fait** : l'essai sur machines virtuelles GNOME/Wayland, KDE/Wayland et Sway (aucune
-de ces sessions n'est installée ici). Le scénario « 3 onglets, `kill -9`, relance » est
+**Non fait** : l'essai sur machines virtuelles GNOME/Wayland et KDE/Wayland. Sway : fait le
+2026-11-01, voir « Essai sous Sway » plus bas. Le scénario « 3 onglets, `kill -9`, relance » est
 couvert par le test automatique ci-dessus sur X11 et Weston.
 
 ### Défauts trouvés par le test Orca automatisé, et corrigés
@@ -70,3 +70,32 @@ couvert par le test automatique ci-dessus sur X11 et Weston.
 Reste connu : sur la barre d'onglets, Orca lit parfois la description deux fois
 (« essai, onglet 2 sur 2, groupement, essai, onglet 2 sur 2 ») ; c'est sa façon de
 présenter un groupement.
+
+## Essai sous Sway (VM) — 2026-11-01
+
+`scripts/vm-sway.sh tout` : VM Debian 13 (image officielle, empreinte vérifiée ; 2 cœurs,
+2 Go ; KVM), Sway 1.10.1 sans écran (backend headless), clavier fr dvorak, Pupitre de
+`target/release`. Touches simulées par `wtype`, résultats lus dans des fichiers, fenêtres
+par `swaymsg`, accessibilité par AT-SPI. Déroulé : `tests/vm/essai-sway.sh`.
+
+**13 réussis sur 13** : fenêtre ouverte et focalisée (identifiant `fr.pupitre.Pupitre`) ;
+saisie et Entrée ; Ctrl+Maj+T (nouvel onglet, autre terminal) ; Ctrl+Maj+V (collage) ;
+Ctrl+PgPréc ; fenêtre de phrase de passe SSH focalisée, phrase acceptée, clé chargée dans
+l'agent, clavier rendu au terminal ; Ctrl+Maj+O (Connexions SSH focalisée) et Échap ;
+arbre d'accessibilité (liste d'onglets, terminal, bouton « Menu »). Orca lui-même n'est pas
+lancé dans la VM : l'arbre AT-SPI est ce qu'il lit.
+
+**Défauts trouvés et corrigés**
+
+1. *Pupitre paniquait au lancement* (f84c667) : l'icône des fenêtres, ajoutée le jour même,
+   était posée avant l'initialisation de GTK. Aucun test ne lançait le vrai programme ;
+   nouveau test `gui_binaire` (X11 et Wayland).
+2. *Les dialogues n'étaient pas rattachés à l'application* : sous Wayland, Sway les voyait
+   sous l'identifiant `pupitre` au lieu de `fr.pupitre.Pupitre` (bureau : pas d'icône ni de
+   regroupement). Les tests SSH vérifient désormais ce rattachement.
+
+**Particularités de l'outil, pas de Pupitre** : `wtype` envoie son propre plan de clavier à
+chaque appel et GTK, comme le terminal `foot`, perd alors la première touche (contourné par
+une touche neutre). Sous `wtype`, « ( » est arrivé en « [ » dans Pupitre mais pas dans
+`foot` : à confirmer avec un vrai clavier sous Sway ; le traitement des caractères est
+celui de GTK et VTE, Pupitre n'y touche pas.

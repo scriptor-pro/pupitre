@@ -290,6 +290,11 @@ impl Pupitre {
         // `destroy` ne convient pas : il n'arrive qu'à la dernière référence relâchée.
         let faible = Rc::downgrade(&p);
         app.connect_window_removed(move |_, w| {
+            // Les dialogues sont aussi rattachés à l'application : seules les fenêtres
+            // principales sont suivies (aucun emprunt pendant la fermeture d'un dialogue).
+            if !w.is::<gtk::ApplicationWindow>() {
+                return;
+            }
             if let Some(p) = faible.upgrade() {
                 p.fenetres.borrow_mut().retain(|f| {
                     let garder = f.0.fenetre.upcast_ref::<gtk::Window>() != w;
@@ -1698,6 +1703,9 @@ pub(crate) fn confirmer_action(
         .resizable(false)
         .accessible_role(gtk::AccessibleRole::Dialog)
         .build();
+    // Rattachée à l'application : même identifiant (et donc même icône) que les fenêtres
+    // principales pour le bureau.
+    dialogue.set_application(parent.as_ref().application().as_ref());
     let texte = gtk::Label::builder()
         .label(question)
         .wrap(true)

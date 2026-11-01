@@ -58,6 +58,9 @@ pub fn ouvrir_connexions(parent: &FenetrePupitre) -> gtk::Window {
         .default_height(360)
         .accessible_role(gtk::AccessibleRole::Dialog)
         .build();
+    // Rattachée à l'application : même identifiant (et donc même icône) que les fenêtres
+    // principales pour le bureau.
+    dialogue.set_application(parent.fenetre().application().as_ref());
     let liste = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::Browse)
         .activate_on_single_click(false)
@@ -462,6 +465,7 @@ fn ouvrir_formulaire(etat: &Rc<Etat>, indice: Option<usize>) {
         .resizable(false)
         .accessible_role(gtk::AccessibleRole::Dialog)
         .build();
+    fenetre.set_application(etat.dialogue.application().as_ref());
     let boite = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(6)

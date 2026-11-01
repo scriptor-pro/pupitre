@@ -56,6 +56,9 @@ pub fn ouvrir_demande(
         .resizable(false)
         .accessible_role(gtk::AccessibleRole::Dialog)
         .build();
+    // Rattachée à l'application : même identifiant (et donc même icône) que les fenêtres
+    // principales pour le bureau.
+    dialogue.set_application(parent.application().as_ref());
 
     // Une seule réponse, puis la fenêtre disparaît. Détruite sans réponse (fenêtre
     // parente fermée, par exemple), elle répond « annulé ».

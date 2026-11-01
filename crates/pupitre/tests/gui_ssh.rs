@@ -248,6 +248,18 @@ fn preparer(p: &Rc<Pupitre>, marque: &str) -> Result<Rc<Onglet>, String> {
     Ok(o)
 }
 
+/// Un dialogue doit être rattaché à l'application : sous Wayland, le bureau lui donne alors
+/// l'identifiant `fr.pupitre.Pupitre` (et son icône) au lieu du nom du programme.
+fn rattachee(f: gtk::Window) -> Result<gtk::Window, String> {
+    match f.application() {
+        Some(_) => Ok(f),
+        None => Err(format!(
+            "fenêtre « {} » non rattachée à l'application",
+            f.title().unwrap_or_default()
+        )),
+    }
+}
+
 fn fenetre_demande() -> Option<gtk::Window> {
     gtk::Window::list_toplevels()
         .into_iter()
@@ -257,7 +269,8 @@ fn fenetre_demande() -> Option<gtk::Window> {
 
 fn attendre_fenetre() -> Result<gtk::Window, String> {
     attendre(Duration::from_secs(10), || fenetre_demande().is_some());
-    fenetre_demande().ok_or_else(|| format!("fenêtre « {TITRE} » absente"))
+    let f = fenetre_demande().ok_or_else(|| format!("fenêtre « {TITRE} » absente"))?;
+    rattachee(f)
 }
 
 fn descendants(w: &gtk::Widget, v: &mut Vec<gtk::Widget>) {
@@ -595,7 +608,8 @@ fn fenetre_titree(titre: &str) -> Option<gtk::Window> {
 
 fn attendre_titree(titre: &str) -> Result<gtk::Window, String> {
     attendre(Duration::from_secs(10), || fenetre_titree(titre).is_some());
-    fenetre_titree(titre).ok_or_else(|| format!("fenêtre « {titre} » absente"))
+    let f = fenetre_titree(titre).ok_or_else(|| format!("fenêtre « {titre} » absente"))?;
+    rattachee(f)
 }
 
 fn par_nom(fenetre: &gtk::Window, nom: &str) -> Result<gtk::Widget, String> {
