@@ -6,6 +6,7 @@
 
 use crate::invite::classer_invite;
 use crate::trousseau::{Coffre, EtatTrousseau};
+use pupitre_i18n::{t, ta, ArgI18n};
 use pupitre_proto::{read_frame, write_frame, ClientMsg, Genre, ServerMsg, VERSION};
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -13,7 +14,15 @@ use zeroize::Zeroizing;
 
 /// Message sur la sortie d'erreur (jamais de secret).
 fn dire(texte: &str) {
-    eprintln!("pupitre-askpass : {texte}");
+    eprintln!(
+        "{}",
+        ta("askpass-ligne", &[("texte", ArgI18n::from(texte))])
+    );
+}
+
+/// Phrase `id` avec l'erreur `e` en argument `erreur`.
+fn erreur(id: &str, e: &dyn std::fmt::Display) -> String {
+    ta(id, &[("erreur", ArgI18n::from(e.to_string()))])
 }
 
 /// Écrit la réponse suivie de `\n` en un seul `write_all`, depuis un tampon effacé ensuite,
@@ -56,7 +65,7 @@ fn mode_trousseau(genre: &Genre, coffre: &dyn Coffre, sortie: &mut dyn Write) ->
             Ok(Some(phrase)) if ecrire_reponse(sortie, &phrase) => 0,
             Ok(_) => 1,
             Err(e) => {
-                dire(&format!("phrase mémorisée non lue : {e}"));
+                dire(&erreur("askpass-memorisee-non-lue", &e));
                 1
             }
         },
@@ -66,7 +75,7 @@ fn mode_trousseau(genre: &Genre, coffre: &dyn Coffre, sortie: &mut dyn Write) ->
             nouvel_essai: true,
         } => {
             if let Err(e) = coffre.oublier(cle) {
-                dire(&format!("phrase mémorisée non oubliée : {e}"));
+                dire(&erreur("askpass-memorisee-non-oubliee", &e));
             }
             1
         }
@@ -82,13 +91,13 @@ fn mode_normal(
     sortie: &mut dyn Write,
 ) -> i32 {
     let Some(socket) = env("PUPITRE_SOCKET").filter(|s| !s.is_empty()) else {
-        dire("PUPITRE_SOCKET absent : pas de processus de fond à interroger");
+        dire(&t("askpass-socket-absent"));
         return 1;
     };
     let mut flux = match UnixStream::connect(&socket) {
         Ok(f) => f,
         Err(e) => {
-            dire(&format!("processus de fond injoignable : {e}"));
+            dire(&erreur("askpass-fond-injoignable", &e));
             return 1;
         }
     };
@@ -109,7 +118,7 @@ fn mode_normal(
         )
     });
     if envoi.is_err() {
-        dire("échec de l'envoi de la demande");
+        dire(&t("askpass-envoi-echec"));
         return 1;
     }
     // Welcome, Demande, Message… ne nous concernent pas : seule la réponse compte.
@@ -127,7 +136,7 @@ fn mode_normal(
             }
             Ok(_) => {}
             Err(_) => {
-                dire("connexion fermée avant la réponse");
+                dire(&t("askpass-connexion-fermee"));
                 return 1;
             }
         }
@@ -166,7 +175,7 @@ fn memoriser_phrase(coffre: &dyn Coffre, cle: &std::path::Path, phrase: &str) ->
     match coffre.ecrire(cle, phrase) {
         Ok(()) => true,
         Err(e) => {
-            dire(&format!("phrase non mémorisée : {e}"));
+            dire(&erreur("askpass-non-memorisee", &e));
             false
         }
     }

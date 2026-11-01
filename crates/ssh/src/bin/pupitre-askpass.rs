@@ -8,13 +8,26 @@ use std::os::fd::AsFd;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    pupitre_i18n::init(&pupitre_i18n::langues_demandees(&|n| std::env::var(n).ok()));
     let coffre = CoffreSecretService::ouvrir();
     // Sortie sans tampon : un double du descripteur 1 (fichier), pas `stdout()` qui garde
     // les lignes dans un tampon.
     let mut sortie = match std::io::stdout().as_fd().try_clone_to_owned() {
         Ok(fd) => std::fs::File::from(fd),
         Err(e) => {
-            eprintln!("pupitre-askpass : sortie standard inutilisable : {e}");
+            eprintln!(
+                "{}",
+                pupitre_i18n::ta(
+                    "askpass-ligne",
+                    &[(
+                        "texte",
+                        pupitre_i18n::ArgI18n::from(pupitre_i18n::ta(
+                            "askpass-sortie-inutilisable",
+                            &[("erreur", pupitre_i18n::ArgI18n::from(e.to_string()))]
+                        ))
+                    )]
+                )
+            );
             std::process::exit(1);
         }
     };

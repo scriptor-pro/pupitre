@@ -136,9 +136,8 @@ pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {
                 t("config-trop-gros"),
             ));
         }
-        String::from_utf8(octets).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, t("config-pas-utf8"))
-        })
+        String::from_utf8(octets)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, t("config-pas-utf8")))
     };
     lire().map_err(|e| ErreurConfig {
         ligne: None,

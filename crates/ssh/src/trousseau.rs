@@ -19,6 +19,7 @@
 //! verrouiller ; le démon afficherait alors sa propre demande de déverrouillage.
 //! La fenêtre est minuscule et la conséquence bénigne.
 
+use pupitre_i18n::{t, ta, ArgI18n};
 use secret_service::blocking::{Collection, SecretService};
 use secret_service::EncryptionType;
 use std::collections::{BTreeMap, HashMap};
@@ -49,10 +50,13 @@ pub enum ErreurTrousseau {
 impl fmt::Display for ErreurTrousseau {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Verrouille => write!(f, "le trousseau est verrouillé"),
-            Self::Absent => write!(f, "aucun trousseau disponible"),
-            Self::Delai => write!(f, "le trousseau ne répond pas"),
-            Self::Autre(m) => write!(f, "erreur du trousseau : {m}"),
+            Self::Verrouille => f.write_str(&t("trousseau-verrouille")),
+            Self::Absent => f.write_str(&t("trousseau-absent")),
+            Self::Delai => f.write_str(&t("trousseau-delai")),
+            Self::Autre(m) => f.write_str(&ta(
+                "trousseau-erreur",
+                &[("detail", ArgI18n::from(m.as_str()))],
+            )),
         }
     }
 }
@@ -161,7 +165,7 @@ impl CoffreSecretService {
         rx.recv_timeout(DELAI_TROUSSEAU).map_err(|e| match e {
             mpsc::RecvTimeoutError::Timeout => ErreurTrousseau::Delai,
             mpsc::RecvTimeoutError::Disconnected => {
-                ErreurTrousseau::Autre("fil du trousseau interrompu".into())
+                ErreurTrousseau::Autre(t("trousseau-fil-interrompu"))
             }
         })
     }
@@ -200,7 +204,7 @@ impl Coffre for CoffreSecretService {
     fn lire(&self, cle: &Path) -> Result<Option<Zeroizing<String>>, ErreurTrousseau> {
         let cle = cle
             .to_str()
-            .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?
+            .ok_or_else(|| ErreurTrousseau::Autre(t("trousseau-chemin-non-utf8")))?
             .to_string();
         self.avec_collection(move |a| {
             let col = match a {
@@ -223,9 +227,7 @@ impl Coffre for CoffreSecretService {
                 Ok(s) => Ok(Some(Zeroizing::new(s))),
                 Err(e) => {
                     drop(Zeroizing::new(e.into_bytes()));
-                    Err(ErreurTrousseau::Autre(
-                        "phrase illisible (UTF-8 invalide)".into(),
-                    ))
+                    Err(ErreurTrousseau::Autre(t("trousseau-phrase-illisible")))
                 }
             }
         })?
@@ -234,9 +236,12 @@ impl Coffre for CoffreSecretService {
     fn ecrire(&self, cle: &Path, phrase: &str) -> Result<(), ErreurTrousseau> {
         let chemin = cle
             .to_str()
-            .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?
+            .ok_or_else(|| ErreurTrousseau::Autre(t("trousseau-chemin-non-utf8")))?
             .to_string();
-        let libelle = format!("Pupitre — phrase de passe de {}", chemin_lisible(cle));
+        let libelle = ta(
+            "trousseau-libelle",
+            &[("chemin", ArgI18n::from(chemin_lisible(cle)))],
+        );
         let phrase = Zeroizing::new(phrase.to_string());
         self.avec_collection(move |a| match a {
             Acces::Absent => Err(ErreurTrousseau::Absent),
@@ -257,7 +262,7 @@ impl Coffre for CoffreSecretService {
     fn oublier(&self, cle: &Path) -> Result<(), ErreurTrousseau> {
         let chemin = cle
             .to_str()
-            .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?
+            .ok_or_else(|| ErreurTrousseau::Autre(t("trousseau-chemin-non-utf8")))?
             .to_string();
         self.avec_collection(move |a| match a {
             Acces::Absent => Err(ErreurTrousseau::Absent),

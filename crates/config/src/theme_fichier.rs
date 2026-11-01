@@ -19,8 +19,8 @@
 
 use crate::couleur::Rgb;
 use crate::fichier::{lire_toml, notre, ErreurConfig};
-use pupitre_i18n::{ta, ArgI18n};
 use crate::theme::{theme_clair, theme_sombre, Role, Theme};
+use pupitre_i18n::{ta, ArgI18n};
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -65,12 +65,10 @@ impl<'de> Deserialize<'de> for Palette {
         let v = Vec::<Couleur>::deserialize(d)?;
         let n = v.len();
         let couleurs: Vec<Rgb> = v.into_iter().map(|c| c.0).collect();
-        couleurs.try_into().map(Palette).map_err(|_| {
-            notre(ta(
-                "theme-palette-16",
-                &[("n", ArgI18n::from(n))],
-            ))
-        })
+        couleurs
+            .try_into()
+            .map(Palette)
+            .map_err(|_| notre(ta("theme-palette-16", &[("n", ArgI18n::from(n))])))
     }
 }
 

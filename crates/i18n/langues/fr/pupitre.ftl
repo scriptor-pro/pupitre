@@ -60,3 +60,27 @@ connexion-port-invalide = port « { $v } » invalide : un nombre de 1 à 65535 e
 connexion-cle-vide = chemin de clé vide
 connexion-cle-tiret = le chemin de la clé ne doit pas commencer par « - »
 connexion-cle-controle = le chemin de la clé ne doit pas contenir de caractère de contrôle
+
+## SSH : agent, trousseau, askpass
+
+agent-deja-present = un agent répond déjà sur ce socket
+agent-injoignable = ssh-agent n'est pas devenu joignable
+
+trousseau-verrouille = le trousseau est verrouillé
+trousseau-absent = aucun trousseau disponible
+trousseau-delai = le trousseau ne répond pas
+trousseau-erreur = erreur du trousseau : { $detail }
+trousseau-fil-interrompu = fil du trousseau interrompu
+trousseau-chemin-non-utf8 = chemin non UTF-8
+trousseau-phrase-illisible = phrase illisible (UTF-8 invalide)
+trousseau-libelle = Pupitre — phrase de passe de { $chemin }
+
+askpass-ligne = pupitre-askpass : { $texte }
+askpass-memorisee-non-lue = phrase mémorisée non lue : { $erreur }
+askpass-memorisee-non-oubliee = phrase mémorisée non oubliée : { $erreur }
+askpass-socket-absent = PUPITRE_SOCKET absent : pas de processus de fond à interroger
+askpass-fond-injoignable = processus de fond injoignable : { $erreur }
+askpass-envoi-echec = échec de l'envoi de la demande
+askpass-connexion-fermee = connexion fermée avant la réponse
+askpass-non-memorisee = phrase non mémorisée : { $erreur }
+askpass-sortie-inutilisable = sortie standard inutilisable : { $erreur }

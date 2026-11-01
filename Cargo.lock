@@ -1399,6 +1399,7 @@ version = "0.1.0"
 dependencies = [
  "glob",
  "nix 0.30.1",
+ "pupitre-i18n",
  "pupitre-proto",
  "secret-service",
  "tempfile",

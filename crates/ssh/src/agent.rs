@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Recherche d'un agent SSH joignable, ou lancement d'un agent propre à Pupitre.
 
+use pupitre_i18n::t;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -233,7 +234,7 @@ impl AgentPupitre {
                     if agent_joignable(socket, DELAI_SONDE) {
                         return Err(io::Error::new(
                             io::ErrorKind::AddrInUse,
-                            "un agent répond déjà sur ce socket",
+                            t("agent-deja-present"),
                         ));
                     }
                     match fs::remove_file(socket) {
@@ -277,7 +278,7 @@ impl AgentPupitre {
                 }
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    "ssh-agent n'est pas devenu joignable",
+                    t("agent-injoignable"),
                 ));
             }
             std::thread::sleep(Duration::from_millis(20));
