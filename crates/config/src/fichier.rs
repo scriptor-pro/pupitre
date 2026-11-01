@@ -2,6 +2,7 @@
 //! Fichier de configuration TOML : valeurs par défaut, chargement, erreurs avec numéro de ligne.
 
 use crate::atomique::ecrire_atomique;
+use pupitre_i18n::{langue_active, t, ta, ArgI18n};
 use serde::{de, Deserialize, Deserializer};
 use std::fmt;
 use std::io::{self, Read};
@@ -9,6 +10,21 @@ use std::path::{Path, PathBuf};
 
 /// Fichier créé pour l'utilisateur au premier lancement ; donne exactement `Config::default()`.
 pub const CONFIG_DEFAUT: &str = include_str!("../../../assets/config/pupitre.toml");
+
+/// Fichiers par défaut par langue : le même réglage partout, seuls les commentaires diffèrent.
+/// Une langue absente de cette liste reçoit le fichier français.
+const CONFIGS_DEFAUT: &[(&str, &str)] = &[("fr", CONFIG_DEFAUT)];
+
+/// Valeurs acceptées pour `langue` (vide : langue du système).
+pub const LANGUES_CONFIG: &[&str] = &["fr", "en", "es", "it", "de", "nl"];
+
+/// Fichier par défaut de la langue donnée (code de langue, ex. « de »), sinon le français.
+pub fn config_defaut(langue: &str) -> &'static str {
+    CONFIGS_DEFAUT
+        .iter()
+        .find(|(l, _)| *l == langue)
+        .map_or(CONFIG_DEFAUT, |(_, c)| c)
+}
 
 /// Au-delà, le fichier est refusé (protection contre un fichier énorme ou un périphérique).
 const TAILLE_MAX: u64 = 1024 * 1024;
@@ -36,6 +52,9 @@ pub struct Config {
     pub historique_lignes: u32,
     #[serde(deserialize_with = "zoom_valide")]
     pub zoom_max_pourcent: u16,
+    /// Langue de l'interface, appliquée au prochain lancement ; vide : langue du système.
+    #[serde(deserialize_with = "langue_valide")]
+    pub langue: String,
 }
 
 impl Default for Config {
@@ -46,6 +65,7 @@ impl Default for Config {
             curseur_clignote: false,
             historique_lignes: 10_000,
             zoom_max_pourcent: 200,
+            langue: String::new(),
         }
     }
 }
@@ -60,7 +80,13 @@ pub struct ErreurConfig {
 impl fmt::Display for ErreurConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.ligne {
-            Some(l) => write!(f, "ligne {l} : {}", self.message),
+            Some(l) => f.write_str(&ta(
+                "config-ligne",
+                &[
+                    ("ligne", ArgI18n::from(l)),
+                    ("message", ArgI18n::from(self.message.as_str())),
+                ],
+            )),
             None => f.write_str(&self.message),
         }
     }
@@ -89,7 +115,8 @@ pub(crate) fn lire_toml_avec<T: de::DeserializeOwned>(
     toml::from_str(&texte).map_err(|e| erreur_toml(&texte, &e, cles))
 }
 
-const CLES_CONFIG: &str = "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent";
+const CLES_CONFIG: &str =
+    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue";
 
 /// Lit un fichier (ordinaire, taille bornée, UTF-8).
 pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {
@@ -98,7 +125,7 @@ pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {
         if !f.metadata()?.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "ce n'est pas un fichier ordinaire",
+                t("config-pas-ordinaire"),
             ));
         }
         let mut octets = Vec::new();
@@ -106,16 +133,22 @@ pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {
         if octets.len() as u64 > TAILLE_MAX {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "fichier trop gros (plus de 1 Mio)",
+                t("config-trop-gros"),
             ));
         }
         String::from_utf8(octets).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "le fichier n'est pas en UTF-8")
+            io::Error::new(io::ErrorKind::InvalidData, t("config-pas-utf8"))
         })
     };
     lire().map_err(|e| ErreurConfig {
         ligne: None,
-        message: format!("impossible de lire {} : {e}", chemin.display()),
+        message: ta(
+            "config-lecture-impossible",
+            &[
+                ("chemin", ArgI18n::from(chemin.display().to_string())),
+                ("erreur", ArgI18n::from(e.to_string())),
+            ],
+        ),
     })
 }
 
@@ -135,26 +168,31 @@ fn traduire(m: &str, cles: &str) -> String {
     }
     if let Some(reste) = m.strip_prefix("unknown field `") {
         let cle = reste.split('`').next().unwrap_or(reste);
-        return format!("clé inconnue « {cle} » ; clés possibles : {cles}");
+        return ta(
+            "config-cle-inconnue",
+            &[("cle", ArgI18n::from(cle)), ("cles", ArgI18n::from(cles))],
+        );
     }
     for (prefixe, debut) in [
-        ("invalid type: ", "type incorrect"),
-        ("invalid value: ", "valeur incorrecte"),
+        ("invalid type: ", "config-type-incorrect"),
+        ("invalid value: ", "config-valeur-incorrecte"),
     ] {
         if let Some((recu, attendu)) = m
             .strip_prefix(prefixe)
             .and_then(|r| r.split_once(", expected "))
         {
-            return format!(
-                "{debut} : {} au lieu de {}",
-                traduire_recu(recu),
-                traduire_attendu(attendu)
+            return ta(
+                debut,
+                &[
+                    ("recu", ArgI18n::from(traduire_recu(recu))),
+                    ("attendu", ArgI18n::from(traduire_attendu(attendu))),
+                ],
             );
         }
     }
     match m {
-        "duplicate key" => "clé en double (déjà définie plus haut)".into(),
-        _ => format!("syntaxe TOML incorrecte ({m})"),
+        "duplicate key" => t("config-cle-double"),
+        _ => ta("config-syntaxe-toml", &[("detail", ArgI18n::from(m))]),
     }
 }
 
@@ -167,14 +205,15 @@ pub(crate) fn notre<E: de::Error>(message: String) -> E {
 
 fn traduire_recu(r: &str) -> String {
     let valeur = |p: &str| r.strip_prefix(p).map(|v| v.trim_matches('`').to_owned());
+    let avec = |id: &str, v: String| ta(id, &[("v", ArgI18n::from(v))]);
     if let Some(v) = valeur("integer ") {
-        format!("le nombre {v}")
+        avec("config-recu-entier", v)
     } else if let Some(v) = valeur("floating point ") {
-        format!("le nombre décimal {v}")
+        avec("config-recu-decimal", v)
     } else if let Some(v) = valeur("string ") {
-        format!("le texte {v}")
+        avec("config-recu-texte", v)
     } else if let Some(v) = valeur("boolean ") {
-        format!("la valeur {v}")
+        avec("config-recu-booleen", v)
     } else {
         r.to_owned()
     }
@@ -182,9 +221,9 @@ fn traduire_recu(r: &str) -> String {
 
 fn traduire_attendu(a: &str) -> String {
     match a {
-        "a boolean" => "true ou false".into(),
-        "a string" => "un texte entre guillemets".into(),
-        "i64" | "u64" | "u32" | "u16" => "un nombre entier".into(),
+        "a boolean" => t("config-attendu-booleen"),
+        "a string" => t("config-attendu-texte"),
+        "i64" | "u64" | "u32" | "u16" => t("config-attendu-entier"),
         _ => a.to_owned(),
     }
 }
@@ -228,7 +267,8 @@ pub fn creer_defaut_si_absent(chemin: &Path) -> io::Result<bool> {
     if let Some(dossier) = chemin.parent() {
         std::fs::create_dir_all(dossier)?;
     }
-    ecrire_atomique(chemin, CONFIG_DEFAUT.as_bytes())?;
+    let langue = langue_active();
+    ecrire_atomique(chemin, config_defaut(langue.language.as_str()).as_bytes())?;
     Ok(true)
 }
 
@@ -241,9 +281,9 @@ impl<'de> Deserialize<'de> for ThemeChoix {
             "systeme" | "système" => Ok(ThemeChoix::Systeme),
             _ if v.starts_with('/') => Ok(ThemeChoix::Fichier(PathBuf::from(v))),
             _ if v.starts_with("~/") => Ok(ThemeChoix::Fichier(dossier_personnel().join(&v[2..]))),
-            _ => Err(notre(format!(
-                "thème « {v} » inconnu : valeurs possibles « sombre », « clair », « systeme », \
-                 ou le chemin d'un fichier de thème commençant par / ou ~/"
+            _ => Err(notre(ta(
+                "config-theme-inconnu",
+                &[("v", ArgI18n::from(v))],
             ))),
         }
     }
@@ -252,9 +292,7 @@ impl<'de> Deserialize<'de> for ThemeChoix {
 fn police_valide<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     let v = String::deserialize(d)?;
     if v.trim().is_empty() {
-        return Err(notre(String::from(
-            "police vide : indiquer une famille et une taille, ex. « B612 Mono 11 »",
-        )));
+        return Err(notre(t("config-police-vide")));
     }
     Ok(v.trim().to_owned())
 }
@@ -263,8 +301,12 @@ fn historique_valide<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
     // Lu en i64 pour que toute valeur hors limites reçoive le message ci-dessous.
     let v = i64::deserialize(d)?;
     if !(0..=i64::from(HISTORIQUE_MAX)).contains(&v) {
-        return Err(notre(format!(
-            "historique de {v} lignes hors limites (de 0 à {HISTORIQUE_MAX})"
+        return Err(notre(ta(
+            "config-historique-limites",
+            &[
+                ("v", ArgI18n::Nombre(v)),
+                ("max", ArgI18n::Nombre(i64::from(HISTORIQUE_MAX))),
+            ],
         )));
     }
     u32::try_from(v).map_err(de::Error::custom)
@@ -273,9 +315,36 @@ fn historique_valide<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
 fn zoom_valide<'de, D: Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
     let v = i64::deserialize(d)?;
     if !(i64::from(ZOOM_MIN)..=i64::from(ZOOM_MAX)).contains(&v) {
-        return Err(notre(format!(
-            "zoom maximum {v} % hors limites (de {ZOOM_MIN} à {ZOOM_MAX})"
+        return Err(notre(ta(
+            "config-zoom-limites",
+            &[
+                ("v", ArgI18n::Nombre(v)),
+                ("min", ArgI18n::Nombre(i64::from(ZOOM_MIN))),
+                ("max", ArgI18n::Nombre(i64::from(ZOOM_MAX))),
+            ],
         )));
     }
     u16::try_from(v).map_err(de::Error::custom)
+}
+
+fn langue_valide<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v = String::deserialize(d)?;
+    if v.is_empty() || LANGUES_CONFIG.contains(&v.as_str()) {
+        Ok(v)
+    } else {
+        Err(notre(ta(
+            "config-langue-inconnue",
+            &[("v", ArgI18n::from(v))],
+        )))
+    }
+}
+
+/// Réglage `langue` du fichier, lu avant tout le reste (pour choisir la langue des messages,
+/// y compris ceux de l'erreur). Tolérant : fichier absent, illisible, invalide ou langue
+/// inconnue donnent `None` (langue du système).
+pub fn langue_configuree(chemin: &Path) -> Option<String> {
+    let texte = lire_texte(chemin).ok()?;
+    let table: toml::Table = toml::from_str(&texte).ok()?;
+    let v = table.get("langue")?.as_str()?;
+    LANGUES_CONFIG.contains(&v).then(|| v.to_string())
 }

@@ -5,6 +5,7 @@ use crate::atomique::ecrire_atomique;
 use crate::fichier::{
     dossier_pupitre, erreur_toml, lire_texte, notre, numero_de_ligne, ErreurConfig,
 };
+use pupitre_i18n::{t, ta, ArgI18n};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 use std::io;
@@ -47,32 +48,45 @@ struct Fichier<T> {
     connexion: Vec<T>,
 }
 
+fn arg(v: &str) -> ArgI18n {
+    ArgI18n::from(v)
+}
+
 const CLES: &str = "nom, hote, utilisateur, port, cle";
 
 fn verifier_nom(v: &str) -> Result<(), String> {
     if v.trim().is_empty() {
-        return Err("nom vide".into());
+        return Err(t("connexion-nom-vide"));
     }
     if v.chars().any(char::is_control) {
-        return Err("le nom ne doit pas contenir de caractère de contrôle".into());
+        return Err(t("connexion-nom-controle"));
     }
     Ok(())
 }
 
 /// Hôte ou utilisateur : mis dans la ligne de commande de ssh, donc jamais pris pour une option.
-fn verifier_mot(champ: &str, v: &str) -> Result<(), String> {
+fn verifier_mot(hote: bool, v: &str) -> Result<(), String> {
+    let (vide, tiret, blancs) = if hote {
+        (
+            "connexion-hote-vide",
+            "connexion-hote-tiret",
+            "connexion-hote-blancs",
+        )
+    } else {
+        (
+            "connexion-utilisateur-vide",
+            "connexion-utilisateur-tiret",
+            "connexion-utilisateur-blancs",
+        )
+    };
     if v.is_empty() {
-        return Err(format!("{champ} vide"));
+        return Err(t(vide));
     }
     if v.starts_with('-') {
-        return Err(format!(
-            "{champ} « {v} » refusé : ne doit pas commencer par « - »"
-        ));
+        return Err(ta(tiret, &[("v", arg(v))]));
     }
     if v.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err(format!(
-            "{champ} refusé : ni blanc ni caractère de contrôle autorisés"
-        ));
+        return Err(t(blancs));
     }
     Ok(())
 }
@@ -81,19 +95,19 @@ fn verifier_port(v: i64) -> Result<u16, String> {
     u16::try_from(v)
         .ok()
         .filter(|&p| p != 0)
-        .ok_or_else(|| format!("port {v} hors limites (de 1 à 65535)"))
+        .ok_or_else(|| ta("connexion-port-limites", &[("v", ArgI18n::Nombre(v))]))
 }
 
 fn verifier_cle(v: &Path) -> Result<(), String> {
-    let t = v.to_string_lossy();
-    if t.is_empty() {
-        return Err("chemin de clé vide".into());
+    let chemin = v.to_string_lossy();
+    if chemin.is_empty() {
+        return Err(t("connexion-cle-vide"));
     }
-    if t.starts_with('-') {
-        return Err("le chemin de la clé ne doit pas commencer par « - »".into());
+    if chemin.starts_with('-') {
+        return Err(t("connexion-cle-tiret"));
     }
-    if t.chars().any(char::is_control) {
-        return Err("le chemin de la clé ne doit pas contenir de caractère de contrôle".into());
+    if chemin.chars().any(char::is_control) {
+        return Err(t("connexion-cle-controle"));
     }
     Ok(())
 }
@@ -106,14 +120,14 @@ fn nom_valide<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
 
 fn hote_valide<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     let v = String::deserialize(d)?;
-    verifier_mot("hôte", &v).map_err(notre::<D::Error>)?;
+    verifier_mot(true, &v).map_err(notre::<D::Error>)?;
     Ok(v)
 }
 
 fn utilisateur_valide<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     let v = Option::<String>::deserialize(d)?;
     if let Some(u) = &v {
-        verifier_mot("utilisateur", u).map_err(notre::<D::Error>)?;
+        verifier_mot(false, u).map_err(notre::<D::Error>)?;
     }
     Ok(v)
 }
@@ -160,9 +174,9 @@ pub fn valider_connexions(v: &[Connexion]) -> Result<(), ErreurValidation> {
     for c in v {
         let erreur = |champ, message| ErreurValidation { champ, message };
         verifier_nom(&c.nom).map_err(|m| erreur(ChampConnexion::Nom, m))?;
-        verifier_mot("hôte", &c.hote).map_err(|m| erreur(ChampConnexion::Hote, m))?;
+        verifier_mot(true, &c.hote).map_err(|m| erreur(ChampConnexion::Hote, m))?;
         if let Some(u) = &c.utilisateur {
-            verifier_mot("utilisateur", u).map_err(|m| erreur(ChampConnexion::Utilisateur, m))?;
+            verifier_mot(false, u).map_err(|m| erreur(ChampConnexion::Utilisateur, m))?;
         }
         if let Some(p) = c.port {
             verifier_port(i64::from(p)).map_err(|m| erreur(ChampConnexion::Port, m))?;
@@ -173,7 +187,7 @@ pub fn valider_connexions(v: &[Connexion]) -> Result<(), ErreurValidation> {
         if !vus.insert(c.nom.as_str()) {
             return Err(erreur(
                 ChampConnexion::Nom,
-                format!("nom « {} » en double", c.nom),
+                ta("connexion-nom-double", &[("nom", arg(&c.nom))]),
             ));
         }
     }
@@ -182,13 +196,13 @@ pub fn valider_connexions(v: &[Connexion]) -> Result<(), ErreurValidation> {
 
 /// Port saisi à la main : vide = aucun ; sinon un nombre de 1 à 65535.
 pub fn analyser_port(texte: &str) -> Result<Option<u16>, String> {
-    let t = texte.trim();
-    if t.is_empty() {
+    let saisie = texte.trim();
+    if saisie.is_empty() {
         return Ok(None);
     }
-    let v: i64 = t
+    let v: i64 = saisie
         .parse()
-        .map_err(|_| format!("port « {t} » invalide : un nombre de 1 à 65535 est attendu"))?;
+        .map_err(|_| ta("connexion-port-invalide", &[("v", arg(saisie))]))?;
     verifier_port(v).map(Some)
 }
 
@@ -215,7 +229,7 @@ pub fn charger_connexions(chemin: &Path) -> Result<Vec<Connexion>, ErreurConfig>
         if !vus.insert(c.nom.clone()) {
             return Err(ErreurConfig {
                 ligne: Some(numero_de_ligne(&texte, debut)),
-                message: format!("nom « {} » en double (déjà défini plus haut)", c.nom),
+                message: ta("connexion-nom-double-plus-haut", &[("nom", arg(&c.nom))]),
             });
         }
         res.push(c);

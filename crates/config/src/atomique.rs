@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Écriture de fichier sans risque de perte : jamais de fichier à moitié écrit.
 
+use pupitre_i18n::{t, ta, ArgI18n};
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -19,7 +20,7 @@ pub fn ecrire_atomique(chemin: &Path, contenu: &[u8]) -> io::Result<()> {
     };
     let nom = cible
         .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "chemin sans nom de fichier"))?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, t("fichier-sans-nom")))?
         .to_owned();
     let dossier = match cible.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
@@ -29,7 +30,10 @@ pub fn ecrire_atomique(chemin: &Path, contenu: &[u8]) -> io::Result<()> {
         Ok(m) if !m.is_file() => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("{} n'est pas un fichier ordinaire", cible.display()),
+                ta(
+                    "fichier-pas-ordinaire",
+                    &[("chemin", ArgI18n::from(cible.display().to_string()))],
+                ),
             ))
         }
         Ok(m) => Some(m),

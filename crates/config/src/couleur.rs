@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Couleurs RVB et ratio de contraste WCAG 2.x.
 
+use pupitre_i18n::{ta, ArgI18n};
 use std::fmt;
 use std::str::FromStr;
 
@@ -18,11 +19,10 @@ pub struct ErreurCouleur(pub String);
 
 impl fmt::Display for ErreurCouleur {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "couleur invalide {:?} : format attendu #rrggbb (ex. #1e1e2e)",
-            self.0
-        )
+        f.write_str(&ta(
+            "couleur-invalide",
+            &[("texte", ArgI18n::Texte(format!("{:?}", self.0)))],
+        ))
     }
 }
 

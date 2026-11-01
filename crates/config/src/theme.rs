@@ -2,6 +2,7 @@
 //! Thèmes de couleurs intégrés et vérificateur de contraste (WCAG AA).
 
 use crate::couleur::{contrast_ratio, Rgb};
+use pupitre_i18n::{t as tr, ta, ArgI18n};
 
 /// Usage d'une couleur de la palette : c'est lui qui décide quelles paires sont vérifiées.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,13 +39,14 @@ pub struct ProblemeContraste {
 impl std::fmt::Display for ProblemeContraste {
     /// Ex. « couleur 8 (#585b70) sur le fond (#1e1e2e) : 2,46:1, minimum 4,5:1 ».
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} : {}:1, minimum {}:1",
-            self.description,
-            nombre_fr(self.ratio, 2),
-            nombre_fr(self.minimum, 1)
-        )
+        f.write_str(&ta(
+            "contraste-ligne",
+            &[
+                ("description", ArgI18n::Texte(self.description.clone())),
+                ("ratio", ArgI18n::Texte(nombre_fr(self.ratio, 2))),
+                ("minimum", ArgI18n::Texte(nombre_fr(self.minimum, 1))),
+            ],
+        ))
     }
 }
 
@@ -152,9 +154,14 @@ pub fn check_theme(t: &Theme) -> Vec<ProblemeContraste> {
     let mut problemes = Vec::new();
     let mut verifier = |avant: (String, Rgb), arriere: (String, Rgb), minimum: f64| {
         let ratio = contrast_ratio(avant.1, arriere.1);
-        let description = format!(
-            "{} ({}) sur {} ({})",
-            avant.0, avant.1, arriere.0, arriere.1
+        let description = ta(
+            "contraste-description",
+            &[
+                ("avant", ArgI18n::Texte(avant.0)),
+                ("couleur_avant", ArgI18n::Texte(avant.1.to_string())),
+                ("arriere", ArgI18n::Texte(arriere.0)),
+                ("couleur_arriere", ArgI18n::Texte(arriere.1.to_string())),
+            ],
         );
         if ratio < minimum
             && !problemes
@@ -168,17 +175,23 @@ pub fn check_theme(t: &Theme) -> Vec<ProblemeContraste> {
             });
         }
     };
-    let fond = || ("le fond".to_owned(), t.fond);
-    let couleur = |i: usize| (format!("couleur {i}"), t.palette[i]);
-    let sur_couleur = |i: usize| (format!("la couleur {i}"), t.palette[i]);
+    let fond = || (tr("contraste-le-fond"), t.fond);
+    let numero = |i: usize| ArgI18n::Nombre(i64::try_from(i).unwrap_or(0));
+    let couleur = |i: usize| (ta("contraste-couleur", &[("n", numero(i))]), t.palette[i]);
+    let sur_couleur = |i: usize| {
+        (
+            ta("contraste-sur-couleur", &[("n", numero(i))]),
+            t.palette[i],
+        )
+    };
 
-    verifier(("texte".into(), t.texte), fond(), MIN_TEXTE);
+    verifier((tr("contraste-texte"), t.texte), fond(), MIN_TEXTE);
     verifier(
-        ("texte sélectionné".into(), t.selection_texte),
-        ("la sélection".into(), t.selection_fond),
+        (tr("contraste-texte-selectionne"), t.selection_texte),
+        (tr("contraste-la-selection"), t.selection_fond),
         MIN_TEXTE,
     );
-    verifier(("curseur".into(), t.curseur), fond(), MIN_CURSEUR);
+    verifier((tr("contraste-curseur"), t.curseur), fond(), MIN_CURSEUR);
 
     for (i, role) in t.roles.iter().enumerate() {
         if matches!(role, Role::Texte | Role::TexteEtFond) {

@@ -117,6 +117,7 @@ fn valeurs_lues() -> R {
             curseur_clignote: true,
             historique_lignes: 500,
             zoom_max_pourcent: 300,
+            langue: String::new(),
         }
     );
     std::fs::write(&chemin, "theme = \"~/themes/nuit.toml\"\n")?;
@@ -199,6 +200,39 @@ fn defaut_commente_est_valide() {
     // Le fichier fourni à l'utilisateur doit donner exactement les valeurs par défaut.
     let c: Config = toml::from_str(CONFIG_DEFAUT).unwrap();
     assert_eq!(c, Config::default());
+}
+
+#[test]
+fn defauts_par_langue_memes_reglages() {
+    // Chaque fichier par défaut, quelle que soit sa langue, donne exactement les mêmes clés et
+    // valeurs que le français (seuls les commentaires diffèrent).
+    let reference: toml::Table = toml::from_str(CONFIG_DEFAUT).unwrap();
+    for l in LANGUES_CONFIG {
+        let table: toml::Table = toml::from_str(config_defaut(l)).unwrap();
+        assert_eq!(table, reference, "langue {l}");
+    }
+}
+
+#[test]
+fn langue_validee_et_lue_sans_tout_charger() -> R {
+    let d = tempfile::tempdir()?;
+    let chemin = d.path().join("pupitre.toml");
+    std::fs::write(&chemin, "langue = \"de\"\n")?;
+    assert_eq!(charger(&chemin).map_err(|e| e.message)?.langue, "de");
+    assert_eq!(langue_configuree(&chemin).as_deref(), Some("de"));
+    std::fs::write(&chemin, "langue = \"klingon\"\n")?;
+    let e = charger(&chemin).unwrap_err();
+    assert_eq!(e.ligne, Some(1));
+    assert!(e.message.contains("klingon"), "{e}");
+    assert_eq!(langue_configuree(&chemin), None);
+    // Une autre erreur du fichier n'empêche pas de lire la langue.
+    std::fs::write(&chemin, "langue = \"nl\"\nzoom_max_pourcent = 9999\n")?;
+    assert!(charger(&chemin).is_err());
+    assert_eq!(langue_configuree(&chemin).as_deref(), Some("nl"));
+    std::fs::write(&chemin, "langue = \"\"\n")?;
+    assert_eq!(langue_configuree(&chemin), None);
+    assert_eq!(langue_configuree(&d.path().join("absent.toml")), None);
+    Ok(())
 }
 
 #[test]

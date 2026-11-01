@@ -15,7 +15,8 @@ pub use connexions::{
 };
 pub use couleur::{contrast_ratio, ErreurCouleur, Rgb};
 pub use fichier::{
-    charger, chemin_config, creer_defaut_si_absent, Config, ErreurConfig, ThemeChoix, CONFIG_DEFAUT,
+    charger, chemin_config, config_defaut, creer_defaut_si_absent, langue_configuree, Config,
+    ErreurConfig, ThemeChoix, CONFIG_DEFAUT, LANGUES_CONFIG,
 };
 pub use theme::{check_theme, theme_clair, theme_sombre, ProblemeContraste, Role, Theme};
 pub use theme_fichier::charger_theme;

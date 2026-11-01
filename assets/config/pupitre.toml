@@ -25,3 +25,7 @@ historique_lignes = 10000
 
 # Zoom maximum autorisé avec Ctrl+plus, en pourcentage (100 à 500).
 zoom_max_pourcent = 200
+
+# Langue de l'interface : "" (langue du système), "fr", "en", "es", "it", "de" ou "nl".
+# S'applique au prochain lancement de Pupitre.
+langue = ""

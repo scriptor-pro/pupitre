@@ -19,6 +19,7 @@
 
 use crate::couleur::Rgb;
 use crate::fichier::{lire_toml, notre, ErreurConfig};
+use pupitre_i18n::{ta, ArgI18n};
 use crate::theme::{theme_clair, theme_sombre, Role, Theme};
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
@@ -65,8 +66,9 @@ impl<'de> Deserialize<'de> for Palette {
         let n = v.len();
         let couleurs: Vec<Rgb> = v.into_iter().map(|c| c.0).collect();
         couleurs.try_into().map(Palette).map_err(|_| {
-            notre(format!(
-                "la palette doit avoir exactement 16 couleurs (0 à 15), elle en a {n}"
+            notre(ta(
+                "theme-palette-16",
+                &[("n", ArgI18n::from(n))],
             ))
         })
     }
@@ -77,8 +79,9 @@ impl<'de> Deserialize<'de> for Indice {
         let v = String::deserialize(d)?;
         match v.trim().parse::<usize>() {
             Ok(i) if i < 16 => Ok(Indice(i)),
-            _ => Err(notre(format!(
-                "numéro de couleur « {v} » invalide : de 0 à 15"
+            _ => Err(notre(ta(
+                "theme-numero-couleur",
+                &[("v", ArgI18n::from(v))],
             ))),
         }
     }
@@ -91,9 +94,7 @@ impl<'de> Deserialize<'de> for RoleToml {
             "texte" => Ok(RoleToml(Role::Texte)),
             "fond" => Ok(RoleToml(Role::Fond)),
             "texte et fond" | "texte+fond" | "texte-et-fond" => Ok(RoleToml(Role::TexteEtFond)),
-            _ => Err(notre(format!(
-                "rôle « {v} » inconnu : « texte », « fond » ou « texte et fond »"
-            ))),
+            _ => Err(notre(ta("theme-role-inconnu", &[("v", ArgI18n::from(v))]))),
         }
     }
 }
@@ -104,9 +105,7 @@ impl<'de> Deserialize<'de> for Base {
         match v.trim() {
             "sombre" => Ok(Base::Sombre),
             "clair" => Ok(Base::Clair),
-            _ => Err(notre(format!(
-                "base « {v} » inconnue : « sombre » ou « clair »"
-            ))),
+            _ => Err(notre(ta("theme-base-inconnue", &[("v", ArgI18n::from(v))]))),
         }
     }
 }
