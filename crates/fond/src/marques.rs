@@ -2,16 +2,77 @@
 //! Lecture des marques de commandes (OSC 133) dans le flux d'une session.
 
 use pupitre_proto::MarqueCommande;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Taille maximale d'une séquence OSC suivie ; au-delà, elle est abandonnée.
 pub const OSC_MAX: usize = 4096;
+
+/// Marques transmises au plus par morceau lu du PTY. Chaque marque coupe le flux en deux
+/// messages : sans limite, un seul gros morceau plein de fausses marques remplirait la file
+/// (bornée) d'un client et le ferait déconnecter.
+pub const MARQUES_PAR_LECTURE: u32 = 16;
+/// Marques transmises au plus par seconde et par session (fenêtre d'une seconde). Avec la
+/// réserve des `D` (voir [`LimiteMarques`]), cela reste très loin de la file d'un client.
+pub const MARQUES_PAR_SECONDE: u32 = 100;
+const FENETRE: Duration = Duration::from_secs(1);
 
 /// Un morceau du flux, dans l'ordre : des octets à relayer, ou une marque vue juste après.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Morceau {
     Octets(Vec<u8>),
     Marque(MarqueCommande),
+}
+
+/// Limite du débit des marques transmises (les octets, eux, passent toujours). Une marque
+/// refusée est simplement ignorée : seule la navigation entre commandes est dégradée.
+/// Une marque `D` qui clôt une commande dont le `C` a été transmis passe toujours (elle porte
+/// l'annonce de fin) ; comme les `C` sont limités, ces `D` le sont aussi.
+#[derive(Debug, Default)]
+pub struct LimiteMarques {
+    dans_la_lecture: u32,
+    debut_fenetre: Option<Instant>,
+    dans_la_fenetre: u32,
+    /// Un `C` a été transmis et son `D` n'est pas encore passé.
+    execution_transmise: bool,
+}
+
+impl LimiteMarques {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// À appeler au début de chaque morceau lu du PTY.
+    pub fn nouvelle_lecture(&mut self) {
+        self.dans_la_lecture = 0;
+    }
+
+    /// Vrai si `marque` peut être transmise (et comptée).
+    pub fn admettre(&mut self, marque: &MarqueCommande, maintenant: Instant) -> bool {
+        if matches!(marque, MarqueCommande::Fin { .. }) && self.execution_transmise {
+            self.execution_transmise = false;
+            return true;
+        }
+        match self.debut_fenetre {
+            Some(d) if maintenant.saturating_duration_since(d) < FENETRE => {}
+            _ => {
+                self.debut_fenetre = Some(maintenant);
+                self.dans_la_fenetre = 0;
+            }
+        }
+        if self.dans_la_lecture >= MARQUES_PAR_LECTURE
+            || self.dans_la_fenetre >= MARQUES_PAR_SECONDE
+        {
+            return false;
+        }
+        self.dans_la_lecture += 1;
+        self.dans_la_fenetre += 1;
+        match marque {
+            MarqueCommande::Execution => self.execution_transmise = true,
+            MarqueCommande::Fin { .. } => self.execution_transmise = false,
+            _ => {}
+        }
+        true
+    }
 }
 
 const ESC: u8 = 0x1b;
@@ -208,6 +269,48 @@ mod tests {
     /// Lit `entree` en une fois, au temps `t`.
     fn lire(l: &mut LecteurMarques, entree: &[u8], t: Instant) -> Vec<Morceau> {
         l.lire(entree, t)
+    }
+
+    #[test]
+    fn limite_par_lecture_et_par_seconde() {
+        let t0 = Instant::now();
+        let mut l = LimiteMarques::new();
+        l.nouvelle_lecture();
+        let admises = (0..1000)
+            .filter(|_| l.admettre(&MarqueCommande::Invite, t0))
+            .count();
+        assert_eq!(admises, MARQUES_PAR_LECTURE as usize);
+        // Lectures successives dans la même seconde : plafond par seconde.
+        let mut total = admises;
+        for _ in 0..1000 {
+            l.nouvelle_lecture();
+            total += (0..1000)
+                .filter(|_| l.admettre(&MarqueCommande::Saisie, t0))
+                .count();
+        }
+        assert_eq!(total, MARQUES_PAR_SECONDE as usize);
+        // Nouvelle seconde : ça repart.
+        l.nouvelle_lecture();
+        assert!(l.admettre(&MarqueCommande::Invite, t0 + Duration::from_millis(1100)));
+    }
+
+    #[test]
+    fn fin_d_une_commande_transmise_toujours_admise() {
+        let t0 = Instant::now();
+        let fin = MarqueCommande::Fin {
+            code: Some(0),
+            duree_ms: None,
+        };
+        let mut l = LimiteMarques::new();
+        l.nouvelle_lecture();
+        assert!(l.admettre(&MarqueCommande::Execution, t0));
+        for _ in 0..1000 {
+            l.admettre(&MarqueCommande::Invite, t0);
+        }
+        assert!(!l.admettre(&MarqueCommande::Invite, t0));
+        assert!(l.admettre(&fin, t0), "le D d'un C transmis passe");
+        // Un D sans C transmis compte dans la limite, donc est refusé.
+        assert!(!l.admettre(&fin, t0));
     }
 
     #[test]

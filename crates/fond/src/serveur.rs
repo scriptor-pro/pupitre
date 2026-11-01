@@ -10,7 +10,7 @@
 //! chaque client a une file d'envoi bornée ; s'il ne suit plus, il est déconnecté.
 
 use crate::chargement::{self, Rapport, Travail};
-use crate::marques::{LecteurMarques, Morceau};
+use crate::marques::{LecteurMarques, LimiteMarques, Morceau};
 use crate::relecture::{ReplayBuffer, REPLAY_CAPACITY};
 use crate::session::{variable_protegee, Session, SessionEvent};
 use crate::ssh::{EntreesSsh, EtatSsh};
@@ -276,6 +276,8 @@ struct SessionEtat {
     relecture: ReplayBuffer,
     /// Repère les marques de commandes (OSC 133) dans la sortie.
     marques: LecteurMarques,
+    /// Borne le débit des marques transmises (octets toujours relayés).
+    limite_marques: LimiteMarques,
     cols: u16,
     rows: u16,
     occupe: bool,
@@ -361,13 +363,27 @@ impl Etat {
                 // Octets et marques repartent dans l'ordre exact du flux ; les octets
                 // eux-mêmes ne sont jamais modifiés.
                 let mut messages = Vec::new();
-                for morceau in s.marques.lire(&data, Instant::now()) {
+                // Octets en attente d'être envoyés : une marque ignorée ne coupe pas le
+                // flux en deux messages (sinon un flot de fausses marques ferait un
+                // message par marque).
+                let mut octets: Vec<u8> = Vec::new();
+                let maintenant = Instant::now();
+                s.limite_marques.nouvelle_lecture();
+                for morceau in s.marques.lire(&data, maintenant) {
                     match morceau {
-                        Morceau::Octets(data) => {
-                            s.relecture.push(&data);
-                            messages.push(ServerMsg::Output { id: sid, data });
+                        Morceau::Octets(o) => {
+                            s.relecture.push(&o);
+                            octets.extend(o);
                         }
+                        // Marque au-delà du débit permis : ignorée (ni diffusée, ni gardée
+                        // pour la relecture), les octets continuent de passer.
+                        Morceau::Marque(marque)
+                            if !s.limite_marques.admettre(&marque, maintenant) => {}
                         Morceau::Marque(marque) => {
+                            if !octets.is_empty() {
+                                let data = std::mem::take(&mut octets);
+                                messages.push(ServerMsg::Output { id: sid, data });
+                            }
                             s.relecture.push_marque(marque);
                             messages.push(ServerMsg::Marque {
                                 id: sid,
@@ -376,6 +392,12 @@ impl Etat {
                             });
                         }
                     }
+                }
+                if !octets.is_empty() {
+                    messages.push(ServerMsg::Output {
+                        id: sid,
+                        data: octets,
+                    });
                 }
                 for m in &messages {
                     self.diffuser(m);
@@ -806,6 +828,7 @@ impl Etat {
                 saisie: saisie_tx,
                 relecture: ReplayBuffer::new(REPLAY_CAPACITY),
                 marques: LecteurMarques::new(),
+                limite_marques: LimiteMarques::new(),
                 cols,
                 rows,
                 occupe: false,

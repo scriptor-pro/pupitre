@@ -1584,8 +1584,10 @@ fn rejeu_de_milliers_de_marques_en_un_message() {
         _ => None,
     });
     assert!(fin, "le script n'avait pas fini");
-    // Plafonné à MARQUES_MAX (les plus récentes), mais en un seul message.
-    assert_eq!(marques, pupitre_fond::relecture::MARQUES_MAX);
+    // Le débit des marques est limité (une seconde de flot : environ MARQUES_PAR_SECONDE),
+    // mais ce qui est gardé arrive en un seul message.
+    assert!(marques >= pupitre_fond::marques::MARQUES_PAR_SECONDE as usize);
+    assert!(marques <= pupitre_fond::relecture::MARQUES_MAX);
     // Toujours connecté, et plus aucun message de rejeu.
     assert!(c2.silence(Duration::from_millis(300)));
     c2.envoyer(ClientMsg::List);
@@ -1616,4 +1618,60 @@ fn client_v2_flux_sans_marque() {
         matches!(m, ServerMsg::Replay { .. }).then_some(())
     });
     assert!(c.silence(Duration::from_millis(300)));
+}
+
+/// Flot de fausses marques (un fichier piégé, un `cat`) : le client reste connecté, reçoit
+/// exactement les octets envoyés, au plus la borne de marques, puis la fin d'une vraie
+/// commande qui suit.
+fn flot_de_marques(decoupes: usize) {
+    use pupitre_fond::marques::{MARQUES_PAR_LECTURE, MARQUES_PAR_SECONDE};
+    use pupitre_proto::MarqueCommande;
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    // Le shell écrit le flot en `decoupes` morceaux, puis une vraie commande (C, D;7).
+    let flot = "\\033]133;A\\007\\033]133;B\\007\\033]133;C\\007\\033]133;D;0\\007";
+    let par_morceau = 10_000 / 4 / decoupes;
+    let script = format!(
+        "j=0; while [ $j -lt {decoupes} ]; do s=''; i=0; while [ $i -lt {par_morceau} ]; do s=\"$s{flot}\"; i=$((i+1)); done; printf '%b' \"$s\"; j=$((j+1)); done; printf 'FLOT'; sleep 1; printf '\\033]133;A\\007\\033]133;C\\007ok\\033]133;D;7\\007FIN'; sleep 5"
+    );
+    let id = ouvrir_script(&mut c, &script);
+    let v = evenements(&mut c, id, |v| aplati(v).ends_with("FIN"));
+    let marques: Vec<_> = v
+        .iter()
+        .filter_map(|e| match e {
+            Evenement::Marque(m, _) => Some(*m),
+            _ => None,
+        })
+        .collect();
+    // Les octets sont ceux du script : toutes les séquences du flot et de la vraie commande
+    // sont arrivées intactes, aucune n'a été retirée.
+    let texte = aplati(&v).replace("<M>", "");
+    assert_eq!(
+        texte.matches("\x1b]133;").count(),
+        4 * par_morceau * decoupes + 3
+    );
+    // Borne : deux fenêtres d'une seconde au plus, avec la réserve des D.
+    assert!(
+        marques.len() <= 4 * MARQUES_PAR_SECONDE as usize,
+        "{} marques",
+        marques.len()
+    );
+    let _ = MARQUES_PAR_LECTURE;
+    assert!(matches!(
+        marques.last(),
+        Some(MarqueCommande::Fin { code: Some(7), .. })
+    ));
+    // Toujours connecté.
+    c.envoyer(ClientMsg::List);
+    c.attendre(|m| matches!(m, ServerMsg::Sessions(_)).then_some(()));
+}
+
+#[test]
+fn flot_de_marques_en_un_morceau() {
+    flot_de_marques(1);
+}
+
+#[test]
+fn flot_de_marques_en_cent_morceaux() {
+    flot_de_marques(100);
 }
