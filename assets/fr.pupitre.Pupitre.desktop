@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Pupitre
+GenericName=Terminal
+GenericName[fr]=Terminal
+Comment=Accessible tabbed terminal
+Comment[fr]=Terminal à onglets accessible
+Exec=pupitre
+Icon=fr.pupitre.Pupitre
+Terminal=false
+StartupNotify=true
+StartupWMClass=fr.pupitre.Pupitre
+Categories=System;TerminalEmulator;GTK;
+Keywords=terminal;shell;console;ssh;command;prompt;
+Keywords[fr]=terminal;shell;console;ssh;commande;invite;
+Actions=nouvelle-fenetre;
+
+[Desktop Action nouvelle-fenetre]
+Name=New Window
+Name[fr]=Nouvelle fenêtre
+Exec=pupitre

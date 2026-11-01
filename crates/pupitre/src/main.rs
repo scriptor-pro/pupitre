@@ -40,6 +40,8 @@ fn main() -> glib::ExitCode {
         _ => eprintln!("pupitre: polices embarquées introuvables ; police du système utilisée"),
     }
     glib::set_application_name("Pupitre");
+    // Icône des fenêtres (X11) : celle du thème installée par scripts/installer-bureau.sh.
+    gtk::Window::set_default_icon_name(ID_APPLICATION);
     let app = gtk::Application::builder()
         .application_id(ID_APPLICATION)
         .build();
