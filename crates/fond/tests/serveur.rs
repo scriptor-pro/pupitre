@@ -1326,3 +1326,74 @@ fn ouvrir_applique_les_variables_du_client() {
     assert_eq!(champs[1], id.to_string());
     assert_ne!(champs[2], "/faux");
 }
+
+/// Les noms protégés reçus dans `Ouvrir.env` sont refusés, même quand le fond ne les pose
+/// pas lui-même ; les variables d'invite de l'interface (`PUPITRE_INVITE`…) passent.
+#[test]
+fn ouvrir_refuse_les_variables_protegees() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    let noms = [
+        "PUPITRE_ASKPASS_MODE",
+        "TERM",
+        "COLORTERM",
+        "TERM_PROGRAM",
+        "PUPITRE_SOCKET",
+        "SSH_ASKPASS",
+        "SSH_ASKPASS_REQUIRE",
+        "COLUMNS",
+        "VTE_VERSION",
+        "PUPITRE_INVITE",
+        "STARSHIP_CONFIG",
+    ];
+    let mut script = String::new();
+    for n in noms {
+        script.push_str(&format!("printf 'V_{n}=%s\\n' \"${{{n}-<unset>}}\"; "));
+    }
+    script.push_str("sleep 1");
+    let env = noms
+        .iter()
+        .map(|n| (n.to_string(), "trousseau-ou-dumb".to_string()))
+        .collect();
+    c.envoyer(ClientMsg::Ouvrir {
+        argv: vec!["/bin/sh".into(), "-c".into(), script],
+        cwd: None,
+        cols: 80,
+        rows: 24,
+        env,
+    });
+    let id = c.attendre(|m| match m {
+        ServerMsg::Opened { id } => Some(*id),
+        ServerMsg::OpenFailed { error } => panic!("{error}"),
+        _ => None,
+    });
+    let mut tout = Vec::new();
+    let sortie = c.attendre(|m| match m {
+        ServerMsg::Output { id: i, data } if *i == id => {
+            tout.extend(data);
+            let t = String::from_utf8_lossy(&tout).into_owned();
+            t.contains("V_STARSHIP_CONFIG=").then_some(t)
+        }
+        _ => None,
+    });
+    let valeur = |n: &str| {
+        let d = sortie.find(&format!("V_{n}=")).unwrap() + n.len() + 3;
+        let f = sortie[d..].find('\n').unwrap();
+        sortie[d..d + f].trim_end().to_string()
+    };
+    for n in [
+        "PUPITRE_ASKPASS_MODE",
+        "PUPITRE_SOCKET",
+        "SSH_ASKPASS_REQUIRE",
+        "COLUMNS",
+        "VTE_VERSION",
+    ] {
+        assert_ne!(valeur(n), "trousseau-ou-dumb", "{n} ne doit pas passer");
+    }
+    assert_eq!(valeur("TERM"), "xterm-256color");
+    assert_eq!(valeur("COLORTERM"), "truecolor");
+    assert_eq!(valeur("TERM_PROGRAM"), "Pupitre");
+    assert_ne!(valeur("SSH_ASKPASS"), "trousseau-ou-dumb");
+    assert_eq!(valeur("PUPITRE_INVITE"), "trousseau-ou-dumb");
+    assert_eq!(valeur("STARSHIP_CONFIG"), "trousseau-ou-dumb");
+}

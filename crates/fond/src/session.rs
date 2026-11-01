@@ -38,6 +38,27 @@ const VARIABLES_RETIREES: [&str; 6] = [
     "PUPITRE_ASKPASS_MODE",
 ];
 
+/// Noms que l'interface n'a pas le droit d'imposer à un shell, même quand le fond ne les
+/// pose pas lui-même (agent SSH, askpass, identité de la session, terminal), en plus de
+/// [`VARIABLES_RETIREES`]. Les variables d'invite (`PUPITRE_INVITE`, `STARSHIP_CONFIG`,
+/// `ZDOTDIR`…) ne sont pas concernées.
+const VARIABLES_PROTEGEES: [&str; 9] = [
+    "SSH_AUTH_SOCK",
+    "SSH_ASKPASS",
+    "SSH_ASKPASS_REQUIRE",
+    "PUPITRE_SOCKET",
+    "PUPITRE_SESSION",
+    "PUPITRE_ASKPASS_MODE",
+    "TERM",
+    "COLORTERM",
+    "TERM_PROGRAM",
+];
+
+/// Vrai si `nom` ne peut pas être fixé par le client dans `Ouvrir.env`.
+pub fn variable_protegee(nom: &str) -> bool {
+    VARIABLES_PROTEGEES.contains(&nom) || VARIABLES_RETIREES.contains(&nom)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionEvent {
     Output(Vec<u8>),

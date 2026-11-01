@@ -11,7 +11,7 @@
 
 use crate::chargement::{self, Rapport, Travail};
 use crate::relecture::{ReplayBuffer, REPLAY_CAPACITY};
-use crate::session::{Session, SessionEvent};
+use crate::session::{variable_protegee, Session, SessionEvent};
 use crate::ssh::{EntreesSsh, EtatSsh};
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
@@ -704,7 +704,12 @@ impl Etat {
         // après et l'emportent, pour que l'interface ne puisse pas détourner l'agent isolé.
         let mut env: Vec<(String, String)> = env_client
             .into_iter()
-            .filter(|(k, v)| !k.is_empty() && !k.contains(['=', '\0']) && !v.contains('\0'))
+            .filter(|(k, v)| {
+                !k.is_empty()
+                    && !k.contains(['=', '\0'])
+                    && !v.contains('\0')
+                    && !variable_protegee(k)
+            })
             .collect();
         env.extend(self.ssh.variables(self.prochain_id));
         if self.chargement.reessai {
