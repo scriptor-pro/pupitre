@@ -1344,6 +1344,8 @@ fn ouvrir_refuse_les_variables_protegees() {
         "COLUMNS",
         "VTE_VERSION",
         "PUPITRE_INVITE",
+        "SSH_AUTH_SOCK",
+        "PUPITRE_SESSION",
         "STARSHIP_CONFIG",
     ];
     let mut script = String::new();
@@ -1398,6 +1400,8 @@ fn ouvrir_refuse_les_variables_protegees() {
     assert_eq!(valeur("COLORTERM"), "truecolor");
     assert_eq!(valeur("TERM_PROGRAM"), "Pupitre");
     assert_ne!(valeur("SSH_ASKPASS"), "trousseau-ou-dumb");
+    assert_ne!(valeur("SSH_AUTH_SOCK"), "trousseau-ou-dumb");
+    assert_eq!(valeur("PUPITRE_SESSION"), id.to_string());
     assert_eq!(valeur("PUPITRE_INVITE"), "trousseau-ou-dumb");
     assert_eq!(valeur("STARSHIP_CONFIG"), "trousseau-ou-dumb");
 }
@@ -1496,21 +1500,40 @@ fn relecture_rejoue_les_marques() {
     });
     let mut c2 = Client::connecter(&s.socket);
     c2.envoyer(ClientMsg::Attach { id });
-    let v = evenements(&mut c2, id, |v| {
-        v.iter()
-            .filter(|e| matches!(e, Evenement::Marque(..)))
-            .count()
-            == 2
-    });
-    // Le tampon d'abord, puis les marques, toutes marquées comme rejouées.
-    assert!(matches!(&v[0], Evenement::Octets(o) if o.ends_with(b"c\r\n")));
+    let v = evenements(&mut c2, id, |v| aplati(v).ends_with("c\r\n"));
+    // Le premier message est le `Replay`, puis les marques sont intercalées avec les
+    // octets qui les suivent, comme dans le flux d'origine.
+    let tout = aplati(&v);
+    assert!(
+        tout.ends_with("a\x1b]133;A\x07<M>b\x1b]133;B\x1b\\<M>c\r\n"),
+        "{tout:?}"
+    );
+    assert!(matches!(&v[0], Evenement::Octets(o) if o.ends_with(b"a\x1b]133;A\x07")));
+    let marques: Vec<_> = v
+        .iter()
+        .filter(|e| matches!(e, Evenement::Marque(..)))
+        .collect();
     assert_eq!(
-        &v[1..],
-        &[
-            Evenement::Marque(MarqueCommande::Invite, true),
-            Evenement::Marque(MarqueCommande::Saisie, true),
+        marques,
+        vec![
+            &Evenement::Marque(MarqueCommande::Invite, true),
+            &Evenement::Marque(MarqueCommande::Saisie, true),
         ]
     );
+    // Un client v2 reçoit les mêmes octets en un seul `Replay`, sans marque.
+    let mut c3 = Client::brut(&s.socket);
+    c3.envoyer(ClientMsg::Hello { version: 2 });
+    assert_eq!(c3.recevoir(), ServerMsg::Welcome { version: 2 });
+    c3.envoyer(ClientMsg::Attach { id });
+    let data = c3.attendre(|m| match m {
+        ServerMsg::Replay { data, .. } => Some(data.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        String::from_utf8_lossy(&data).replace("<M>", ""),
+        tout.replace("<M>", "")
+    );
+    assert!(c3.silence(Duration::from_millis(300)));
 }
 
 #[test]

@@ -18,8 +18,8 @@ use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
 use pupitre_i18n::{t, ta, ArgI18n};
 use pupitre_proto::{
-    read_frame, write_frame, ClientMsg, DemandeId, ServerMsg, SessionId, SessionInfo, VERSION,
-    VERSION_MIN,
+    read_frame, write_frame, ClientMsg, DemandeId, MarqueCommande, ServerMsg, SessionId,
+    SessionInfo, VERSION, VERSION_MIN,
 };
 use pupitre_ssh::trousseau::{Coffre, CoffreMemoire, CoffreSecretService};
 use std::collections::{BTreeMap, HashMap};
@@ -497,18 +497,13 @@ impl Etat {
             ClientMsg::Attach { id } => match self.sessions.get(&id) {
                 Some(s) => {
                     let (data, marques) = s.relecture.snapshot_avec_marques();
-                    self.envoyer(cid, ServerMsg::Replay { id, data });
-                    // Les marques des octets rejoués, dans l'ordre (sans effet pour un
-                    // client qui ne connaît pas la version 3).
-                    for marque in marques {
-                        self.envoyer(
-                            cid,
-                            ServerMsg::Marque {
-                                id,
-                                marque,
-                                rejouee: true,
-                            },
-                        );
+                    // Un client qui ne connaît pas la version 3 reçoit un seul `Replay`.
+                    let v3 = self.clients.get(&cid).is_some_and(|c| c.version >= 3);
+                    let marques = if v3 { marques } else { Vec::new() };
+                    // Tout le rejeu part d'une traite vers ce seul client : la sortie en
+                    // direct, traitée par la même boucle, ne s'intercale jamais dedans.
+                    for m in rejeu(id, data, &marques) {
+                        self.envoyer(cid, m);
                     }
                 }
                 None => self.inconnue(cid, id),
@@ -883,6 +878,36 @@ impl Etat {
             let _ = c.flux.shutdown(Shutdown::Both);
         }
     }
+}
+
+/// Messages d'un rejeu : un `Replay` avec les octets jusqu'à la première marque, puis, dans
+/// l'ordre du flux, chaque `Marque` rejouée suivie d'un `Output` avec les octets qui la
+/// suivent (jusqu'à la marque suivante). Sans marque : un seul `Replay`. L'interface
+/// note la ligne du terminal à l'arrivée de chaque marque, d'où ce découpage.
+fn rejeu(id: SessionId, data: Vec<u8>, marques: &[(usize, MarqueCommande)]) -> Vec<ServerMsg> {
+    let mut coupes: Vec<usize> = marques.iter().map(|&(d, _)| d.min(data.len())).collect();
+    coupes.push(data.len());
+    let mut messages = Vec::with_capacity(2 * marques.len() + 1);
+    let mut debut = 0usize;
+    for (i, &fin) in coupes.iter().enumerate() {
+        let fin = fin.max(debut);
+        let segment = data.get(debut..fin).unwrap_or_default().to_vec();
+        match i.checked_sub(1).and_then(|k| marques.get(k)) {
+            None => messages.push(ServerMsg::Replay { id, data: segment }),
+            Some(&(_, marque)) => {
+                messages.push(ServerMsg::Marque {
+                    id,
+                    marque,
+                    rejouee: true,
+                });
+                if !segment.is_empty() {
+                    messages.push(ServerMsg::Output { id, data: segment });
+                }
+            }
+        }
+        debut = fin;
+    }
+    messages
 }
 
 /// Message tel qu'un client en `version` peut le recevoir, ou `None` s'il ne doit rien

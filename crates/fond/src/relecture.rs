@@ -93,8 +93,10 @@ impl ReplayBuffer {
     }
 
     /// Comme [`Self::snapshot`], avec les marques qui se trouvent dans les octets rejoués
-    /// (celles d'avant la coupe ne sont pas rendues), dans l'ordre du flux.
-    pub fn snapshot_avec_marques(&self) -> (Vec<u8>, Vec<MarqueCommande>) {
+    /// (celles d'avant la coupe ne sont pas rendues), dans l'ordre du flux. Chaque marque
+    /// porte son décalage dans les octets rendus (0 = avant le premier, `len` = après le
+    /// dernier) : elle vient juste avant l'octet de ce rang.
+    pub fn snapshot_avec_marques(&self) -> (Vec<u8>, Vec<(usize, MarqueCommande)>) {
         let debut = if self.coupe {
             self.octets
                 .iter()
@@ -109,7 +111,10 @@ impl ReplayBuffer {
             .marques
             .iter()
             .filter(|&&(p, _)| p >= premiere)
-            .map(|&(_, m)| m)
+            .map(|&(p, m)| {
+                let decalage = usize::try_from(p.saturating_sub(premiere)).unwrap_or(usize::MAX);
+                (decalage.min(self.octets.len()), m)
+            })
             .collect();
         (octets, marques)
     }
@@ -197,7 +202,10 @@ mod tests {
         t.push_marque(MarqueCommande::Saisie);
         let (o, m) = t.snapshot_avec_marques();
         assert_eq!(o, b"abcdef");
-        assert_eq!(m, vec![MarqueCommande::Invite, MarqueCommande::Saisie]);
+        assert_eq!(
+            m,
+            vec![(3, MarqueCommande::Invite), (6, MarqueCommande::Saisie)]
+        );
     }
 
     #[test]
@@ -219,7 +227,11 @@ mod tests {
         // "bb\n" est parti : la marque Invite aussi, les deux autres restent.
         let (o, m) = t.snapshot_avec_marques();
         assert_eq!(o, b"cc\ndd\nee\n");
-        assert_eq!(m, vec![MarqueCommande::Saisie, MarqueCommande::Execution]);
+        // Décalages dans "cc\ndd\nee\n" : avant "cc" et avant "dd".
+        assert_eq!(
+            m,
+            vec![(0, MarqueCommande::Saisie), (3, MarqueCommande::Execution)]
+        );
         t.push(&[b'x'; 100]);
         assert!(t.snapshot_avec_marques().1.is_empty());
         assert!(t.marques.is_empty());
