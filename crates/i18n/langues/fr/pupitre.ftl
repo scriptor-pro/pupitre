@@ -306,3 +306,20 @@ shells-niveau-tel-quel = tel quel
 shells-absents = Shells pris en charge, non installés :
 shells-absent = { $nom } ({ $niveau })
 shells-absent-installer = { $nom } ({ $niveau }) : { $commande }
+
+## Fin des commandes et navigation de commande en commande
+
+duree-moins-seconde = moins d'une seconde
+duree-secondes = { $s } s
+duree-minutes = { $m } min { $s } s
+duree-minutes-rondes = { $m } min
+commande-terminee = Commande terminée.
+commande-terminee-duree = Commande terminée en { $duree }.
+commande-echec = Commande en échec, code { $code }.
+commande-echec-duree = Commande en échec, code { $code }, en { $duree }.
+commande-navigation = Commande : { $texte }
+commande-navigation-echec = Commande : { $texte }, en échec, code { $code }
+commande-vide = Commande vide.
+commande-vide-echec = Commande vide, en échec, code { $code }.
+commande-aucune-avant = Aucune commande avant.
+commande-aucune-apres = Aucune commande après.

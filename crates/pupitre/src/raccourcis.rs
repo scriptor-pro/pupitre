@@ -35,6 +35,10 @@ pub enum Raccourci {
     FocusSuivant,
     /// Ctrl+Maj+Tab : élément précédent.
     FocusPrecedent,
+    /// Ctrl+Maj+↑ : commande précédente (↑ seule reste au shell).
+    CommandePrecedente,
+    /// Ctrl+Maj+↓ : commande suivante.
+    CommandeSuivante,
 }
 
 /// Raccourci correspondant à une touche (`code` = code matériel), s'il y en a un.
@@ -53,6 +57,11 @@ pub fn raccourci(touche: gdk::Key, code: u32, mods: gdk::ModifierType) -> Option
     if m == ctrl_maj {
         if matches!(touche, gdk::Key::Tab | gdk::Key::ISO_Left_Tab) {
             return Some(Raccourci::FocusPrecedent);
+        }
+        match touche {
+            gdk::Key::Up | gdk::Key::KP_Up => return Some(Raccourci::CommandePrecedente),
+            gdk::Key::Down | gdk::Key::KP_Down => return Some(Raccourci::CommandeSuivante),
+            _ => {}
         }
         return match touche.to_lower() {
             gdk::Key::t => Some(Raccourci::NouvelOnglet),
@@ -226,6 +235,26 @@ mod tests {
         );
         // Tab seul reste au shell (complétion).
         assert_eq!(raccourci(gdk::Key::Tab, 23, M::empty()), None);
+    }
+
+    #[test]
+    fn commandes_au_clavier() {
+        // Ctrl+Maj+↑/↓ : navigation de commande en commande, jamais envoyée au shell.
+        assert_eq!(
+            raccourci(gdk::Key::Up, 111, CS),
+            Some(Raccourci::CommandePrecedente)
+        );
+        assert_eq!(
+            raccourci(gdk::Key::Down, 116, CS),
+            Some(Raccourci::CommandeSuivante)
+        );
+        // Les flèches seules, avec Ctrl seul ou avec Maj seul, restent au shell.
+        for mods in [M::empty(), M::CONTROL_MASK, M::SHIFT_MASK, M::ALT_MASK] {
+            assert_eq!(raccourci(gdk::Key::Up, 111, mods), None, "{mods:?}");
+            assert_eq!(raccourci(gdk::Key::Down, 116, mods), None, "{mods:?}");
+        }
+        // Avec Alt en plus : au programme aussi.
+        assert_eq!(raccourci(gdk::Key::Up, 111, CS | M::ALT_MASK), None);
     }
 
     #[test]

@@ -8,6 +8,7 @@
 
 use crate::apparence::{suivre_preference_systeme, theme_systeme, Preference};
 use crate::client::{connect_or_spawn_at, Client, CONNEXION_PERDUE};
+use crate::commandes::{doit_annoncer, texte_annonce, Sens};
 use crate::demande::{ouvrir_demande, DemandeAffichee};
 use crate::messages::{
     annoncer_focus_une_fois_affiche, refaire_annonce_focus, ActionMessage, BandeauMessages,
@@ -26,7 +27,7 @@ use pupitre_config::{
     charger_theme, check_theme, theme_clair, theme_sombre, Config, ErreurConfig, Theme, ThemeChoix,
 };
 use pupitre_i18n::{t as tr, ta, ArgI18n};
-use pupitre_proto::{ClientMsg, DemandeId, Genre, ServerMsg, SessionId};
+use pupitre_proto::{ClientMsg, DemandeId, Genre, MarqueCommande, ServerMsg, SessionId};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -76,7 +77,13 @@ pub struct Onglet {
     attend_relecture: Cell<bool>,
     /// Indicateur ● (cloche dans un onglet non visible).
     signale: Cell<bool>,
+    /// Dernières annonces de commandes faites au lecteur d'écran (les plus anciennes sont
+    /// oubliées).
+    annonces: RefCell<VecDeque<String>>,
 }
+
+/// Annonces de commandes gardées par onglet (observées par les tests).
+const ANNONCES_GARDEES: usize = 32;
 
 impl Onglet {
     pub fn terminal(&self) -> &TerminalOnglet {
@@ -130,6 +137,48 @@ impl Onglet {
     /// Texte de l'étiquette de l'onglet, indicateur compris.
     pub fn titre_affiche(&self) -> String {
         self.etiquette.text().to_string()
+    }
+
+    /// Dernières annonces de commandes (fin d'une commande, navigation), de la plus
+    /// ancienne à la plus récente.
+    pub fn annonces(&self) -> Vec<String> {
+        self.annonces.borrow().iter().cloned().collect()
+    }
+
+    /// Nombre de commandes repérées dans la sortie du shell de cet onglet.
+    pub fn nombre_commandes(&self) -> usize {
+        self.terminal.nombre_commandes()
+    }
+
+    /// Annonce `texte` au lecteur d'écran, poliment, et le garde dans le journal.
+    fn annoncer_commande(&self, texte: &str) {
+        {
+            let mut a = self.annonces.borrow_mut();
+            if a.len() >= ANNONCES_GARDEES {
+                a.pop_front();
+            }
+            a.push_back(texte.to_string());
+        }
+        crate::messages::annoncer(self.terminal.terminal(), texte);
+    }
+
+    /// L'onglet est affiché dans une fenêtre active (les autres : à l'étape 4).
+    fn visible_et_actif(&self) -> bool {
+        let Some(c) = self.carnet() else { return false };
+        c.page_num(&self.widget()) == c.current_page()
+            && c.root()
+                .and_downcast::<gtk::Window>()
+                .is_some_and(|w| crate::commandes::fenetre_active(w.is_active()))
+    }
+
+    /// Défile jusqu'à la commande précédente ou suivante et l'annonce.
+    pub fn naviguer_commande(self: &Rc<Self>, sens: Sens) {
+        let faible = Rc::downgrade(self);
+        self.terminal.naviguer(sens, move |n| {
+            if let (Some(o), Some(n)) = (faible.upgrade(), n) {
+                o.annoncer_commande(&n.texte());
+            }
+        });
     }
 
     fn signaler(&self, oui: bool) {
@@ -673,20 +722,8 @@ impl Pupitre {
                     o.terminal.on_output(&data);
                 }
             }
-            // Les marques du rejeu ne sont pas encore exploitées : même traitement qu'un
-            // `Replay` (les octets sont les mêmes).
-            ServerMsg::Replay { id, data } | ServerMsg::ReplayMarque { id, data, .. } => {
-                if let Some(o) = self.onglet(id) {
-                    o.attend_relecture.set(false);
-                    o.terminal.on_output(&data);
-                    let faible = Rc::downgrade(&o);
-                    glib::timeout_add_local_once(DELAI_REDESSIN, move || {
-                        if let Some(o) = faible.upgrade() {
-                            o.terminal.forcer_redessin();
-                        }
-                    });
-                }
-            }
+            ServerMsg::Replay { id, data } => self.rejouer(id, &data, &[]),
+            ServerMsg::ReplayMarque { id, data, marques } => self.rejouer(id, &data, &marques),
             ServerMsg::Busy { id, busy } => {
                 if let Some(o) = self.onglet(id) {
                     o.occupe.set(busy);
@@ -715,8 +752,17 @@ impl Pupitre {
                 },
             ),
             ServerMsg::DemandeClose { demande } => self.fermer_demande(demande),
-            // Les marques de commandes sont utilisées par la navigation entre commandes.
-            ServerMsg::Marque { .. } => {}
+            // Marque de commande en direct (OSC 133), à sa place dans le flux des octets ;
+            // pendant la relecture d'une reprise, la sortie est ignorée et les marques aussi.
+            ServerMsg::Marque {
+                id,
+                marque,
+                rejouee,
+            } => {
+                if let Some(o) = self.onglet(id).filter(|o| !o.attend_relecture.get()) {
+                    o.terminal.marque(marque, rejouee);
+                }
+            }
             ServerMsg::Message(t) => {
                 let fenetres = self.fenetres();
                 if fenetres.is_empty() {
@@ -730,6 +776,20 @@ impl Pupitre {
                 }
             }
             ServerMsg::Welcome { .. } | ServerMsg::Sessions(_) | ServerMsg::Reponse { .. } => {}
+        }
+    }
+
+    /// Reprise d'une session : octets (avec leurs marques de commandes) à afficher d'un coup.
+    fn rejouer(&self, id: SessionId, data: &[u8], marques: &[(u32, MarqueCommande)]) {
+        if let Some(o) = self.onglet(id) {
+            o.attend_relecture.set(false);
+            o.terminal.rejouer(data, marques);
+            let faible = Rc::downgrade(&o);
+            glib::timeout_add_local_once(DELAI_REDESSIN, move || {
+                if let Some(o) = faible.upgrade() {
+                    o.terminal.forcer_redessin();
+                }
+            });
         }
     }
 
@@ -1274,6 +1334,12 @@ impl FenetrePupitre {
                 self.deplacer_focus(gtk::DirectionType::TabBackward);
             }
             Raccourci::ZoomNormal => actif.iter().for_each(|o| o.terminal.zoomer(None, zoom_max)),
+            Raccourci::CommandePrecedente => actif
+                .iter()
+                .for_each(|o| o.naviguer_commande(Sens::Precedente)),
+            Raccourci::CommandeSuivante => actif
+                .iter()
+                .for_each(|o| o.naviguer_commande(Sens::Suivante)),
         }
     }
 
@@ -1556,6 +1622,20 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
         termine: Cell::new(false),
         attend_relecture: Cell::new(false),
         signale: Cell::new(false),
+        annonces: RefCell::new(VecDeque::new()),
+    });
+
+    // Fin d'une commande vue en direct : annoncée selon le réglage, seulement si l'onglet
+    // est affiché dans la fenêtre active.
+    let (faible, pupitre) = (Rc::downgrade(&o), Rc::downgrade(p));
+    o.terminal.connecter_fin_commande(move |code, duree| {
+        let (Some(o), Some(p)) = (faible.upgrade(), pupitre.upgrade()) else {
+            return;
+        };
+        let mode = p.config.borrow().annonce_fin_commande;
+        if doit_annoncer(mode, duree) && o.visible_et_actif() {
+            o.annoncer_commande(&texte_annonce(code, duree));
+        }
     });
 
     // Cloche : ● si l'onglet n'est pas visible, ou si le flash est remplacé (animations

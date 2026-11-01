@@ -4,6 +4,7 @@
 pub mod apparence;
 pub mod attenuation;
 pub mod client;
+pub mod commandes;
 pub mod connexions;
 pub mod demande;
 pub mod fenetre;

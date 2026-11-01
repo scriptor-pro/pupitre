@@ -60,3 +60,7 @@ harness = false
 [[test]]
 name = "gui_binaire"
 harness = false
+
+[[test]]
+name = "gui_commandes"
+harness = false

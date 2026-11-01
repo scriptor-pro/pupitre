@@ -17,7 +17,7 @@ prévues mais pas encore disponibles.
 7. Messages de Pupitre
 8. Connexions SSH, phrases de passe et trousseau
 9. Shells et invite
-10. Fin des commandes et navigation entre commandes (à venir)
+10. Fin des commandes et navigation entre commandes
 11. Configuration : `pupitre.toml`
 12. Thèmes et couleurs
 13. Polices
@@ -63,8 +63,8 @@ avec ceux d'Orca.
 | Plein écran | F11 |
 | Quitter le terminal vers l'élément suivant | Ctrl+Tab |
 | Revenir à l'élément précédent | Ctrl+Maj+Tab |
-| Commande précédente (à venir) | Ctrl+Maj+↑ |
-| Commande suivante (à venir) | Ctrl+Maj+↓ |
+| Commande précédente | Ctrl+Maj+↑ |
+| Commande suivante | Ctrl+Maj+↓ |
 | Ouvrir cette aide (à venir) | Ctrl+Maj+H |
 
 Les raccourcis suivent la lettre de votre disposition de clavier : Ctrl+Maj+T fonctionne là
@@ -268,7 +268,7 @@ l'entrée « Pupitre — phrase de passe de … ».
 - **Shell absent** : l'onglet s'ouvre avec votre shell de connexion et un message donne la
   commande d'installation, par exemple « sudo apt install fish ».
 
-## 10. Fin des commandes et navigation entre commandes (à venir)
+## 10. Fin des commandes et navigation entre commandes
 
 Ces fonctions marchent avec bash, zsh, fish et nushell.
 
@@ -276,7 +276,11 @@ Ces fonctions marchent avec bash, zsh, fish et nushell.
 Quand une commande dure **5 secondes ou plus**, Orca annonce sa fin et son résultat :
 - « Commande terminée en 12 s. » si elle a réussi ;
 - « Commande en échec, code 2, en 12 s. » si elle a échoué ;
-- au-delà d'une minute : « … en 2 min 5 s. »
+- au-delà d'une minute : « … en 2 min 5 s » (« en 2 min » pile) ;
+- si le shell ne donne pas la durée : « Commande terminée. » ou « Commande en échec, code 2. »
+  (avec le réglage `"toutes"` seulement : sans durée, une commande n'est jamais « longue ») ;
+- avec `"toutes"`, une commande de moins d'une seconde : « Commande terminée en moins d'une
+  seconde. »
 
 Les commandes plus courtes (`ls`, `cd`…) ne sont pas annoncées : Orca lit déjà ce qu'elles
 affichent, et une annonce après chaque commande deviendrait pénible.
@@ -286,14 +290,25 @@ Réglage `annonce_fin_commande` dans `pupitre.toml` :
 - `"toutes"` : chaque commande ;
 - `"aucune"` : jamais.
 
-Pas d'annonce pour une commande qui se termine dans un onglet caché, ni pour les commandes
-déjà terminées quand Pupitre est rouvert après un incident.
+Pas d'annonce pour une commande qui se termine dans un onglet caché ou dans une fenêtre qui
+n'est pas la fenêtre active, ni pour les commandes déjà terminées quand Pupitre est rouvert
+après un incident. L'annonce est « polie » : Orca la dit sans couper ce qu'il est en train de
+lire.
 
 ### Passer d'une commande à l'autre
 - **Ctrl+Maj+↑** : commande précédente. **Ctrl+Maj+↓** : commande suivante.
-- Le terminal défile jusqu'à la commande et Orca la lit : « Commande : git fetch », suivi de
-  « en échec, code 1 » si elle a échoué.
+- Le terminal défile pour mettre la ligne de l'invite de la commande en haut, et Orca lit :
+  « Commande : git fetch », suivi de « , en échec, code 1 » si elle a échoué. Le texte lu est
+  celui que vous avez tapé, sans l'invite. Si le shell ne signale pas où finit l'invite, la
+  ligne entière est lue, invite comprise. Une commande vide est annoncée « Commande vide. »
 - Au bout de la liste : « Aucune commande avant. » ou « Aucune commande après. »
+- La navigation vise les commandes déjà lancées, pas l'invite du bas, où vous êtes déjà ; une
+  commande sortie de l'historique du terminal (voir `historique_lignes`) est oubliée. Après un
+  changement de largeur de la fenêtre, les commandes d'avant ne sont plus retrouvées : la
+  navigation repart des suivantes.
+- Après une reprise (Pupitre rouvert), les commandes déjà faites servent à la navigation,
+  mais seulement celles que le processus de fond a retenues ; si une commande manque, la
+  navigation passe simplement à la voisine.
 - Les flèches seules (↑ et ↓) restent au shell et aux programmes : dans le shell, elles
   rappellent les commandes déjà tapées ; dans `less`, `htop`, `vim`…, elles déplacent le
   curseur.
@@ -324,7 +339,7 @@ le chemin du fichier.
 | `zoom_max_pourcent` | `200` | de 100 à 500 |
 | `shell` | `""` (shell de connexion) | nom ou chemin, ex. `"fish"` |
 | `invite` | `"starship"` | `"starship"` ou `"shell"` |
-| `annonce_fin_commande` (à venir) | `"longues"` | `"longues"`, `"toutes"`, `"aucune"` |
+| `annonce_fin_commande` | `"longues"` | `"longues"`, `"toutes"`, `"aucune"` |
 | `langue` (à venir) | `""` (langue du système) | `"fr"`, `"en"`, `"es"`, `"it"`, `"de"`, `"nl"` ; appliqué au prochain lancement |
 
 Exemple de shells déclarés (le premier élément de `commande` est le programme, sans `-` au

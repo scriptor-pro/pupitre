@@ -5,13 +5,14 @@
 
 use crate::attenuation::{attenuation_lisible, FiltreAttenue};
 use crate::client::Client;
+use crate::commandes::{Flux, Navigation, Sens};
 use gtk::gdk;
 use gtk::glib;
 use gtk::pango;
 use gtk::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use pupitre_config::{Config, Rgb, Theme};
-use pupitre_proto::{ClientMsg, SessionId};
+use pupitre_proto::{segments_de_rejeu, ClientMsg, MarqueCommande, SessionId};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -172,7 +173,9 @@ pub struct TerminalOnglet {
     id: Rc<Cell<SessionId>>,
     /// Session terminée : frappes et tailles ne sont plus envoyées.
     muet: Rc<Cell<bool>>,
-    attenuation: RefCell<FiltreAttenue>,
+    attenuation: Rc<RefCell<FiltreAttenue>>,
+    /// Octets et marques de commandes dans l'ordre, et lignes des commandes.
+    flux: Rc<Flux>,
     zoom: Cell<u16>,
     /// Clignotement demandé par la configuration (appliqué si les animations sont permises).
     clignote: Rc<Cell<bool>>,
@@ -199,8 +202,24 @@ impl TerminalOnglet {
 
         // Frappes, collages, réponses aux requêtes et souris → session. Une erreur d'envoi
         // signifie connexion perdue : elle est déjà signalée sur le canal du client.
-        let (c, i, m) = (client.clone(), id.clone(), muet.clone());
+        let attenuation = Rc::new(RefCell::new(FiltreAttenue::default()));
+        let flux = {
+            let (a, t) = (attenuation.clone(), terminal.clone());
+            Flux::new(
+                terminal.clone(),
+                Box::new(move |data: &[u8]| {
+                    let mut filtree = Vec::with_capacity(data.len());
+                    a.borrow_mut().filtrer(data, &mut filtree);
+                    t.feed(&filtree);
+                }),
+            )
+        };
+        let (c, i, m, fl) = (client.clone(), id.clone(), muet.clone(), flux.clone());
         terminal.connect_commit(move |_, texte, _| {
+            // Réponse à notre propre demande de position du curseur : pas pour le shell.
+            if fl.garder_reponse(texte) {
+                return;
+            }
             if !m.get() {
                 let _ = c.send(ClientMsg::Input {
                     id: i.get(),
@@ -208,8 +227,9 @@ impl TerminalOnglet {
                 });
             }
         });
-        let (c, i, m) = (client.clone(), id.clone(), muet.clone());
+        let (c, i, m, fl) = (client.clone(), id.clone(), muet.clone(), flux.clone());
         cadre.connecter_taille(move |cols, rows| {
+            fl.grille_changee(i64::from(cols));
             if !m.get() {
                 let _ = c.send(ClientMsg::Resize {
                     id: i.get(),
@@ -295,7 +315,8 @@ impl TerminalOnglet {
             client,
             id,
             muet,
-            attenuation: RefCell::new(FiltreAttenue::default()),
+            attenuation,
+            flux,
             zoom: Cell::new(100),
             clignote,
             lanceur,
@@ -441,9 +462,38 @@ impl TerminalOnglet {
 
     /// Affiche des octets reçus de la session (y compris invalides : VTE les remplace).
     pub fn on_output(&self, data: &[u8]) {
-        let mut filtree = Vec::with_capacity(data.len());
-        self.attenuation.borrow_mut().filtrer(data, &mut filtree);
-        self.terminal().feed(&filtree);
+        self.flux.octets(data);
+    }
+
+    /// Marque de commande (OSC 133) reçue du shell, à sa place dans le flux ; `rejouee` :
+    /// vue lors d'une reprise (sert à la navigation, jamais annoncée).
+    pub fn marque(&self, marque: MarqueCommande, rejouee: bool) {
+        self.flux.marque(marque, rejouee);
+    }
+
+    /// Rejeu d'une reprise : les octets avec leurs marques (décalages dans `data`).
+    pub fn rejouer(&self, data: &[u8], marques: &[(u32, MarqueCommande)]) {
+        for (marque, octets) in segments_de_rejeu(data, marques) {
+            if let Some(m) = marque {
+                self.flux.marque(m, true);
+            }
+            self.flux.octets(octets);
+        }
+    }
+
+    /// Nombre de commandes repérées dans le flux.
+    pub fn nombre_commandes(&self) -> usize {
+        self.flux.nombre_commandes()
+    }
+
+    /// `f(code, durée en ms)` est appelé à la fin de chaque commande vue en direct.
+    pub fn connecter_fin_commande(&self, f: impl Fn(Option<i32>, Option<u64>) + 'static) {
+        self.flux.connecter_fin(f);
+    }
+
+    /// Défile jusqu'à la commande précédente ou suivante ; `fini` reçoit le résultat.
+    pub fn naviguer(&self, sens: Sens, fini: impl FnOnce(Option<Navigation>) + 'static) {
+        self.flux.naviguer(sens, fini);
     }
 
     /// Applique police, couleurs et comportement ; peut être rappelé à tout moment.
@@ -465,6 +515,10 @@ impl TerminalOnglet {
         self.clignote.set(config.curseur_clignote);
         t.set_cursor_blink_mode(mode_curseur(config.curseur_clignote));
         t.set_scrollback_lines(i64::from(config.historique_lignes));
+        // Autant de commandes que de lignes d'historique au plus (une ligne chacune).
+        self.flux.definir_capacite(
+            usize::try_from(config.historique_lignes).map_or(10_000, |n| n.clamp(256, 100_000)),
+        );
         t.set_allow_hyperlink(true);
         t.set_audible_bell(false);
     }
