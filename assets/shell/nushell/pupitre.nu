@@ -7,10 +7,11 @@
 # Les marques natives restent actives même si la configuration de l'utilisateur les avait coupées.
 $env.config = ($env.config? | default {} | upsert shell_integration.osc133 true | upsert shell_integration.osc7 true)
 
-# Starship, seulement si demandé et si le binaire est toujours là. `starship init nu` produit un
+# Starship, seulement si demandé et si le binaire est toujours là et exécutable (`which` ne
+# trouve un chemin que s'il est exécutable). `starship init nu` produit un
 # script à `source` (chemin connu à l'analyse) : on reprend ici son contenu, avec le binaire de
 # Pupitre, sans écrire de fichier.
-if (($env.PUPITRE_INVITE? | default "") == "starship") and (($env.PUPITRE_STARSHIP? | default "") != "") and ($env.PUPITRE_STARSHIP | path type) == "file" {
+if (($env.PUPITRE_INVITE? | default "") == "starship") and (($env.PUPITRE_STARSHIP? | default "") != "") and ((which $env.PUPITRE_STARSHIP | length) > 0) {
     $env.STARSHIP_SHELL = "nu"
     $env.STARSHIP_SESSION_KEY = (random chars -l 16)
     $env.PROMPT_MULTILINE_INDICATOR = (^$env.PUPITRE_STARSHIP prompt --continuation)

@@ -11,19 +11,50 @@
 use path
 use platform
 
-# 1. Configuration habituelle de l'utilisateur (chemins de rc.elv comme elvish les cherche).
+# Une erreur dans le rc de l'utilisateur ou dans Starship ne doit jamais empêcher les marques :
+# chaque étape est protégée, l'erreur est affichée sur la sortie d'erreur (message d'elvish).
+fn pupitre-signaler {|e|
+  echo (to-string $e) >&2
+}
+
+# Vrai si le fichier est exécutable (elvish n'a pas de test intégré : on passe par `test -x`).
+fn pupitre-executable {|chemin|
+  try {
+    e:test -x $chemin
+    put $true
+  } catch _ {
+    put $false
+  }
+}
+
+# 1. Configuration habituelle de l'utilisateur (même recherche qu'elvish : XDG puis ~/.config,
+#    puis l'ancien ~/.elvish/rc.elv).
 var dossier-config = ~/.config
 if (has-env XDG_CONFIG_HOME) {
   set dossier-config = $E:XDG_CONFIG_HOME
 }
-var rc-utilisateur = (path:join $dossier-config elvish rc.elv)
-if (path:is-regular $rc-utilisateur) {
-  eval (slurp < $rc-utilisateur)
+var candidats = [(path:join $dossier-config elvish rc.elv) ~/.elvish/rc.elv]
+# Pour savoir si le rc de l'utilisateur initialise lui-même Starship (variables héritées oubliées).
+unset-env STARSHIP_SESSION_KEY
+for rc $candidats {
+  if (path:is-regular $rc) {
+    try {
+      eval (slurp < $rc)
+    } catch e {
+      pupitre-signaler $e
+    }
+    break
+  }
 }
 
-# 2. Starship, seulement si demandé et si le binaire est toujours là.
-if (and (has-env PUPITRE_INVITE) (has-env PUPITRE_STARSHIP) (==s $E:PUPITRE_INVITE starship) (path:is-regular $E:PUPITRE_STARSHIP)) {
-  eval ((external $E:PUPITRE_STARSHIP) init elvish --print-full-init | slurp)
+# 2. Starship, seulement si demandé, si le binaire est exécutable et s'il n'est pas déjà
+#    initialisé par le rc de l'utilisateur.
+try {
+  if (and (has-env PUPITRE_INVITE) (has-env PUPITRE_STARSHIP) (==s $E:PUPITRE_INVITE starship) (not (has-env STARSHIP_SESSION_KEY)) (path:is-regular $E:PUPITRE_STARSHIP) (pupitre-executable $E:PUPITRE_STARSHIP)) {
+    eval ((external $E:PUPITRE_STARSHIP) init elvish --print-full-init | slurp)
+  }
+} catch e {
+  pupitre-signaler $e
 }
 
 # 3. Marques, posées après tout le reste.

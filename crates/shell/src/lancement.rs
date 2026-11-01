@@ -30,6 +30,17 @@ fn texte(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// Chaîne fish entre guillemets simples (seuls `\\` et `\'` y sont spéciaux).
+fn guillemets_fish(s: &str) -> String {
+    format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+/// Chaîne nushell entre guillemets doubles (`\\` et `\"` échappés) : seule forme qui admet
+/// n'importe quel caractère, et qui reste une constante lisible par `source`.
+fn guillemets_nushell(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// Lancement de `shell`. Ne vérifie que l'existence des fichiers d'intégration ; le repli
 /// quand le shell lui-même est absent revient à l'appelant.
 pub fn lancement(shell: &Path, mode: ModeInvite, r: &Ressources) -> Lancement {
@@ -96,8 +107,14 @@ pub(crate) fn lancement_pour(
                 std::env::var("ZDOTDIR").unwrap_or_default(),
             ));
         }
-        "fish" => argv.extend(["-C".into(), format!("source {}", texte(&fichier))]),
-        "nu" => argv.extend(["-e".into(), format!("source {}", texte(&fichier))]),
+        "fish" => argv.extend([
+            "-C".into(),
+            format!("source {}", guillemets_fish(&texte(&fichier))),
+        ]),
+        "nu" => argv.extend([
+            "-e".into(),
+            format!("source {}", guillemets_nushell(&texte(&fichier))),
+        ]),
         _ => argv.extend(["-rc".into(), texte(&fichier)]),
     }
 
@@ -183,6 +200,14 @@ mod tests {
         assert_eq!(var(&l, "PUPITRE_STARSHIP"), Some("/usr/bin/starship"));
         assert!(var(&l, "PUPITRE_INTEGRATION").is_some());
         assert_eq!(l.avertissement, None);
+    }
+
+    #[test]
+    fn echappement_des_chemins() {
+        assert_eq!(guillemets_fish("/a b/c"), "'/a b/c'");
+        assert_eq!(guillemets_fish("/l'ami\\x"), "'/l\\'ami\\\\x'");
+        assert_eq!(guillemets_nushell("/a b/c"), "\"/a b/c\"");
+        assert_eq!(guillemets_nushell("/a\"b\\c"), "\"/a\\\"b\\\\c\"");
     }
 
     #[test]

@@ -117,6 +117,8 @@ struct Banc {
     home: tempfile::TempDir,
     _exec: tempfile::TempDir,
     config_starship: PathBuf,
+    /// Dossier `assets/shell` utilisé (la copie d'un test peut le remplacer).
+    integration: PathBuf,
 }
 
 impl Banc {
@@ -136,6 +138,7 @@ impl Banc {
             home,
             _exec: exec,
             config_starship,
+            integration: dossier_integration(),
         }
     }
 
@@ -236,7 +239,7 @@ impl Session {
             return None;
         }
         let r = Ressources {
-            integration: Some(dossier_integration()),
+            integration: Some(banc.integration.clone()),
             starship,
             config_starship: banc.config_starship.clone(),
         };
@@ -791,5 +794,120 @@ fn aucune_ecriture_dans_home() {
                 "{shell} {mode:?} : ajoutés {ajoutes:?}, disparus {perdus:?}, modifiés {modifies:?}"
             );
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Robustesse (tour de correction 1)
+// ---------------------------------------------------------------------------------------
+
+fn copier_dossier(src: &Path, dst: &Path) {
+    std::fs::create_dir_all(dst).unwrap();
+    for e in std::fs::read_dir(src).unwrap().flatten() {
+        let d = dst.join(e.file_name());
+        if e.path().is_dir() {
+            copier_dossier(&e.path(), &d);
+        } else {
+            std::fs::copy(e.path(), d).unwrap();
+        }
+    }
+}
+
+#[test]
+fn chemin_d_integration_avec_espace_et_apostrophe() {
+    let racine = tempfile::tempdir().unwrap();
+    let copie = racine.path().join("Mes Documents d'été \"x\"/assets shell");
+    copier_dossier(&dossier_integration(), &copie);
+    for shell in ["fish", "nu", "bash", "zsh"] {
+        let mut banc = Banc::nouveau();
+        banc.integration = copie.clone();
+        banc.config_utilisateur(shell);
+        let Some(s) = Session::lancer(&banc, shell, ModeInvite::Shell) else {
+            continue;
+        };
+        s.attendre_marques(2);
+        s.envoyer(&format!("{}\n", syntaxe(shell).echo_vu));
+        s.attendre_texte("R=1");
+        s.stabiliser();
+        let m = normalisees(&s.flux());
+        assert!(
+            m.contains(&"A".to_string()) && m.contains(&"B".to_string()),
+            "{shell} : {m:?}"
+        );
+        assert!(s.texte().contains("MONINVITE> "), "{shell}");
+        s.fermer();
+    }
+}
+
+#[test]
+fn elvish_rc_utilisateur_en_erreur_marques_quand_meme() {
+    let banc = Banc::nouveau();
+    banc.ecrire(
+        ".config/elvish/rc.elv",
+        "set-env VU 1\nfail 'rc cassé'\nset-env APRES 1\n",
+    );
+    for mode in modes() {
+        let Some(s) = Session::lancer(&banc, "elvish", mode) else {
+            return;
+        };
+        s.attendre_marques(1);
+        s.envoyer("true\n");
+        s.attendre_marques(4);
+        s.stabiliser();
+        let m: Vec<String> = normalisees(&s.flux())
+            .iter()
+            .map(|x| x.split(';').next().unwrap_or("").to_string())
+            .collect();
+        assert_eq!(m, ["A", "C", "D", "A"], "{mode:?} : {:?}", s.texte());
+        s.fermer();
+    }
+}
+
+#[test]
+fn elvish_rc_de_repli_dot_elvish() {
+    let banc = Banc::nouveau();
+    banc.ecrire(".elvish/rc.elv", "set-env VU 1\n");
+    let Some(s) = Session::lancer(&banc, "elvish", ModeInvite::Shell) else {
+        return;
+    };
+    s.attendre_marques(1);
+    s.envoyer("echo R=$E:VU\n");
+    s.attendre_texte("R=1");
+    s.fermer();
+}
+
+#[test]
+fn starship_non_executable_garde_l_invite_de_l_utilisateur() {
+    use std::os::unix::fs::PermissionsExt;
+    if dans_path("starship").is_none() {
+        sauter("Starship n'est pas installé");
+        return;
+    }
+    for shell in ["bash", "zsh", "fish", "nu", "elvish"] {
+        let banc = Banc::nouveau();
+        banc.config_utilisateur(shell);
+        let faux = banc._exec.path().join("faux-starship");
+        std::fs::write(&faux, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&faux, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let faux_txt = faux.to_string_lossy().into_owned();
+        let Some(s) = Session::lancer_avec(&banc, shell, ModeInvite::Starship, |env| {
+            env.retain(|(k, _)| k != "PUPITRE_STARSHIP");
+            env.push(("PUPITRE_STARSHIP".into(), faux_txt));
+        }) else {
+            return;
+        };
+        let debut = if shell == "elvish" { 1 } else { 2 };
+        s.attendre_marques(debut);
+        s.envoyer(&format!("{}\n", syntaxe(shell).ok));
+        s.attendre_marques(if shell == "elvish" { 4 } else { 6 });
+        s.stabiliser();
+        let texte = s.texte();
+        assert!(texte.contains("MONINVITE> "), "{shell} : {texte:?}");
+        let minuscules = texte.to_lowercase();
+        assert!(
+            !minuscules.contains("permission denied") && !minuscules.contains("error"),
+            "{shell} : erreur affichée : {texte:?}"
+        );
+        s.fermer();
     }
 }
