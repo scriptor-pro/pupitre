@@ -290,6 +290,9 @@ déjà terminées quand Pupitre est rouvert après un incident.
 - Le terminal défile jusqu'à la commande et Orca la lit : « Commande : git fetch », suivi de
   « en échec, code 1 » si elle a échoué.
 - Au bout de la liste : « Aucune commande avant. » ou « Aucune commande après. »
+- Les flèches seules (↑ et ↓) restent au shell et aux programmes : dans le shell, elles
+  rappellent les commandes déjà tapées ; dans `less`, `htop`, `vim`…, elles déplacent le
+  curseur.
 
 ## 11. Configuration : `pupitre.toml`
 

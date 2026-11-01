@@ -236,7 +236,7 @@ Demandée par le porteur le 2026-11-01.
 
 1. **[Validé le 2026-11-01]** **Invite par défaut = votre invite actuelle sur deux lignes** (heure, charge, branche git et état ; puis marqueurs, `utilisateur@machine`, dossier, symbole `λ`), et non le `$` écrit dans la conception. Les couleurs viennent du thème de Pupitre.
 2. **[Validé le 2026-11-01 ; à expliquer dans l'aide]** **Annonce de fin de commande seulement pour les commandes de 5 s ou plus** (`annonce_fin_commande = "longues"`), réussies ou non ; réglable en `"toutes"` ou `"aucune"`. Pour une commande courte, Orca lit déjà la sortie.
-3. **Raccourcis de navigation : Ctrl+Maj+↑ et Ctrl+Maj+↓** (commande précédente / suivante).
+3. **[Validé le 2026-11-01 ; flèches seules écartées : elles restent au shell et aux programmes]** **Raccourcis de navigation : Ctrl+Maj+↑ et Ctrl+Maj+↓** (commande précédente / suivante).
 4. **Starship du système** (1.22.1 sous Debian 13), dépendance recommandée du futur paquet, rien de compilé ni d'embarqué ; **sans Starship, chaque shell garde l'invite habituelle de l'utilisateur** (décision du porteur, 2026-11-01), avec un avertissement unique donnant la commande d'installation.
 5. **Fichier d'invite modifiable** : `~/.config/pupitre/starship.toml`, créé au premier lancement à partir de l'invite par défaut ; jamais écrasé ensuite.
 6. **Shells absents : commande d'installation affichée** dans `pupitre shells` et dans le message quand le shell configuré manque ; le menu « Nouvel onglet avec » ne liste que les shells installés et ceux que vous déclarez.
