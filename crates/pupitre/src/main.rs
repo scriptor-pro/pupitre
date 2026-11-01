@@ -40,11 +40,12 @@ fn main() -> glib::ExitCode {
         _ => eprintln!("pupitre: polices embarquées introuvables ; police du système utilisée"),
     }
     glib::set_application_name("Pupitre");
-    // Icône des fenêtres (X11) : celle du thème installée par scripts/installer-bureau.sh.
-    gtk::Window::set_default_icon_name(ID_APPLICATION);
     let app = gtk::Application::builder()
         .application_id(ID_APPLICATION)
         .build();
+    // Icône des fenêtres (X11) : celle du thème installée par scripts/installer-bureau.sh.
+    // Au démarrage de l'application seulement : avant, GTK n'est pas initialisé (panique).
+    app.connect_startup(|_| gtk::Window::set_default_icon_name(ID_APPLICATION));
     let pupitre: Rc<RefCell<Option<Rc<Pupitre>>>> = Rc::new(RefCell::new(None));
     app.connect_activate(move |app| {
         let existant = pupitre.borrow().clone();
