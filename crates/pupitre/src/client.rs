@@ -17,8 +17,12 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Temps laissé au processus de fond pour démarrer et répondre.
+/// Temps laissé au processus de fond pour démarrer (création du socket).
 const DELAI_DEMARRAGE: Duration = Duration::from_secs(2);
+/// Temps laissé au processus de fond pour répondre au `Hello`. Il écoute avant d'avoir fini
+/// de démarrer : sa recherche d'agent SSH (jusqu'à 1 s + 0,3 s, puis 2 s pour lancer le
+/// sien) passe avant l'accueil, et plus encore sur une machine chargée.
+const DELAI_ACCUEIL: Duration = Duration::from_secs(5);
 const PAS: Duration = Duration::from_millis(25);
 /// Début du texte d'erreur d'un processus de fond qui refuse la version proposée.
 const REFUS_VERSION: &str = "version du protocole incompatible";
@@ -176,7 +180,7 @@ fn demarrer(
     let mut ecriture = flux.try_clone()?;
     let mut lecture = flux.try_clone()?;
     write_frame(&mut ecriture, &ClientMsg::Hello { version })?;
-    lecture.set_read_timeout(Some(DELAI_DEMARRAGE))?;
+    lecture.set_read_timeout(Some(DELAI_ACCUEIL))?;
     let accueil = match read_frame::<_, ServerMsg>(&mut lecture) {
         Ok(m @ ServerMsg::Welcome { .. }) => m,
         Ok(ServerMsg::Error(e)) => return Err(ClientError::Refus(e)),

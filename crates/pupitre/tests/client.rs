@@ -289,3 +289,24 @@ fn shell_du_fond_voit_un_agent_isole() {
         "SSH_AUTH_SOCK inattendu : {val}"
     );
 }
+
+#[test]
+fn accueil_lent_accepte() {
+    // Un fond qui démarre lentement (recherche d'agent, machine chargée) répond au `Hello`
+    // après plus de 2 s : l'interface patiente au lieu de le déclarer injoignable.
+    use pupitre_proto::{read_frame, write_frame, VERSION};
+    let d = tempfile::tempdir().unwrap();
+    let socket = d.path().join("fond.sock");
+    let ecoute = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let fond = std::thread::spawn(move || {
+        let (mut flux, _) = ecoute.accept().unwrap();
+        let hello: ClientMsg = read_frame(&mut flux).unwrap();
+        assert!(matches!(hello, ClientMsg::Hello { .. }));
+        std::thread::sleep(Duration::from_secs(3));
+        write_frame(&mut flux, &ServerMsg::Welcome { version: VERSION }).unwrap();
+        flux
+    });
+    let r = connect_or_spawn_at(&socket);
+    assert!(r.is_ok(), "{:?}", r.err());
+    drop(fond.join().unwrap());
+}
