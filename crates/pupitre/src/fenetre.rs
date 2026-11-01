@@ -655,7 +655,9 @@ impl Pupitre {
                     o.terminal.on_output(&data);
                 }
             }
-            ServerMsg::Replay { id, data } => {
+            // Les marques du rejeu ne sont pas encore exploitées : même traitement qu'un
+            // `Replay` (les octets sont les mêmes).
+            ServerMsg::Replay { id, data } | ServerMsg::ReplayMarque { id, data, .. } => {
                 if let Some(o) = self.onglet(id) {
                     o.attend_relecture.set(false);
                     o.terminal.on_output(&data);

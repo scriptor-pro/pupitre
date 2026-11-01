@@ -148,6 +148,14 @@ pub enum ServerMsg {
         marque: MarqueCommande,
         rejouee: bool,
     },
+    /// Rejeu d'un client en version 3 (réponse à `Attach`) : comme `Replay`, avec les marques
+    /// vues dans `data`, chacune à son décalage en octets (croissant, au plus `data.len()` ;
+    /// la marque vient juste avant l'octet de ce rang). Variante ajoutée en fin d'énumération.
+    ReplayMarque {
+        id: SessionId,
+        data: Vec<u8>,
+        marques: Vec<(u32, MarqueCommande)>,
+    },
 }
 
 /// Étape d'une commande, repérée dans la sortie du shell (séquences OSC 133 A, B, C, D).
@@ -316,6 +324,12 @@ impl std::fmt::Debug for ServerMsg {
                 .field("memoriser", memoriser)
                 .finish(),
             ServerMsg::Message(t) => f.debug_tuple("Message").field(t).finish(),
+            ServerMsg::ReplayMarque { id, data, marques } => f
+                .debug_struct("ReplayMarque")
+                .field("id", id)
+                .field("data", data)
+                .field("marques", marques)
+                .finish(),
             ServerMsg::Marque {
                 id,
                 marque,
@@ -348,13 +362,17 @@ impl ServerMsg {
             ServerMsg::Reponse { .. } => "Reponse",
             ServerMsg::Message(_) => "Message",
             ServerMsg::Marque { .. } => "Marque",
+            ServerMsg::ReplayMarque { .. } => "ReplayMarque",
         }
     }
 
     /// Vrai pour les variantes introduites par la version 3, qu'un client en version 1 ou 2
     /// ne sait pas décoder.
     pub fn est_v3(&self) -> bool {
-        matches!(self, ServerMsg::Marque { .. })
+        matches!(
+            self,
+            ServerMsg::Marque { .. } | ServerMsg::ReplayMarque { .. }
+        )
     }
 
     /// Vrai pour les variantes introduites par la version 2, qu'un client en version 1
@@ -368,6 +386,35 @@ impl ServerMsg {
                 | ServerMsg::Message(_)
         )
     }
+}
+
+/// Découpe un rejeu `ReplayMarque` en segments : chaque élément est la marque (sauf pour le
+/// premier segment, avant toute marque) suivie des octets qui la suivent, jusqu'à la marque
+/// suivante. Sûr face à des décalages invalides : un décalage hors de `data` est ramené à
+/// sa fin, un décalage qui recule est ramené au précédent ; jamais de panique.
+pub fn segments_de_rejeu<'a>(
+    data: &'a [u8],
+    marques: &[(u32, MarqueCommande)],
+) -> Vec<(Option<MarqueCommande>, &'a [u8])> {
+    let mut coupes = Vec::with_capacity(marques.len() + 1);
+    let mut precedent = 0usize;
+    for &(d, _) in marques {
+        let d = usize::try_from(d).unwrap_or(usize::MAX).min(data.len());
+        precedent = precedent.max(d);
+        coupes.push(precedent);
+    }
+    coupes.push(data.len());
+    let mut segments = Vec::with_capacity(coupes.len());
+    let mut debut = 0usize;
+    for (i, &fin) in coupes.iter().enumerate() {
+        let marque = i
+            .checked_sub(1)
+            .and_then(|k| marques.get(k))
+            .map(|&(_, m)| m);
+        segments.push((marque, data.get(debut..fin).unwrap_or_default()));
+        debut = fin;
+    }
+    segments
 }
 
 /// Description d'une session, renvoyée par `List`.
@@ -547,6 +594,11 @@ mod tests {
                 rejouee: true,
             });
         }
+        ar(ServerMsg::ReplayMarque {
+            id: 3,
+            data: b"abc".to_vec(),
+            marques: vec![(0, MarqueCommande::Invite), (3, MarqueCommande::Saisie)],
+        });
         ar(ClientMsg::Demander {
             session: None,
             invite: String::new(),
@@ -570,9 +622,36 @@ mod tests {
         assert_eq!(postcard::to_stdvec(&marque).unwrap()[0], 13);
         assert!(marque.est_v3() && !marque.est_v2());
         assert_eq!(marque.nom(), "Marque");
+        let rejeu = ServerMsg::ReplayMarque {
+            id: 0,
+            data: vec![],
+            marques: vec![],
+        };
+        assert_eq!(postcard::to_stdvec(&rejeu).unwrap()[0], 14);
+        assert!(rejeu.est_v3() && !rejeu.est_v2());
+        assert_eq!(rejeu.nom(), "ReplayMarque");
         assert_eq!(postcard::to_stdvec(&EtatTrousseau::Lent).unwrap(), [3]);
         // Les valeurs v2 de l'état ne bougent pas.
         assert_eq!(postcard::to_stdvec(&EtatTrousseau::Absent).unwrap(), [2]);
+    }
+
+    #[test]
+    fn segments_de_rejeu_surs() {
+        use MarqueCommande::{Invite, Saisie};
+        let s = segments_de_rejeu(b"abcdef", &[(2, Invite), (4, Saisie)]);
+        assert_eq!(
+            s,
+            vec![
+                (None, &b"ab"[..]),
+                (Some(Invite), &b"cd"[..]),
+                (Some(Saisie), &b"ef"[..])
+            ]
+        );
+        // Décalages hors bornes ou qui reculent : bornés, sans panique.
+        let s = segments_de_rejeu(b"abc", &[(9, Invite), (1, Saisie), (u32::MAX, Invite)]);
+        assert_eq!(s.len(), 4);
+        assert_eq!(s.iter().map(|(_, o)| o.len()).sum::<usize>(), 3);
+        assert_eq!(segments_de_rejeu(b"", &[]), vec![(None, &b""[..])]);
     }
 
     #[test]

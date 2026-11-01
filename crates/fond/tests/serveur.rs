@@ -348,7 +348,11 @@ fn session_survit_au_client() {
     assert_eq!(v[0].id, id);
     b.envoyer(ClientMsg::Attach { id });
     let relu = b.attendre(|m| match m {
-        ServerMsg::Replay { id: i, data } if *i == id => Some(data.clone()),
+        ServerMsg::Replay { id: i, data } | ServerMsg::ReplayMarque { id: i, data, .. }
+            if *i == id =>
+        {
+            Some(data.clone())
+        }
         _ => None,
     });
     assert!(String::from_utf8_lossy(&relu).contains("trace"));
@@ -1253,6 +1257,21 @@ fn client_v2_ne_recoit_ni_marque_ni_lent() {
     assert_eq!(adapter_pour(marque.clone(), 1), None);
     assert_eq!(adapter_pour(marque.clone(), 2), None);
     assert_eq!(adapter_pour(marque.clone(), 3), Some(marque));
+    let rejeu = ServerMsg::ReplayMarque {
+        id: 1,
+        data: b"abc".to_vec(),
+        marques: vec![(1, pupitre_proto::MarqueCommande::Invite)],
+    };
+    for v in [1, 2] {
+        assert_eq!(
+            adapter_pour(rejeu.clone(), v),
+            Some(ServerMsg::Replay {
+                id: 1,
+                data: b"abc".to_vec()
+            })
+        );
+    }
+    assert_eq!(adapter_pour(rejeu.clone(), 3), Some(rejeu));
 
     // De bout en bout : la demande avec un trousseau lent.
     let s = demarrer(Duration::from_secs(30));
@@ -1498,42 +1517,79 @@ fn relecture_rejoue_les_marques() {
             == 2
             && aplati(v).ends_with('\n')
     });
+    // Client v3 : un seul message, avec les marques à leur décalage.
     let mut c2 = Client::connecter(&s.socket);
     c2.envoyer(ClientMsg::Attach { id });
-    let v = evenements(&mut c2, id, |v| aplati(v).ends_with("c\r\n"));
-    // Le premier message est le `Replay`, puis les marques sont intercalées avec les
-    // octets qui les suivent, comme dans le flux d'origine.
-    let tout = aplati(&v);
+    let (data, marques) = c2.attendre(|m| match m {
+        ServerMsg::Replay { .. } => panic!("un client v3 reçoit ReplayMarque"),
+        ServerMsg::ReplayMarque {
+            id: i,
+            data,
+            marques,
+        } if *i == id => Some((data.clone(), marques.clone())),
+        _ => None,
+    });
+    let a = b"a\x1b]133;A\x07";
+    let b = b"b\x1b]133;B\x1b\\";
+    assert!(data.ends_with(b"c\r\n"));
     assert!(
-        tout.ends_with("a\x1b]133;A\x07<M>b\x1b]133;B\x1b\\<M>c\r\n"),
-        "{tout:?}"
+        data.starts_with(&[a.as_slice(), b.as_slice()].concat()),
+        "{data:?}"
     );
-    assert!(matches!(&v[0], Evenement::Octets(o) if o.ends_with(b"a\x1b]133;A\x07")));
-    let marques: Vec<_> = v
-        .iter()
-        .filter(|e| matches!(e, Evenement::Marque(..)))
-        .collect();
     assert_eq!(
         marques,
         vec![
-            &Evenement::Marque(MarqueCommande::Invite, true),
-            &Evenement::Marque(MarqueCommande::Saisie, true),
+            (a.len() as u32, MarqueCommande::Invite),
+            ((a.len() + b.len()) as u32, MarqueCommande::Saisie),
         ]
     );
+    assert!(c2.silence(Duration::from_millis(300)));
     // Un client v2 reçoit les mêmes octets en un seul `Replay`, sans marque.
     let mut c3 = Client::brut(&s.socket);
     c3.envoyer(ClientMsg::Hello { version: 2 });
     assert_eq!(c3.recevoir(), ServerMsg::Welcome { version: 2 });
     c3.envoyer(ClientMsg::Attach { id });
-    let data = c3.attendre(|m| match m {
+    let rejeu = c3.attendre(|m| match m {
         ServerMsg::Replay { data, .. } => Some(data.clone()),
+        ServerMsg::ReplayMarque { .. } | ServerMsg::Marque { .. } => panic!("{m:?}"),
         _ => None,
     });
-    assert_eq!(
-        String::from_utf8_lossy(&data).replace("<M>", ""),
-        tout.replace("<M>", "")
-    );
+    assert_eq!(rejeu, data);
     assert!(c3.silence(Duration::from_millis(300)));
+}
+
+/// Beaucoup de commandes dans le tampon : le rejeu reste un seul message et le client
+/// n'est pas coupé par sa file bornée.
+#[test]
+fn rejeu_de_milliers_de_marques_en_un_message() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c1 = Client::connecter(&s.socket);
+    let id = ouvrir_script(
+        &mut c1,
+        "i=0; while [ $i -lt 3000 ]; do printf '\\033]133;A\\007$ \\033]133;B\\007\\033]133;C\\007x\\n\\033]133;D;0\\007'; i=$((i+1)); done; printf FINI; sleep 5",
+    );
+    // Personne ne lit pendant que le script s'exécute (le flux en direct a sa file bornée) :
+    // seul le rejeu est mesuré.
+    let _ = id;
+    drop(c1);
+    thread::sleep(Duration::from_secs(2));
+    let mut c2 = Client::connecter(&s.socket);
+    c2.envoyer(ClientMsg::Attach { id });
+    let (fin, marques) = c2.attendre(|m| match m {
+        ServerMsg::ReplayMarque {
+            id: i,
+            data,
+            marques,
+        } if *i == id => Some((data.ends_with(b"FINI"), marques.len())),
+        _ => None,
+    });
+    assert!(fin, "le script n'avait pas fini");
+    // Plafonné à MARQUES_MAX (les plus récentes), mais en un seul message.
+    assert_eq!(marques, pupitre_fond::relecture::MARQUES_MAX);
+    // Toujours connecté, et plus aucun message de rejeu.
+    assert!(c2.silence(Duration::from_millis(300)));
+    c2.envoyer(ClientMsg::List);
+    c2.attendre(|m| matches!(m, ServerMsg::Sessions(_)).then_some(()));
 }
 
 #[test]
