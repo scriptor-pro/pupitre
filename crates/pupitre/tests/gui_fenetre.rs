@@ -458,6 +458,7 @@ fn fenetre_s_ouvre_et_affiche_le_shell(racine: &Path) -> Resultat {
     let sonde = commun::sonde_a11y();
     let mut sortie = String::new();
     let limite = Instant::now() + Duration::from_secs(20);
+    // L'invite est celle du shell (« $ ») ou celle de Starship (« λ ») selon qu'il est installé.
     let mut trouve = false;
     while Instant::now() < limite && !trouve {
         if let Ok(o) = Command::new("python3")
@@ -466,7 +467,9 @@ fn fenetre_s_ouvre_et_affiche_le_shell(racine: &Path) -> Resultat {
             .output()
         {
             sortie = String::from_utf8_lossy(&o.stdout).into_owned();
-            trouve = o.status.success() && sortie.contains(&hote) && sortie.contains('$');
+            trouve = o.status.success()
+                && sortie.contains(&hote)
+                && (sortie.contains('$') || sortie.contains('λ'));
         }
         if !trouve {
             std::thread::sleep(Duration::from_millis(300));
@@ -494,7 +497,7 @@ fn fenetre_s_ouvre_et_affiche_le_shell(racine: &Path) -> Resultat {
         Ok(())
     } else {
         Err(format!(
-            "invite (« {hote} », « $ ») non lue par la sonde : {sortie}"
+            "invite (« {hote} », « $ » ou « λ ») non lue par la sonde : {sortie}"
         ))
     }
 }

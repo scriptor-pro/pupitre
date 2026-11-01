@@ -29,3 +29,28 @@ zoom_max_pourcent = 200
 # Langue de l'interface : "" (langue du système), "fr", "en", "es", "it", "de" ou "nl".
 # S'applique au prochain lancement de Pupitre.
 langue = ""
+
+# Shell des nouveaux onglets : "" (shell de connexion de votre compte), un nom ("fish", "zsh")
+# ou un chemin ("/usr/bin/fish"). Si le shell est introuvable, Pupitre le dit et utilise le
+# shell de connexion. La commande « pupitre shells » liste les shells installés.
+shell = ""
+
+# Invite de commande :
+#   "starship"  Pupitre fournit une invite Starship accessible (si Starship est installé) ;
+#               sa configuration est créée dans ~/.config/pupitre/starship.toml
+#   "shell"     garder l'invite habituelle du shell
+invite = "starship"
+
+# Annonce vocale de la fin des commandes :
+#   "longues"  seulement les commandes qui ont duré un moment (recommandé)
+#   "toutes"   toutes les commandes
+#   "aucune"   aucune annonce
+annonce_fin_commande = "longues"
+
+# Autres programmes proposés dans le menu « Nouvel onglet avec », lancés tels quels.
+# Un bloc [[shells]] par programme : nom affiché, et commande (le premier élément est le
+# programme, sans « - » au début). Exemple :
+#
+# [[shells]]
+# nom = "Serveur"
+# commande = ["ssh", "serveur"]

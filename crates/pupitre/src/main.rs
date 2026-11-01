@@ -9,10 +9,14 @@ use gtk::glib;
 use gtk::prelude::*;
 use pupitre::fenetre::Pupitre;
 use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
+use pupitre::shells::chemin_starship;
 use pupitre::verification;
-use pupitre_config::{charger, chemin_config, creer_defaut_si_absent, langue_configuree, Config};
+use pupitre_config::{
+    charger, chemin_config, creer_defaut_si_absent, langue_configuree, Config, Invite,
+};
 use pupitre_fond::serveur::socket_path;
 use pupitre_i18n::{init, langues_demandees, ta, ArgI18n, LanguageIdentifier};
+use pupitre_shell::creer_config_starship_si_absente;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -36,6 +40,13 @@ fn main() -> glib::ExitCode {
         None => {}
         Some("check") => {
             let code = verification::executer(&args[1..], &mut std::io::stdout());
+            return glib::ExitCode::from(u8::try_from(code).unwrap_or(1));
+        }
+        Some("shells") if args.len() == 1 => {
+            let code = pupitre::shells::executer_shells(
+                &pupitre::shells::path_courant(),
+                &mut std::io::stdout(),
+            );
             return glib::ExitCode::from(u8::try_from(code).unwrap_or(1));
         }
         Some("-h" | "--help" | "aide" | "help") => {
@@ -75,9 +86,30 @@ fn main() -> glib::ExitCode {
                 if let Err(e) = creer_defaut_si_absent(&chemin) {
                     eprintln!("pupitre: impossible de créer {} : {e}", chemin.display());
                 }
+                let config = charger(&chemin);
+                // Invite Starship de Pupitre (réglage par défaut) : son fichier est créé s'il
+                // manque. En cas d'échec, l'invite du shell est gardée (voir `shells`).
+                if config
+                    .as_ref()
+                    .map_or(true, |c| c.invite == Invite::Starship)
+                {
+                    let invite = chemin_starship();
+                    if let Err(e) = creer_config_starship_si_absente(&invite) {
+                        eprintln!(
+                            "pupitre: {}",
+                            ta(
+                                "shell-starship-config-impossible",
+                                &[
+                                    ("chemin", ArgI18n::from(invite.display().to_string())),
+                                    ("erreur", ArgI18n::from(e.to_string())),
+                                ],
+                            )
+                        );
+                    }
+                }
                 let p = Pupitre::demarrer(app, socket_path(), Config::default());
                 // Invalide : valeurs par défaut gardées, message avec la ligne fautive.
-                p.appliquer_config(charger(&chemin));
+                p.appliquer_config(config);
                 p.surveiller_config(chemin);
                 *pupitre.borrow_mut() = Some(p);
             }

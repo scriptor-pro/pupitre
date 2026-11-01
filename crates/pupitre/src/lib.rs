@@ -12,6 +12,7 @@ pub mod polices;
 pub mod raccourcis;
 pub mod rechargement;
 pub mod recherche;
+pub mod shells;
 pub mod taille;
 pub mod terminal;
 pub mod verification;

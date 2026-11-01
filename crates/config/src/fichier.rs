@@ -55,6 +55,41 @@ pub struct Config {
     /// Langue de l'interface, appliquée au prochain lancement ; vide : langue du système.
     #[serde(deserialize_with = "langue_valide")]
     pub langue: String,
+    /// Shell des nouveaux onglets : nom ou chemin ; vide : shell de connexion.
+    pub shell: String,
+    /// Qui dessine l'invite de commande.
+    pub invite: Invite,
+    /// Quand la fin d'une commande est annoncée.
+    pub annonce_fin_commande: AnnonceFin,
+    /// Commandes proposées dans « Nouvel onglet avec » (lancées telles quelles).
+    pub shells: Vec<ShellDeclare>,
+}
+
+/// Réglage `invite`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Invite {
+    /// Invite Starship gérée par Pupitre (si Starship est installé).
+    Starship,
+    /// Invite habituelle du shell, laissée telle quelle.
+    Shell,
+}
+
+/// Réglage `annonce_fin_commande`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnonceFin {
+    Longues,
+    Toutes,
+    Aucune,
+}
+
+/// Entrée `[[shells]]` : un nom affiché et la commande (argv) à lancer.
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ShellDeclare {
+    #[serde(deserialize_with = "nom_shell_valide")]
+    pub nom: String,
+    #[serde(deserialize_with = "commande_shell_valide")]
+    pub commande: Vec<String>,
 }
 
 impl Default for Config {
@@ -66,6 +101,10 @@ impl Default for Config {
             historique_lignes: 10_000,
             zoom_max_pourcent: 200,
             langue: String::new(),
+            shell: String::new(),
+            invite: Invite::Starship,
+            annonce_fin_commande: AnnonceFin::Longues,
+            shells: Vec::new(),
         }
     }
 }
@@ -116,7 +155,7 @@ pub(crate) fn lire_toml_avec<T: de::DeserializeOwned>(
 }
 
 const CLES_CONFIG: &str =
-    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue";
+    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue, shell, invite, annonce_fin_commande, shells";
 
 /// Lit un fichier (ordinaire, taille bornée, UTF-8).
 pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {
@@ -335,6 +374,56 @@ fn langue_valide<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
             "config-langue-inconnue",
             &[("v", ArgI18n::from(v))],
         )))
+    }
+}
+
+impl<'de> Deserialize<'de> for Invite {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = String::deserialize(d)?;
+        match v.as_str() {
+            "starship" => Ok(Invite::Starship),
+            "shell" => Ok(Invite::Shell),
+            _ => Err(notre(ta(
+                "config-invite-inconnue",
+                &[("v", ArgI18n::from(v))],
+            ))),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AnnonceFin {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = String::deserialize(d)?;
+        match v.as_str() {
+            "longues" => Ok(AnnonceFin::Longues),
+            "toutes" => Ok(AnnonceFin::Toutes),
+            "aucune" => Ok(AnnonceFin::Aucune),
+            _ => Err(notre(ta(
+                "config-annonce-inconnue",
+                &[("v", ArgI18n::from(v))],
+            ))),
+        }
+    }
+}
+
+fn nom_shell_valide<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v = String::deserialize(d)?;
+    if v.trim().is_empty() {
+        return Err(notre(t("config-shell-nom-vide")));
+    }
+    Ok(v.trim().to_owned())
+}
+
+/// Premier élément non vide et sans `-` initial (il ne doit pas pouvoir passer pour une option).
+fn commande_shell_valide<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let v = Vec::<String>::deserialize(d)?;
+    match v.first().map(|p| p.trim()) {
+        None | Some("") => Err(notre(t("config-shell-commande-vide"))),
+        Some(p) if p.starts_with('-') => Err(notre(ta(
+            "config-shell-commande-option",
+            &[("v", ArgI18n::from(p))],
+        ))),
+        Some(_) => Ok(v),
     }
 }
 

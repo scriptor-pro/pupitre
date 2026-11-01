@@ -58,6 +58,11 @@ class Session:
             env[var] = d
         with open(os.path.join(self.perso, ".bashrc"), "w", encoding="utf-8") as f:
             f.write(f'PS1="{INVITE}"\nunset PROMPT_COMMAND\n')
+        # L'invite du .bashrc ci-dessus est celle que le scénario attend : pas d'invite Starship
+        # de Pupitre (réglage « invite = "shell" »).
+        os.makedirs(os.path.join(self.perso, ".config", "pupitre"), exist_ok=True)
+        with open(os.path.join(self.perso, ".config", "pupitre", "pupitre.toml"), "w", encoding="utf-8") as f:
+            f.write('historique_lignes = 10000\ninvite = "shell"\n')
         # Jamais l'agent ni le trousseau de l'utilisateur : le fond lance son propre
         # ssh-agent dans XDG_RUNTIME_DIR (TMPDIR temporaire : pas de recherche dans /tmp),
         # le trousseau est celui, jetable, de scripts/trousseau-test.sh.
@@ -245,7 +250,8 @@ def exiger(ok, quoi):
 
 
 def v01_lancement(s):
-    exiger(s.attendre(r"Terminal — Pupitre", 15), "la fenêtre « Terminal — Pupitre » n'est pas annoncée")
+    # Avec l'intégration du shell, le titre est le dossier courant : « <dossier> — Pupitre ».
+    exiger(s.attendre(r"— Pupitre", 15), "la fenêtre « … — Pupitre » n'est pas annoncée")
     exiger(s.attendre(re.escape(INVITE.strip()), 5), "l'invite du shell n'est pas lue")
 
 
@@ -287,7 +293,8 @@ def v05_titre(s):
     s.calme()
     s.marquer()
     s.touches("Left")
-    exiger(s.attendre(r"Terminal", 4), "flèche gauche : l'autre onglet n'est pas lu")
+    # L'autre onglet porte le dossier courant (titre donné par l'intégration du shell).
+    exiger(s.attendre(r"pupitre-orca-", 4), "flèche gauche : l'autre onglet n'est pas lu")
     s.marquer()
     s.touches("Right")
     exiger(s.attendre(r"essai", 4), "flèche droite : l'onglet « essai » n'est pas lu")

@@ -18,6 +18,7 @@ pupitre-proto = { path = "../proto" }
 pupitre-fond = { path = "../fond" }
 pupitre-config = { path = "../config" }
 pupitre-ssh = { path = "../ssh" }
+pupitre-shell = { path = "../shell" }
 zeroize = "1"
 notify = "8"
 
@@ -50,6 +51,10 @@ harness = false
 
 [[test]]
 name = "gui_demarrage"
+harness = false
+
+[[test]]
+name = "gui_shells"
 harness = false
 
 [[test]]

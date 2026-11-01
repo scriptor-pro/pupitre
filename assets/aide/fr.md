@@ -16,7 +16,7 @@ prévues mais pas encore disponibles.
 6. Taille du texte et plein écran
 7. Messages de Pupitre
 8. Connexions SSH, phrases de passe et trousseau
-9. Shells et invite (à venir)
+9. Shells et invite
 10. Fin des commandes et navigation entre commandes (à venir)
 11. Configuration : `pupitre.toml`
 12. Thèmes et couleurs
@@ -81,6 +81,8 @@ Touches laissées volontairement aux programmes :
 ## 3. Onglets et fenêtres
 
 - **Ouvrir** : Ctrl+Maj+T ou menu ▸ « Nouvel onglet ».
+- **Ouvrir avec un autre shell** : menu ▸ « Nouvel onglet avec », puis le shell voulu (voir la
+  section 9).
 - **Renommer** : double-clic sur le nom de l'onglet, ou clic droit ▸ « Renommer l'onglet »,
   ou menu ▸ « Renommer l'onglet ». Laisser le nom vide revient au titre automatique.
 - **Titre automatique** : le titre envoyé par le programme en cours, sinon le dossier courant.
@@ -231,7 +233,7 @@ l'entrée « Pupitre — phrase de passe de … ».
 - **Autres questions** (mot de passe d'un serveur, identifiant git en HTTPS…) : une fenêtre
   « Question de SSH » avec un champ de saisie.
 
-## 9. Shells et invite (à venir)
+## 9. Shells et invite
 
 - **Shell utilisé** : par défaut, votre shell de connexion. Le réglage `shell` permet d'en
   choisir un autre (`shell = "fish"`).
@@ -320,12 +322,13 @@ le chemin du fichier.
 | `curseur_clignote` | `false` | `true` ou `false` |
 | `historique_lignes` | `10000` | de 0 à 1 000 000 |
 | `zoom_max_pourcent` | `200` | de 100 à 500 |
-| `shell` (à venir) | `""` (shell de connexion) | nom ou chemin, ex. `"fish"` |
-| `invite` (à venir) | `"starship"` | `"starship"` ou `"shell"` |
+| `shell` | `""` (shell de connexion) | nom ou chemin, ex. `"fish"` |
+| `invite` | `"starship"` | `"starship"` ou `"shell"` |
 | `annonce_fin_commande` (à venir) | `"longues"` | `"longues"`, `"toutes"`, `"aucune"` |
 | `langue` (à venir) | `""` (langue du système) | `"fr"`, `"en"`, `"es"`, `"it"`, `"de"`, `"nl"` ; appliqué au prochain lancement |
 
-Exemple de shells déclarés (à venir) :
+Exemple de shells déclarés (le premier élément de `commande` est le programme, sans `-` au
+début) :
 
 ```toml
 [[shells]]
@@ -387,7 +390,7 @@ appliqué. `pupitre check --theme CHEMIN` fait la même vérification sans ouvri
 | `pupitre check` | vérifie la configuration et le contraste des thèmes |
 | `pupitre check --theme CHEMIN` | vérifie un fichier de thème |
 | `pupitre aide`, `pupitre --help` | affiche le résumé des commandes |
-| `pupitre shells` (à venir) | liste les shells installés, leur niveau de prise en charge, et la commande d'installation de ceux qui manquent |
+| `pupitre shells` | liste les shells installés, leur niveau de prise en charge, et la commande d'installation de ceux qui manquent |
 
 Codes de sortie de `pupitre check` : 0 aucun problème, 1 problème trouvé, 2 commande mal
 formée.
@@ -424,7 +427,7 @@ Pupitre est fait de deux programmes : la fenêtre (`pupitre`) et un processus de
 | `~/.config/pupitre/pupitre.toml` | configuration |
 | `~/.config/pupitre/connexions.toml` | connexions SSH enregistrées dans Pupitre |
 | `~/.config/pupitre/themes/*.toml` | vos thèmes (emplacement conseillé) |
-| `~/.config/pupitre/starship.toml` | invite (à venir) |
+| `~/.config/pupitre/starship.toml` | invite |
 | `~/.ssh/config` | lu seulement, jamais modifié |
 | `/run/user/<numéro>/pupitre/` | communication entre la fenêtre et le processus de fond (effacé à l'arrêt) |
 

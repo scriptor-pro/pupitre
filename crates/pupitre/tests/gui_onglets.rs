@@ -452,7 +452,7 @@ fn reprise_apres_plantage() -> Resultat {
         // Attendre que l'interface ait affiché l'invite avant d'écrire.
         let (ok, _) = sonder_jusqu_a("pupitre", Duration::from_secs(15), |a| {
             a.lines()
-                .any(|l| l.starts_with("terminal\t") && l.contains('$'))
+                .any(|l| l.starts_with("terminal\t") && (l.contains('$') || l.contains('λ')))
         });
         verifier(ok, || "invite jamais affichée".into())?;
         temoin

@@ -117,7 +117,7 @@ fn valeurs_lues() -> R {
             curseur_clignote: true,
             historique_lignes: 500,
             zoom_max_pourcent: 300,
-            langue: String::new(),
+            ..Config::default()
         }
     );
     std::fs::write(&chemin, "theme = \"~/themes/nuit.toml\"\n")?;
@@ -301,4 +301,62 @@ fn chemin_config_suit_xdg() {
     std::env::set_var("XDG_CONFIG_HOME", "relatif/ignore");
     assert!(chemin_config().ends_with(".config/pupitre/pupitre.toml"));
     std::env::remove_var("XDG_CONFIG_HOME");
+}
+
+#[test]
+fn shells_declares_lus() -> R {
+    let d = tempfile::tempdir()?;
+    let chemin = d.path().join("pupitre.toml");
+    std::fs::write(
+        &chemin,
+        "shell = \"fish\"\ninvite = \"shell\"\nannonce_fin_commande = \"toutes\"\n\n\
+         [[shells]]\nnom = \"Serveur\"\ncommande = [\"ssh\", \"serveur\"]\n\n\
+         [[shells]]\nnom = \"Python\"\ncommande = [\"python3\"]\n",
+    )?;
+    let c = charger(&chemin).map_err(|e| e.message)?;
+    assert_eq!(c.shell, "fish");
+    assert_eq!(c.invite, Invite::Shell);
+    assert_eq!(c.annonce_fin_commande, AnnonceFin::Toutes);
+    assert_eq!(c.shells.len(), 2);
+    assert_eq!(c.shells[0].nom, "Serveur");
+    assert_eq!(c.shells[0].commande, ["ssh", "serveur"]);
+    // Valeurs par défaut.
+    let c = Config::default();
+    assert_eq!(c.shell, "");
+    assert_eq!(c.invite, Invite::Starship);
+    assert_eq!(c.annonce_fin_commande, AnnonceFin::Longues);
+    assert!(c.shells.is_empty());
+    Ok(())
+}
+
+#[test]
+fn commande_vide_refusee() {
+    let base = "\n[[shells]]\nnom = \"X\"\n";
+    for (commande, ligne) in [
+        ("commande = []", 4),
+        ("commande = [\"\"]", 4),
+        ("commande = [\"-x\"]", 4),
+        ("commande = [\"  \", \"a\"]", 4),
+    ] {
+        let e = erreur(&format!("{base}{commande}\n"));
+        assert_eq!(e.ligne, Some(ligne), "{commande} : {e:?}");
+    }
+    assert_eq!(
+        erreur("[[shells]]\nnom = \"\"\ncommande = [\"a\"]\n").ligne,
+        Some(2)
+    );
+    assert!(erreur(&format!("{base}commande = []\n"))
+        .message
+        .contains("commande"));
+}
+
+#[test]
+fn valeurs_inconnues_refusees() {
+    let e = erreur("\ninvite = \"autre\"\n");
+    assert_eq!(e.ligne, Some(2), "{e:?}");
+    assert!(e.message.contains("autre"), "{}", e.message);
+    let e = erreur("annonce_fin_commande = \"parfois\"\n");
+    assert_eq!(e.ligne, Some(1));
+    assert!(e.message.contains("parfois"));
+    assert_eq!(erreur("shell = 3\n").ligne, Some(1));
 }

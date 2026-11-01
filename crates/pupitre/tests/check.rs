@@ -101,3 +101,55 @@ fn argument_inconnu_refuse() {
     let (code, _) = pupitre(d.path(), &["check", "--theme"]);
     assert_eq!(code, 2);
 }
+
+/// `pupitre shells` avec un `PATH` ne contenant que `zsh` (faux exécutable) et `sh`.
+#[test]
+fn shells_liste_chemin_niveau_et_installation() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let bin = d.path().join("bin");
+    ecrire(&bin.join("zsh"), "#!/bin/sh\n");
+    std::fs::set_permissions(bin.join("zsh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Liste de shells maîtrisée : seulement `/bin/sh` et `nologin` (qui ne doit pas sortir).
+    let etc = d.path().join("shells");
+    ecrire(
+        &etc,
+        "# essai\n/bin/sh\n/usr/sbin/nologin\n/usr/bin/git-shell\n",
+    );
+    let o = Command::new(env!("CARGO_BIN_EXE_pupitre"))
+        .arg("shells")
+        .env("PUPITRE_ETC_SHELLS", &etc)
+        .env("PATH", &bin)
+        .env("XDG_CONFIG_HOME", d.path())
+        .env("HOME", d.path())
+        .env("LANGUAGE", "fr")
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY")
+        .output()
+        .unwrap();
+    let sortie = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert_eq!(o.status.code(), Some(0), "{sortie}");
+    let zsh = format!("{}", bin.join("zsh").display());
+    assert!(
+        sortie
+            .lines()
+            .any(|l| l.contains(&zsh) && l.contains("(complet)")),
+        "{sortie}"
+    );
+    assert!(
+        sortie.lines().any(|l| l.contains("fish")),
+        "fish absent mais cité : {sortie}"
+    );
+    for faux in ["nologin", "git-shell"] {
+        assert!(
+            !sortie.contains(faux),
+            "{faux} ne doit pas figurer : {sortie}"
+        );
+    }
+    let os = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    if os.contains("debian") || os.contains("ubuntu") {
+        assert!(sortie.contains("sudo apt install fish"), "{sortie}");
+    }
+    // Rien n'est écrit chez l'utilisateur.
+    assert!(!d.path().join("pupitre").exists());
+}

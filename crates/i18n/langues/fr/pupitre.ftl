@@ -25,6 +25,11 @@ config-police-vide = police vide : indiquer une famille et une taille, ex. « B6
 config-historique-limites = historique de { $v } lignes hors limites (de 0 à { $max })
 config-zoom-limites = zoom maximum { $v } % hors limites (de { $min } à { $max })
 config-langue-inconnue = langue « { $v } » inconnue : valeurs possibles « » (langue du système), « fr », « en », « es », « it », « de », « nl »
+config-invite-inconnue = invite « { $v } » inconnue : valeurs possibles « starship » ou « shell »
+config-annonce-inconnue = annonce_fin_commande « { $v } » inconnue : valeurs possibles « longues », « toutes » ou « aucune »
+config-shell-nom-vide = nom de shell vide : indiquer le nom affiché dans le menu
+config-shell-commande-vide = commande vide : le premier élément doit être un programme, ex. ["ssh", "serveur"]
+config-shell-commande-option = commande « { $v } » refusée : le premier élément ne doit pas commencer par « - »
 
 couleur-invalide = couleur invalide { $texte } : format attendu #rrggbb (ex. #1e1e2e)
 fichier-sans-nom = chemin sans nom de fichier
@@ -256,6 +261,7 @@ usage =
       pupitre                        ouvrir une fenêtre
       pupitre check                  vérifier la configuration et le contraste des thèmes
       pupitre check --theme CHEMIN   vérifier un fichier de thème
+      pupitre shells                 lister les shells installés et leur prise en charge
 arguments-incorrects = Arguments incorrects.
 argument-inconnu = Argument inconnu « { $argument } ».
 check-config-invalide = Configuration invalide ({ $chemin }), { $erreur }
@@ -284,3 +290,19 @@ trame-octets-en-trop = { $n } octet(s) en trop après le message
 shell-integration-absente = L'intégration de Pupitre pour { $shell } est introuvable : le shell est lancé tel quel.
 shell-starship-absent = Starship introuvable : l'invite habituelle du shell est gardée.
 shell-starship-absent-installer = Starship introuvable : l'invite habituelle du shell est gardée. Pour l'installer : { $commande }
+shell-configure-absent = Le shell « { $shell } » est introuvable : le shell de connexion est utilisé.
+shell-configure-absent-installer = Le shell « { $shell } » est introuvable : le shell de connexion est utilisé. Pour l'installer : { $commande }
+shell-starship-config-impossible = Impossible de créer l'invite { $chemin } ({ $erreur }) : l'invite habituelle du shell est gardée.
+
+## Menu « Nouvel onglet avec » et commande pupitre shells
+
+menu-nouvel-onglet-avec = Nouvel onglet avec
+shells-installes = Shells installés :
+shells-aucun = aucun shell trouvé
+shells-niveau = ({ $niveau })
+shells-niveau-complet = complet
+shells-niveau-invite = invite gérée
+shells-niveau-tel-quel = tel quel
+shells-absents = Shells pris en charge, non installés :
+shells-absent = { $nom } ({ $niveau })
+shells-absent-installer = { $nom } ({ $niveau }) : { $commande }

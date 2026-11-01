@@ -15,6 +15,7 @@ use crate::messages::{
 use crate::raccourcis::{raccourci, Raccourci};
 use crate::rechargement::{surveiller, surveiller_fichiers, Surveillance};
 use crate::recherche::BarreRecherche;
+use crate::shells::{self, Choix};
 use crate::taille::{largeur_ecran, taille_ouverture};
 use crate::terminal::{animations_actives, TerminalOnglet};
 use gtk::gdk;
@@ -254,6 +255,8 @@ pub struct Pupitre {
     /// Garde l'application en vie tant que la première fenêtre n'existe pas (GTK quitte
     /// une application sans fenêtre).
     garde: RefCell<Option<gio::ApplicationHoldGuard>>,
+    /// Avertissements de lancement déjà montrés : un seul par lancement de Pupitre.
+    avertis: RefCell<HashSet<String>>,
 }
 
 impl Pupitre {
@@ -281,6 +284,7 @@ impl Pupitre {
             demandes_sans_fenetre: RefCell::new(Vec::new()),
             messages_sans_fenetre: RefCell::new(Vec::new()),
             garde: RefCell::new(Some(app.hold())),
+            avertis: RefCell::new(HashSet::new()),
         });
         p.appliquer_config(Ok(config));
         // Fenêtre fermée (quelle qu'en soit la raison) : retirée de la liste. Le signal
@@ -440,6 +444,9 @@ impl Pupitre {
             }),
         );
         self.changer_theme(theme);
+        for f in self.fenetres() {
+            f.rafraichir_shells();
+        }
     }
 
     /// Surveille le fichier de thème choisi (et lui seul).
@@ -510,7 +517,7 @@ impl Pupitre {
         self.attentes
             .borrow_mut()
             .push_back(Attente::Remplacer(Rc::downgrade(onglet)));
-        self.ouvrir_session(None, cols, rows);
+        self.ouvrir_session(&Choix::Defaut, cols, rows);
     }
 
     fn connecter(self: &Rc<Self>) -> Result<(), String> {
@@ -536,11 +543,22 @@ impl Pupitre {
         Ok(())
     }
 
-    /// Demande l'ouverture d'une session (variables d'environnement : aucune pour l'instant).
-    fn ouvrir_session(&self, argv: Option<Vec<String>>, cols: u16, rows: u16) {
+    /// Demande l'ouverture d'une session pour `choix` : shell, intégration et variables
+    /// viennent de [`shells::preparer`]. Un avertissement (shell ou Starship introuvable…) est
+    /// montré une seule fois par lancement de Pupitre, dans le bandeau de messages.
+    fn ouvrir_session(&self, choix: &Choix, cols: u16, rows: u16) {
+        if self.client.borrow().is_none() {
+            return;
+        }
+        let lancement = shells::preparer(choix, &self.config.borrow(), &shells::path_courant());
+        if let Some(a) = lancement.avertissement {
+            if self.avertis.borrow_mut().insert(a.clone()) {
+                self.poser_message(&format!("lancement:{a}"), Some(a));
+            }
+        }
         if let Some(c) = self.client.borrow().as_ref() {
             // Échec = connexion perdue, signalée par ailleurs sur le canal.
-            let _ = c.ouvrir(argv, None, cols, rows, Vec::new());
+            let _ = c.ouvrir(Some(lancement.argv), None, cols, rows, lancement.env);
         }
     }
 
@@ -894,6 +912,8 @@ pub struct FenetreInterne {
     bandeau: Rc<BandeauMessages>,
     recherche: Rc<BarreRecherche>,
     menu: gtk::MenuButton,
+    /// Sous-menu « Nouvel onglet avec » (refait quand les réglages changent).
+    sous_menu_shells: gio::Menu,
     /// Ne pas fermer la fenêtre quand son dernier onglet part (reconnexion en cours).
     garder_ouverte: Cell<bool>,
     fermee: Cell<bool>,
@@ -925,7 +945,7 @@ impl FenetrePupitre {
         // Ctrl+Tab met le focus sur le carnet lui-même : sans nom, Orca dirait seulement
         // « groupement ». Sa description donne l'onglet courant (voir `decrire_onglets`).
         carnet.update_property(&[gtk::accessible::Property::Label(&tr("onglets-nom"))]);
-        let menu = bouton_menu();
+        let (menu, sous_menu_shells) = bouton_menu();
         carnet.set_action_widget(&menu, gtk::PackType::End);
 
         let bandeau = BandeauMessages::new();
@@ -943,6 +963,7 @@ impl FenetrePupitre {
             bandeau,
             recherche,
             menu,
+            sous_menu_shells,
             garder_ouverte: Cell::new(false),
             fermee: Cell::new(false),
             pupitre: Rc::downgrade(pupitre),
@@ -955,6 +976,7 @@ impl FenetrePupitre {
             f.afficher_message(&texte);
         }
         f.installer_actions();
+        f.rafraichir_shells();
         crate::raccourcis::installer_raccourcis(&f);
         f.installer_signaux();
         f.reannoncer_au_lancement();
@@ -1041,16 +1063,56 @@ impl FenetrePupitre {
 
     /// Ouvre un nouveau shell dans un nouvel onglet de cette fenêtre.
     pub fn ouvrir_session(&self) {
-        self.ouvrir(None, None);
+        self.ouvrir(&Choix::Defaut, None);
+    }
+
+    /// Ouvre un nouvel onglet pour une entrée du sous-menu « Nouvel onglet avec » (valeur
+    /// d'action rendue par [`entrees_nouvel_onglet_avec`](Self::entrees_nouvel_onglet_avec)).
+    fn ouvrir_avec(&self, cible: &str) {
+        let Some(p) = self.pupitre() else { return };
+        let choix = shells::choix_de_cible(cible, &p.config.borrow());
+        if let Some(c) = choix {
+            self.ouvrir(&c, None);
+        }
+    }
+
+    /// Entrées du sous-menu « Nouvel onglet avec » : `(libellé, valeur de l'action)`.
+    pub fn entrees_nouvel_onglet_avec(&self) -> Vec<(String, String)> {
+        let m = &self.0.sous_menu_shells;
+        (0..m.n_items())
+            .filter_map(|i| {
+                let texte = |attr: &str| {
+                    m.item_attribute_value(i, attr, Some(glib::VariantTy::STRING))
+                        .and_then(|v| v.get::<String>())
+                };
+                Some((texte("label")?, texte("target")?))
+            })
+            .collect()
+    }
+
+    /// Refait le sous-menu « Nouvel onglet avec » d'après les shells installés et les réglages.
+    fn rafraichir_shells(&self) {
+        let Some(p) = self.pupitre() else { return };
+        let entrees = shells::entrees_menu(&p.config.borrow(), &shells::path_courant());
+        let m = &self.0.sous_menu_shells;
+        m.remove_all();
+        for (libelle, cible) in entrees {
+            let i = gio::MenuItem::new(Some(&libelle), None);
+            i.set_action_and_target_value(
+                Some("win.nouvel-onglet-avec"),
+                Some(&cible.to_variant()),
+            );
+            m.append_item(&i);
+        }
     }
 
     /// Ouvre `argv` (une commande `ssh …`) dans un nouvel onglet de cette fenêtre. `titre`
     /// reste affiché tant que le programme n'en donne pas.
     pub fn ouvrir_connexion(&self, argv: Vec<String>, titre: String) {
-        self.ouvrir(Some(argv), Some(titre));
+        self.ouvrir(&Choix::Commande(argv), Some(titre));
     }
 
-    fn ouvrir(&self, argv: Option<Vec<String>>, titre: Option<String>) {
+    fn ouvrir(&self, choix: &Choix, titre: Option<String>) {
         let Some(p) = self.pupitre() else { return };
         let (cols, rows) = self
             .onglet_actif()
@@ -1059,7 +1121,7 @@ impl FenetrePupitre {
         p.attentes
             .borrow_mut()
             .push_back(Attente::NouvelOnglet(Rc::downgrade(&self.0), titre));
-        p.ouvrir_session(argv, cols, rows);
+        p.ouvrir_session(choix, cols, rows);
     }
 
     /// Déplace l'onglet de la session `id` dans une nouvelle fenêtre (s'il n'est pas seul).
@@ -1299,6 +1361,16 @@ impl FenetrePupitre {
             self.0.fenetre.add_action(&action);
         };
         ajouter("nouvel-onglet", Box::new(|f| f.ouvrir_session()));
+        let avec = gio::SimpleAction::new("nouvel-onglet-avec", Some(glib::VariantTy::STRING));
+        let faible = Rc::downgrade(&self.0);
+        avec.connect_activate(move |_, cible| {
+            let (Some(w), Some(cible)) = (faible.upgrade(), cible.and_then(|c| c.get::<String>()))
+            else {
+                return;
+            };
+            FenetrePupitre(w).ouvrir_avec(&cible);
+        });
+        self.0.fenetre.add_action(&avec);
         ajouter(
             "nouvelle-fenetre",
             Box::new(|f| {
@@ -1623,7 +1695,7 @@ fn menu_onglet() -> gio::Menu {
 }
 
 /// Menu principal, à droite de la barre d'onglets.
-fn bouton_menu() -> gtk::MenuButton {
+fn bouton_menu() -> (gtk::MenuButton, gio::Menu) {
     let m = gio::Menu::new();
     let item = |libelle: &str, action: &str, accel: Option<&str>| {
         let i = gio::MenuItem::new(Some(libelle), Some(action));
@@ -1637,6 +1709,8 @@ fn bouton_menu() -> gtk::MenuButton {
         "win.nouvel-onglet",
         Some("<Control><Shift>t"),
     ));
+    let sous_menu_shells = gio::Menu::new();
+    m.append_submenu(Some(&tr("menu-nouvel-onglet-avec")), &sous_menu_shells);
     m.append_item(&item(
         &tr("menu-nouvelle-fenetre"),
         "win.nouvelle-fenetre",
@@ -1712,7 +1786,7 @@ fn bouton_menu() -> gtk::MenuButton {
         .primary(false)
         .build();
     b.update_property(&[gtk::accessible::Property::Label(&tr("menu-nom"))]);
-    b
+    (b, sous_menu_shells)
 }
 
 /// Dialogue modal « question ? » avec Annuler (par défaut, et Échap) et Fermer.
