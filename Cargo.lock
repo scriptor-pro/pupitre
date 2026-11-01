@@ -1401,6 +1401,7 @@ dependencies = [
 name = "pupitre-shell"
 version = "0.1.0"
 dependencies = [
+ "portable-pty",
  "pupitre-i18n",
  "tempfile",
 ]
