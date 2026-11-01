@@ -2,23 +2,23 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal :** Pupitre détecte les shells installés et lance chacun avec son intégration (sans toucher aux fichiers de l'utilisateur) ; l'invite Starship embarquée suit le thème ; le processus de fond repère les marques de commandes (OSC 133), ce qui permet d'annoncer à Orca la fin d'une commande avec son résultat et de naviguer de commande en commande au clavier.
+**Goal :** Pupitre détecte les shells installés et lance chacun avec son intégration (sans toucher aux fichiers de l'utilisateur) ; l'invite Starship (celle du système) suit le thème ; sans Starship, chaque shell garde l'invite de l'utilisateur ; le processus de fond repère les marques de commandes (OSC 133), ce qui permet d'annoncer à Orca la fin d'une commande avec son résultat et de naviguer de commande en commande au clavier.
 
 **Architecture :** une nouvelle crate `pupitre-shell` (sans GTK) détecte les shells, leur niveau de prise en charge, la commande d'installation adaptée à la distribution, et construit le **lancement** d'un shell (argv + variables). Les fichiers d'intégration (`assets/shell/`, installés plus tard dans `/usr/share/pupitre/shell/`) chargent d'abord la configuration habituelle de l'utilisateur, puis l'invite et les marques OSC 133 / OSC 7. L'interface calcule le lancement et l'envoie au fond (protocole v3 : ouverture avec variables). `pupitre-fond` lit les marques OSC 133 dans le flux, mesure la durée des commandes et transmet les marques **dans l'ordre** du flux ; l'interface note la ligne VTE de chaque marque, annonce les fins de commande et permet de sauter d'une commande à l'autre.
 
-**Tech Stack :** Rust, GTK 4.18 / VTE 0.80 (existants), Starship 1.22.1 (compilé depuis crates.io, version figée, binaire `pupitre-starship`), bash 5.2, zsh 5.9, fish 4.0, nushell 0.116 ; niveau 2 : elvish 0.21, xonsh 0.19, tcsh 6.24.
+**Tech Stack :** Rust, GTK 4.18 / VTE 0.80 (existants), Starship du système (1.22.1 sous Debian 13, paquet `starship`, dépendance recommandée du futur `.deb`), bash 5.2, zsh 5.9, fish 4.0, nushell 0.116 ; niveau 2 : elvish 0.21, xonsh 0.19, tcsh 6.24.
 
 **Spec :** `docs/conception/2026-10-25-pupitre-conception.md`, §4.2 (OSC 133 intercepté par le fond), §6 (shells et invite), §7.2 (palette), §8 (annonce de fin de commande, navigation), §11 (rien de téléchargé à l'exécution), §12 (configuration), §13 (robustesse), §15 (étape 3).
 
-**Hors étape 3 :** coche ✓/✗ sur l'onglet et bulle du bureau pour une commande finie en arrière-plan, OSC 9/777, OSC 52, bandeau de disposition clavier (étape 4) ; paquet `.deb` (étape 4 : il embarquera `pupitre-starship` et `assets/shell/`).
+**Hors étape 3 :** coche ✓/✗ sur l'onglet et bulle du bureau pour une commande finie en arrière-plan, OSC 9/777, OSC 52, bandeau de disposition clavier (étape 4) ; paquet `.deb` (étape 4 : il embarquera `assets/shell/` et recommandera le paquet `starship`).
 
 ## Global Constraints
 
 - Tout ce qui figure dans les Global Constraints des étapes 1 et 2 reste valable (X11 et Wayland, GTK ≥ 4.18, VTE ≥ 0.80, SPDX `GPL-3.0-or-later`, pas de `unwrap`/`expect`/`panic!` hors tests, `ecrire_atomique`, textes en français, jamais de secret en clair, `suivi-tokens.md` à jour).
 - **Fichiers de l'utilisateur jamais modifiés ni remplacés** : `~/.bashrc`, `~/.zshrc`, `~/.config/fish/`, `~/.config/nushell/`, `~/.config/starship.toml`… Ce dernier n'est **jamais lu** (invite configurée par `STARSHIP_CONFIG`).
 - **Les fichiers d'intégration chargent d'abord la configuration habituelle de l'utilisateur**, puis ajoutent l'intégration Pupitre.
-- **Rien n'est téléchargé à l'exécution** : Starship est fourni avec Pupitre ; Pupitre affiche une commande d'installation pour un shell absent, sans jamais l'exécuter.
-- **Jamais d'erreur bloquante** : shell configuré absent, Starship absent ou en échec, fichiers d'intégration introuvables → l'onglet s'ouvre quand même (repli : shell de connexion, invite simple, shell tel quel), avec un message clair.
+- **Rien n'est téléchargé à l'exécution** : Starship n'est jamais installé par Pupitre (dépendance recommandée du paquet) ; Pupitre affiche une commande d'installation pour un shell absent, sans jamais l'exécuter.
+- **Jamais d'erreur bloquante** : shell configuré absent, Starship absent ou en échec, fichiers d'intégration introuvables → l'onglet s'ouvre quand même (repli : shell de connexion, invite de l'utilisateur, shell tel quel), avec un message clair.
 - Niveaux (§6.1) : **Complet** = bash, zsh, fish, nushell (Starship, OSC 133, dossier courant OSC 7 ; testés à chaque version) ; **Invite gérée** = elvish, xonsh, tcsh, ion, PowerShell (`pwsh`) ; **Tel quel** = tout autre shell.
 - Couleurs de l'invite : uniquement les **16 couleurs de la palette** (noms ANSI de Starship : `green`, `red`, `blue`, `purple`, `yellow`, `cyan`, `bright-black`…), jamais de couleur exacte : changer de thème change l'invite, y compris celles déjà affichées. Aucune icône Nerd Font.
 - Le flux de chaque session est relayé **tel quel** à VTE (les marques OSC 133 aussi : VTE les ignore) ; le fond n'ajoute ni ne retire aucun octet pour l'OSC 133.
@@ -30,7 +30,7 @@
 2. **Séquence OSC 133 coupée entre deux lectures du PTY, mal formée ou démesurée** (`cat` d'un fichier binaire) → ni plantage ni blocage, mémoire bornée, octets relayés intacts. Test : Task 5 `marque_coupee_en_deux`, `osc_demesure_abandonne`, et cible de fuzzing `marques`.
 3. **Fausses marques pendant une commande** (un programme ou un `cat` affiche `ESC]133;A`) → ignorées tant que la commande en cours n'est pas finie ; seule la marque de fin (D) est prise. Test : Task 5 `marques_ignorees_pendant_une_commande`.
 4. **Reprise après plantage de l'interface** → les marques rejouées servent à la navigation mais ne déclenchent **aucune** annonce. Test : Task 5 `relecture_rejoue_les_marques`, Task 7 `marques_rejouees_sans_annonce`.
-5. **Shell configuré absent, Starship absent, dossier d'intégration absent** → onglet ouvert avec le repli, message unique avec la commande d'installation, aucun plantage. Test : Task 1 `integration_absente_tel_quel_avec_avertissement`, Task 3 `starship_absent_invite_simple`, Task 6 `shell_configure_absent_message`.
+5. **Shell configuré absent, Starship absent, dossier d'intégration absent** → onglet ouvert avec le repli, message unique avec la commande d'installation, aucun plantage. Test : Task 1 `integration_absente_tel_quel_avec_avertissement`, Task 3 `starship_absent_invite_utilisateur`, Task 6 `shell_configure_absent_message`.
 
 ---
 
@@ -49,7 +49,6 @@ assets/shell/fish/pupitre.fish          intégration fish (-C)
 assets/shell/nushell/pupitre.nu         intégration nushell
 assets/shell/elvish/pupitre.elv, xonsh/pupitre.xsh, tcsh/…   niveau 2 (selon Task 0)
 assets/shell/starship.toml              invite par défaut (copiée au premier lancement)
-scripts/starship.sh                     compile Starship 1.22.1 → target/<profil>/pupitre-starship
 crates/proto/src/lib.rs                 VERSION 3, Ouvrir, Marque, MarqueCommande, EtatTrousseau::Lent
 crates/fond/src/marques.rs              LecteurMarques (OSC 133 dans le flux, borné)
 crates/fond/src/serveur.rs              Ouvrir, envoi des marques dans l'ordre, relecture
@@ -76,8 +75,8 @@ But : figer les mécanismes dont dépend le plan. **Point de décision** : si un
 - [ ] **Step 2 : zsh.** `ZDOTDIR=<dossier Pupitre>` : vérifier que nos `.zshenv`/`.zshrc` peuvent rendre `ZDOTDIR` d'origine et charger ceux de l'utilisateur (`VU_ZSHRC=1`) ; `precmd_functions` / `preexec_functions` disponibles.
 - [ ] **Step 3 : fish 4.0.2 et nushell 0.116.** Relever les octets émis autour d'une commande : fish émet-il déjà `ESC]133;A/B/C/D` ? nushell avec `$env.config.shell_integration.osc133 = true` ? Option de lancement de fish qui s'exécute **après** `config.fish` (`-C`) ; option de nushell pour un fichier supplémentaire après celui de l'utilisateur.
 - [ ] **Step 4 : niveau 2.** elvish (`-rc`), xonsh (`--rc`), tcsh (existe-t-il un moyen sans toucher `~/.tcshrc` ? sinon tcsh passe « tel quel » et on le note).
-- [ ] **Step 5 : Starship.** `cargo install starship --version 1.22.1 --locked --root <tmp>` : durée sur ce portable, taille du binaire. `starship init bash|zsh|fish|nu|elvish|xonsh|tcsh --print-full-init` : émet-il de l'OSC 133 lui-même ? `STARSHIP_CONFIG` respecté, `~/.config/starship.toml` ignoré (vérifié par `strace -e openat`).
-- [ ] **Step 6 : Consigner** dans `RESULTATS.md`. **Critères :** pour bash, zsh, fish, nushell, un mécanisme charge la configuration de l'utilisateur puis la nôtre sans écrire dans `HOME` ; Starship se compile en moins de 30 min et n'ouvre pas `~/.config/starship.toml`.
+- [ ] **Step 5 : Starship** (celui du système, `/usr/bin/starship`). `starship init bash|zsh|fish|nu|elvish|xonsh|tcsh --print-full-init` : émet-il de l'OSC 133 lui-même ? `STARSHIP_CONFIG` respecté, `~/.config/starship.toml` ignoré (vérifié par `strace -e openat`).
+- [ ] **Step 6 : Consigner** dans `RESULTATS.md`. **Critères :** pour bash, zsh, fish, nushell, un mécanisme charge la configuration de l'utilisateur puis la nôtre sans écrire dans `HOME` ; Starship n'ouvre pas `~/.config/starship.toml`.
 
 ---
 
@@ -88,9 +87,9 @@ But : figer les mécanismes dont dépend le plan. **Point de décision** : si un
 **Interfaces :**
 - Produces : `enum Niveau { Complet, InviteGeree, TelQuel }` ; `struct ShellConnu { nom: &'static str, executable: &'static str, niveau: Niveau, paquets: &[(Distribution, &'static str)] }` ; `const SHELLS_CONNUS: &[ShellConnu]` (bash, zsh, fish, nu, elvish, xonsh, tcsh, ion, pwsh) ; `fn niveau_de(chemin: &Path) -> Niveau` (par le nom du fichier, `-` de connexion retiré) ; `fn shells_installes(etc_shells: &str, path: &OsStr) -> Vec<ShellInstalle>` avec `ShellInstalle { chemin: PathBuf, nom: String, niveau: Niveau }` (dédoublonnés par chemin réel) ; `enum Distribution { Debian, Fedora, Arch, OpenSuse, Alpine, Autre }` ; `fn distribution(os_release: &str) -> Distribution` (`ID` puis `ID_LIKE`) ; `fn commande_installation(shell: &str, d: Distribution) -> Option<String>` (ex. `"sudo apt install fish"`, `None` si inconnu) ; `enum ModeInvite { Starship, Shell }` ; `struct Ressources { integration: Option<PathBuf>, starship: Option<PathBuf>, config_starship: PathBuf }` ; `struct Lancement { argv: Vec<String>, env: Vec<(String, String)>, avertissement: Option<String> }` ; `fn lancement(shell: &Path, mode: ModeInvite, r: &Ressources) -> Lancement`.
 
-- [ ] **Step 1 : Tests** (`#[cfg(test)]`, entrées en texte, aucun accès au système) : `detecte_etc_shells_et_path` (doublons `/bin/bash` et `/usr/bin/bash` → un seul si même fichier réel) ; `niveaux_conformes_a_la_conception` (bash/zsh/fish/nu → Complet ; elvish/xonsh/tcsh/ion/pwsh → InviteGeree ; `dash` → TelQuel ; `-bash` → Complet) ; `distribution_par_id_like` (`ID=linuxmint\nID_LIKE="ubuntu debian"` → Debian) ; `commande_installation_debian` (`fish` → `"sudo apt install fish"`, `nu` → `"sudo apt install nushell"`) ; `commande_inconnue_none` ; `lancement_bash_complet` (argv commence par le chemin de bash, contient `--rcfile` et le fichier `bash/pupitre.bash` ; env contient `STARSHIP_CONFIG` et `PUPITRE_INVITE=starship`) ; `lancement_mode_shell` (`PUPITRE_INVITE=shell`, pas de `STARSHIP_CONFIG`) ; `lancement_tel_quel` (argv = `[chemin]`, env vide) ; `integration_absente_tel_quel_avec_avertissement` ; `starship_absent_mode_shell_force` (`starship: None` + `ModeInvite::Starship` → `PUPITRE_INVITE=simple`, avertissement « invite Starship introuvable : invite simple »).
+- [ ] **Step 1 : Tests** (`#[cfg(test)]`, entrées en texte, aucun accès au système) : `detecte_etc_shells_et_path` (doublons `/bin/bash` et `/usr/bin/bash` → un seul si même fichier réel) ; `niveaux_conformes_a_la_conception` (bash/zsh/fish/nu → Complet ; elvish/xonsh/tcsh/ion/pwsh → InviteGeree ; `dash` → TelQuel ; `-bash` → Complet) ; `distribution_par_id_like` (`ID=linuxmint\nID_LIKE="ubuntu debian"` → Debian) ; `commande_installation_debian` (`fish` → `"sudo apt install fish"`, `nu` → `"sudo apt install nushell"`) ; `commande_inconnue_none` ; `lancement_bash_complet` (argv commence par le chemin de bash, contient `--rcfile` et le fichier `bash/pupitre.bash` ; env contient `STARSHIP_CONFIG` et `PUPITRE_INVITE=starship`) ; `lancement_mode_shell` (`PUPITRE_INVITE=shell`, pas de `STARSHIP_CONFIG`) ; `lancement_tel_quel` (argv = `[chemin]`, env vide) ; `integration_absente_tel_quel_avec_avertissement` ; `starship_absent_mode_shell_force` (`starship: None` + `ModeInvite::Starship` → `PUPITRE_INVITE=shell`, pas de `STARSHIP_CONFIG`, avertissement « Starship introuvable : l'invite habituelle du shell est gardée. Pour l'installer : sudo apt install starship »).
 - [ ] **Step 2 :** `cargo test -p pupitre-shell` → échec de compilation.
-- [ ] **Step 3 : Implémenter.** `lancement` ne vérifie que l'existence des fichiers ; le repli « shell absent » est fait par l'appelant (Task 6) qui passe le shell de connexion. Mécanismes par shell : ceux validés à la Task 0. Variables posées : `PUPITRE_INTEGRATION=<dossier>`, `PUPITRE_INVITE=starship|shell|simple`, `PUPITRE_STARSHIP=<binaire>` si présent, `STARSHIP_CONFIG=<config_starship>` en mode Starship.
+- [ ] **Step 3 : Implémenter.** `lancement` ne vérifie que l'existence des fichiers ; le repli « shell absent » est fait par l'appelant (Task 6) qui passe le shell de connexion. Mécanismes par shell : ceux validés à la Task 0. Variables posées : `PUPITRE_INTEGRATION=<dossier>`, `PUPITRE_INVITE=starship|shell`, `PUPITRE_STARSHIP=<binaire>` si présent, `STARSHIP_CONFIG=<config_starship>` en mode Starship.
 - [ ] **Step 4 :** tests verts ; `cargo clippy -p pupitre-shell` → 0 avertissement.
 - [ ] **Step 5 : Commit** `feat(shell): détection des shells, niveaux et lancement`.
 
@@ -104,18 +103,18 @@ But : figer les mécanismes dont dépend le plan. **Point de décision** : si un
 
 - [ ] **Step 1 : Tests** pour bash, zsh, fish, nushell : `<shell>_charge_la_config_utilisateur` (le fichier habituel de l'utilisateur dans le `HOME` temporaire pose `VU=1` ; `echo $VU` → `1`) ; `<shell>_marques_d_une_commande` (`true` puis `false` → séquence A B C D;0 A B C D;1 A B) ; `<shell>_dossier_courant` (`cd /tmp` → OSC 7 avec `/tmp`) ; `marques_uniques_avec_crochets_utilisateur` (bash et zsh : la config de l'utilisateur pose déjà un `PROMPT_COMMAND`/`precmd` qui affiche `X` et appelle `starship init`) ; `fish_sans_double_marque` ; `aucune_ecriture_dans_home` (liste des fichiers du `HOME` temporaire identique avant/après, hors fichiers d'historique propres au shell) ; `mode_shell_garde_l_invite_native` (`PUPITRE_INVITE=shell` : l'invite définie par l'utilisateur, `MONINVITE>`, est affichée, marques présentes). Niveau 2 (elvish, xonsh, tcsh selon Task 0) : `<shell>_invite_geree` (charge la config de l'utilisateur, invite Starship si présent).
 - [ ] **Step 2 :** échec (fichiers absents).
-- [ ] **Step 3 : Écrire les fichiers.** Chaque fichier : 1) charge la config habituelle de l'utilisateur (comme le shell l'aurait fait seul) ; 2) si `PUPITRE_INVITE=starship` et `PUPITRE_STARSHIP` exécutable : `starship init` avec ce binaire ; si `simple` : invite intégrée `utilisateur@machine dossier λ ` ; si `shell` : rien ; 3) pose les marques **après** tout le reste (pour qu'aucun crochet de l'utilisateur ne les écrase), sans les doubler si le shell les émet déjà (Task 0) ; 4) n'écrit rien dans `HOME`.
+- [ ] **Step 3 : Écrire les fichiers.** Chaque fichier : 1) charge la config habituelle de l'utilisateur (comme le shell l'aurait fait seul) ; 2) si `PUPITRE_INVITE=starship` et `PUPITRE_STARSHIP` exécutable : `starship init` avec ce binaire ; si `shell`, ou si le binaire a disparu entre-temps : rien, l'invite de l'utilisateur reste ; 3) pose les marques **après** tout le reste (pour qu'aucun crochet de l'utilisateur ne les écrase), sans les doubler si le shell les émet déjà (Task 0) ; 4) n'écrit rien dans `HOME`.
 - [ ] **Step 4 :** tests verts (`cargo test -p pupitre-shell --test integration_reelle`).
 - [ ] **Step 5 : Commit** `feat(shell): intégration des shells sans toucher aux fichiers de l'utilisateur`.
 
 ---
 
-### Task 3 : Starship embarqué et invite par défaut
+### Task 3 : Starship du système et invite par défaut
 
-**Files :** Create: `scripts/starship.sh`, `crates/shell/src/starship.rs`, `assets/shell/starship.toml` ; Modify: `scripts/test-x11.sh`, `scripts/test-wayland.sh` (appellent `scripts/starship.sh` s'il manque), `.gitignore`.
+**Files :** Create: `crates/shell/src/starship.rs`, `assets/shell/starship.toml`.
 
 **Interfaces :**
-- Produces : `fn chercher_starship(env_pupitre: Option<&OsStr>, dossier_exe: Option<&Path>, path: &OsStr) -> Option<PathBuf>` — ordre : `PUPITRE_STARSHIP` ; `<dossier de l'exécutable>/pupitre-starship` ; `/usr/lib/pupitre/pupitre-starship` ; `starship` du `PATH` ; sinon `None`. `const CONFIG_STARSHIP_DEFAUT: &str` (contenu de `assets/shell/starship.toml`, `include_str!`). `fn creer_config_starship_si_absente(chemin: &Path) -> io::Result<()>` (via `ecrire_atomique`, `$XDG_CONFIG_HOME/pupitre/starship.toml`).
+- Produces : `fn chercher_starship(env_pupitre: Option<&OsStr>, path: &OsStr) -> Option<PathBuf>` — ordre : `PUPITRE_STARSHIP` (pour les essais) ; `starship` du `PATH` ; sinon `None`. `const CONFIG_STARSHIP_DEFAUT: &str` (contenu de `assets/shell/starship.toml`, `include_str!`). `fn creer_config_starship_si_absente(chemin: &Path) -> io::Result<()>` (via `ecrire_atomique`, `$XDG_CONFIG_HOME/pupitre/starship.toml`).
 
 **Invite par défaut** (reproduit l'invite actuelle du porteur, deux lignes) :
 ```
@@ -124,11 +123,11 @@ But : figer les mécanismes dont dépend le plan. **Point de décision** : si un
 ```
 Ligne 1 : heure (`bright-black`), charge 1 min lue dans `/proc/loadavg` (module `custom`, `bright-black`), branche git (`purple`) et état (`yellow` : `Δ` modifié, `●` indexé, `○` non suivi). Ligne 2 : marqueurs `⚙⚙⚙` (`red`) si `ENVIRONMENT=prod` et `⌁⌁⌁` (`cyan`) si `SSH_CONNECTION`, `utilisateur@machine` (`green`), dossier (`blue`), symbole : `≠` si `ENVIRONMENT=prod`, sinon `#` pour root, `»` en SSH, `λ` sinon ; symbole en `red` si la commande précédente a échoué. `command_timeout = 500`. Uniquement des noms de couleurs ANSI.
 
-- [ ] **Step 1 : Tests** : `chercher_starship_ordre` (dossiers temporaires avec faux exécutables) ; `config_defaut_sans_couleur_exacte` (aucun `#` suivi de 6 chiffres hexadécimaux dans `CONFIG_STARSHIP_DEFAUT`) ; `config_defaut_valide` (si un Starship est trouvé : `STARSHIP_CONFIG=<fichier> starship prompt` → code 0, contient `λ`, aucune ligne `[WARN]`) ; `config_existante_jamais_ecrasee` ; `starship_absent_invite_simple` (intégration bash avec `PUPITRE_INVITE=simple` → invite `utilisateur@machine … λ `) ; `starship_n_ouvre_pas_la_config_utilisateur` (si `strace` présent : `openat` de `~/.config/starship.toml` absent de la trace).
+- [ ] **Step 1 : Tests** : `chercher_starship_ordre` (dossiers temporaires avec faux exécutables) ; `config_defaut_sans_couleur_exacte` (aucun `#` suivi de 6 chiffres hexadécimaux dans `CONFIG_STARSHIP_DEFAUT`) ; `config_defaut_valide` (si un Starship est trouvé : `STARSHIP_CONFIG=<fichier> starship prompt` → code 0, contient `λ`, aucune ligne `[WARN]`) ; `config_existante_jamais_ecrasee` ; `starship_absent_invite_utilisateur` (bash et zsh : `PATH` sans Starship, config de l'utilisateur posant l'invite `MONINVITE>` → `MONINVITE>` affichée, marques présentes, avertissement unique) ; `starship_n_ouvre_pas_la_config_utilisateur` (si `strace` présent : `openat` de `~/.config/starship.toml` absent de la trace).
 - [ ] **Step 2 :** échec.
-- [ ] **Step 3 : Implémenter.** `scripts/starship.sh` : `cargo install starship --version 1.22.1 --locked --root target/starship`, puis copie en `target/debug/pupitre-starship` et `target/release/pupitre-starship` ; ne refait rien si la version est déjà là. Licence ISC de Starship copiée en `target/starship/LICENSE` (embarquée au paquet en étape 4).
+- [ ] **Step 3 : Implémenter.** Rien n'est compilé ni copié : Pupitre utilise le `starship` du `PATH`. `config_defaut_valide` sert de garde-fou si une version future de Starship change le format (un `[WARN]` fait échouer le test).
 - [ ] **Step 4 :** tests verts.
-- [ ] **Step 5 : Commit** `feat(shell): Starship embarqué et invite par défaut`.
+- [ ] **Step 5 : Commit** `feat(shell): invite Starship par défaut, invite de l'utilisateur sans Starship`.
 
 ---
 
@@ -194,7 +193,7 @@ Ligne 1 : heure (`bright-black`), charge 1 min lue dans `/proc/loadavg` (module 
 **Files :** Modify: `tests/a11y/orca/scenario.py`, `tests/a11y/orca/attendu/*.json`, `docs/orca-liste-de-controle.md`, `tests/isolement/verifier.py`, `tests/vm/commun.sh`.
 
 - [ ] **Step 1 : Orca (automatisé, Orca muet)** : vérification 17 — `sleep 6` dans un onglet bash intégré → Orca dit « Commande terminée en 6 s. » ; vérification 18 — après `echo un`, `echo deux`, Ctrl+Maj+↑ → Orca dit « Commande : echo deux », encore → « Commande : echo un ». 18/18 trois fois de suite.
-- [ ] **Step 2 : Isolement** : `pupitre-starship` ajouté aux programmes jugés ; session type avec invite Starship dans un dépôt git → aucune connexion réseau, aucune écriture hors des dossiers de Pupitre, `~/.config/starship.toml` jamais ouvert.
+- [ ] **Step 2 : Isolement** : `starship` ajouté aux programmes jugés ; session type avec invite Starship dans un dépôt git → aucune connexion réseau, aucune écriture hors des dossiers de Pupitre, `~/.config/starship.toml` jamais ouvert.
 - [ ] **Step 3 : VM** : `tests/vm/commun.sh` gagne deux essais — « invite Starship affichée » (texte du terminal lu par AT-SPI contient `λ`) et « fin de commande annoncée » (événement d'annonce AT-SPI reçu après `sleep 6`). `scripts/vm.sh sway|gnome|kde essayer` → 15/15 chacun.
 - [ ] **Step 4 : Commit** `test(a11y): annonces et navigation des commandes, isolement de Starship, essais en VM`.
 
@@ -216,7 +215,7 @@ Ligne 1 : heure (`bright-black`), charge 1 min lue dans `/proc/loadavg` (module 
 1. **Invite par défaut = votre invite actuelle sur deux lignes** (heure, charge, branche git et état ; puis marqueurs, `utilisateur@machine`, dossier, symbole `λ`), et non le `$` écrit dans la conception. Les couleurs viennent du thème de Pupitre.
 2. **Annonce de fin de commande seulement pour les commandes de 5 s ou plus** (`annonce_fin_commande = "longues"`), réussies ou non ; réglable en `"toutes"` ou `"aucune"`. Pour une commande courte, Orca lit déjà la sortie.
 3. **Raccourcis de navigation : Ctrl+Maj+↑ et Ctrl+Maj+↓** (commande précédente / suivante).
-4. **Starship 1.22.1** (la version de Debian 13), compilé depuis ses sources publiées, fourni sous le nom `pupitre-starship` ; s'il manque, Starship du système, sinon invite simple.
+4. **Starship du système** (1.22.1 sous Debian 13), dépendance recommandée du futur paquet, rien de compilé ni d'embarqué ; **sans Starship, chaque shell garde l'invite habituelle de l'utilisateur** (décision du porteur, 2026-11-01), avec un avertissement unique donnant la commande d'installation.
 5. **Fichier d'invite modifiable** : `~/.config/pupitre/starship.toml`, créé au premier lancement à partir de l'invite par défaut ; jamais écrasé ensuite.
 6. **Shells absents : commande d'installation affichée** dans `pupitre shells` et dans le message quand le shell configuré manque ; le menu « Nouvel onglet avec » ne liste que les shells installés et ceux que vous déclarez.
 7. **Protocole v3 en profite pour corriger un reste de l'étape 2** : un trousseau trop lent n'est plus présenté comme « Aucun trousseau disponible ».
