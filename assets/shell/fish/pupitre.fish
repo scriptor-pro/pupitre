@@ -9,11 +9,21 @@ if test "$PUPITRE_INVITE" = starship; and test -n "$PUPITRE_STARSHIP"; and test 
     $PUPITRE_STARSHIP init fish --print-full-init | source
 end
 
+# Rétablit `$status` (un `set` le remet à 0).
+function __pupitre_rendre
+    return $argv[1]
+end
+
 # B : on enveloppe l'invite courante (celle de l'utilisateur ou celle de Starship).
 if functions -q fish_prompt; and not functions -q __pupitre_fish_prompt_origine
     functions -c fish_prompt __pupitre_fish_prompt_origine
     function fish_prompt --description "Invite avec la marque de fin d'invite de Pupitre"
-        # Premier appel : $status est encore celui de la dernière commande (invite d'origine).
+        # $status est celui de la dernière commande : on le garde en premier, on le publie pour
+        # l'invite Starship (symbole rouge après un échec), puis on le rétablit pour l'invite
+        # d'origine (qui le lit à son tour).
+        set -l c $status
+        set -gx PUPITRE_CODE $c
+        __pupitre_rendre $c
         __pupitre_fish_prompt_origine
         printf '\e]133;B\a'
     end

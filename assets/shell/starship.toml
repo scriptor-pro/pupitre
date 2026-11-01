@@ -19,7 +19,8 @@ command_timeout = 500
 format = """
 $time${custom.charge}$git_branch$git_status
 ${custom.marque_prod}${custom.marque_ssh}$username$hostname$directory\
-${custom.symbole_prod}${custom.symbole_root}${custom.symbole_ssh}${custom.symbole}"""
+${custom.symbole_prod}${custom.symbole_prod_echec}${custom.symbole_root}${custom.symbole_root_echec}\
+${custom.symbole_ssh}${custom.symbole_ssh_echec}${custom.symbole}${custom.symbole_echec}"""
 
 [time]
 disabled = false
@@ -27,8 +28,11 @@ time_format = "%H:%M:%S"
 style = "bright-black"
 format = "[$time]($style) "
 
+# Les commandes sont écrites pour sh quel que soit le shell de l'utilisateur (fish, nushell…).
+
 # Charge moyenne sur 1 minute, lue directement dans /proc/loadavg.
 [custom.charge]
+shell = ["sh"]
 command = "cut -d ' ' -f 1 /proc/loadavg"
 when = "test -r /proc/loadavg"
 style = "bright-black"
@@ -46,11 +50,13 @@ staged = "●"
 untracked = "○"
 
 [custom.marque_prod]
+shell = ["sh"]
 when = '[ "$ENVIRONMENT" = prod ]'
 style = "red"
 format = "[⚙⚙⚙]($style)"
 
 [custom.marque_ssh]
+shell = ["sh"]
 when = '[ -n "$SSH_CONNECTION" ]'
 style = "cyan"
 format = "[⌁⌁⌁]($style)"
@@ -71,19 +77,51 @@ style = "blue"
 truncate_to_repo = false
 format = "[$path]($style) "
 
-# Symbole de l'invite, par ordre de priorité : prod, root, SSH, sinon λ.
+# Symbole de l'invite, par ordre de priorité : prod, root, SSH, sinon λ. Chaque symbole existe en
+# deux versions : rouge si PUPITRE_CODE (code de la dernière commande, posé par les fichiers
+# d'intégration de Pupitre) est non nul, normale sinon, y compris dans un shell sans intégration.
+# Les conditions `when` restent simples : un seul symbole est affiché à la fois.
+
 [custom.symbole_prod]
-when = '[ "$ENVIRONMENT" = prod ]'
+shell = ["sh"]
+when = '[ "$ENVIRONMENT" = prod ] && [ "${PUPITRE_CODE:-0}" = 0 ]'
 format = "≠"
 
+[custom.symbole_prod_echec]
+shell = ["sh"]
+when = '[ "$ENVIRONMENT" = prod ] && [ "${PUPITRE_CODE:-0}" != 0 ]'
+style = "red"
+format = "[≠]($style)"
+
 [custom.symbole_root]
-when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" = 0 ]'
+shell = ["sh"]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" = 0 ] && [ "${PUPITRE_CODE:-0}" = 0 ]'
 format = "#"
 
+[custom.symbole_root_echec]
+shell = ["sh"]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" = 0 ] && [ "${PUPITRE_CODE:-0}" != 0 ]'
+style = "red"
+format = "[#]($style)"
+
 [custom.symbole_ssh]
-when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" != 0 ] && [ -n "$SSH_CONNECTION" ]'
+shell = ["sh"]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" != 0 ] && [ -n "$SSH_CONNECTION" ] && [ "${PUPITRE_CODE:-0}" = 0 ]'
 format = "»"
 
+[custom.symbole_ssh_echec]
+shell = ["sh"]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" != 0 ] && [ -n "$SSH_CONNECTION" ] && [ "${PUPITRE_CODE:-0}" != 0 ]'
+style = "red"
+format = "[»]($style)"
+
 [custom.symbole]
-when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" != 0 ] && [ -z "$SSH_CONNECTION" ]'
+shell = ["sh"]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" != 0 ] && [ -z "$SSH_CONNECTION" ] && [ "${PUPITRE_CODE:-0}" = 0 ]'
 format = "λ"
+
+[custom.symbole_echec]
+shell = ["sh"]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" != 0 ] && [ -z "$SSH_CONNECTION" ] && [ "${PUPITRE_CODE:-0}" != 0 ]'
+style = "red"
+format = "[λ]($style)"

@@ -17,10 +17,14 @@ if (($env.PUPITRE_INVITE? | default "") == "starship") and (($env.PUPITRE_STARSH
     $env.PROMPT_MULTILINE_INDICATOR = (^$env.PUPITRE_STARSHIP prompt --continuation)
     $env.PROMPT_INDICATOR = ""
     $env.PROMPT_COMMAND = {||
-        ^$env.PUPITRE_STARSHIP prompt --cmd-duration $env.CMD_DURATION_MS $"--status=($env.LAST_EXIT_CODE)" --terminal-width (term size).columns
+        with-env { PUPITRE_CODE: ($env.LAST_EXIT_CODE | into string) } {
+            ^$env.PUPITRE_STARSHIP prompt --cmd-duration $env.CMD_DURATION_MS $"--status=($env.LAST_EXIT_CODE)" --terminal-width (term size).columns
+        }
     }
     $env.config = ($env.config | upsert render_right_prompt_on_last_line true)
     $env.PROMPT_COMMAND_RIGHT = {||
-        ^$env.PUPITRE_STARSHIP prompt --right --cmd-duration $env.CMD_DURATION_MS $"--status=($env.LAST_EXIT_CODE)" --terminal-width (term size).columns
+        with-env { PUPITRE_CODE: ($env.LAST_EXIT_CODE | into string) } {
+            ^$env.PUPITRE_STARSHIP prompt --right --cmd-duration $env.CMD_DURATION_MS $"--status=($env.LAST_EXIT_CODE)" --terminal-width (term size).columns
+        }
     }
 }

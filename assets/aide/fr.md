@@ -254,7 +254,7 @@ l'entrée « Pupitre — phrase de passe de … ».
   Première ligne : heure, charge de la machine, branche git et son état (Δ modifié,
   ● indexé, ○ non suivi). Deuxième ligne : ⌁⌁⌁ si vous êtes connecté par SSH, ⚙⚙⚙ sur un
   serveur de production, puis utilisateur, machine, dossier et le symbole λ (rouge si la
-  commande précédente a échoué ; `#` pour root, `»` en SSH).
+  commande précédente a échoué, sauf avec elvish ; `#` pour root, `»` en SSH).
 - **Modifier l'invite** : éditez `~/.config/pupitre/starship.toml`, au format de Starship.
   Ce fichier est créé au premier lancement et n'est jamais écrasé. Votre
   `~/.config/starship.toml` n'est pas utilisé par Pupitre, ce qui laisse intacts vos autres

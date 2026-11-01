@@ -28,6 +28,8 @@ typeset -g __pupitre_fin_invite=$'%{\e]133;B\a%}'
 # `$?` est conservé par zsh pour chaque crochet precmd.
 __pupitre_precmd() {
     local c=$?
+    # Code de la dernière commande, pour l'invite Starship (symbole rouge après un échec).
+    export PUPITRE_CODE="$c"
     if [[ -n $__pupitre_dej ]]; then
         printf '\e]133;D;%s\a' "$c"
     fi

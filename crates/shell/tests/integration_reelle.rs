@@ -979,3 +979,63 @@ fn starship_absent_invite_utilisateur() {
         s.fermer();
     }
 }
+
+/// Texte reçu après la dernière marque `A` située après la position `apres`, si une marque
+/// `D;<code>` est elle aussi apparue après `apres` (la commande est finie, l'invite redessinée).
+fn invite_apres(flux: &[u8], apres: usize, code: &str) -> Option<(usize, String)> {
+    let t = String::from_utf8_lossy(flux).into_owned();
+    let d = t[apres..]
+        .find(&format!("133;D;{code}"))
+        .map(|i| i + apres)?;
+    let a = t.rfind("133;A")?;
+    (a > d).then(|| (d, t[a..].to_string()))
+}
+
+#[test]
+fn symbole_rouge_apres_un_echec() {
+    const ROUGE: &str = "\x1b[31m\u{3bb}";
+    if dans_path("starship").is_none() {
+        sauter("Starship n'est pas installé");
+        return;
+    }
+    for shell in ["bash", "zsh", "fish", "nu"] {
+        let banc = Banc::nouveau();
+        // Invite par défaut de Pupitre.
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/shell/starship.toml"),
+            &banc.config_starship,
+        )
+        .unwrap();
+        let Some(s) = Session::lancer(&banc, shell, ModeInvite::Starship) else {
+            continue;
+        };
+        s.attendre("première invite avec λ", |f| {
+            let t = String::from_utf8_lossy(f);
+            t.rfind("133;A").is_some_and(|a| t[a..].contains('\u{3bb}'))
+        });
+        let t0 = s.texte();
+        let a0 = t0.rfind("133;A").unwrap();
+        assert!(
+            !t0[a0..].contains(ROUGE),
+            "{shell} : rouge au départ : {t0:?}"
+        );
+
+        s.envoyer(&format!("{}\n", syntaxe(shell).ko));
+        s.attendre("invite rouge après `false`", |f| {
+            invite_apres(f, 0, "1").is_some_and(|(_, p)| p.contains(ROUGE))
+        });
+        let (d1, _) = invite_apres(&s.flux(), 0, "1").unwrap();
+
+        s.envoyer(&format!("{}\n", syntaxe(shell).ok));
+        s.attendre("invite normale après `true`", |f| {
+            invite_apres(f, d1 + 1, "0").is_some_and(|(_, p)| p.contains('\u{3bb}'))
+        });
+        s.stabiliser();
+        let (_, p) = invite_apres(&s.flux(), d1 + 1, "0").unwrap();
+        assert!(
+            !p.contains(ROUGE),
+            "{shell} : rouge après un succès : {p:?}"
+        );
+        s.fermer();
+    }
+}

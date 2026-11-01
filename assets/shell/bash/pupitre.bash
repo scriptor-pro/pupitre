@@ -23,6 +23,9 @@ __pupitre_fin_invite=$'\\[\e]133;B\a\\]'
 # Doit préserver `$?` pour les entrées suivantes (Starship, crochets de l'utilisateur).
 __pupitre_avant() {
     local c=$?
+    # Code de la dernière commande, pour l'invite Starship (symbole rouge après un échec). Les
+    # entrées de PROMPT_COMMAND passent avant l'évaluation de PS1, donc avant Starship.
+    export PUPITRE_CODE="$c"
     if [ -n "$__pupitre_dej" ]; then
         printf '\e]133;D;%s\a' "$c"
     fi

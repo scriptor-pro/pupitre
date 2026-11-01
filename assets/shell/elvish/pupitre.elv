@@ -3,7 +3,8 @@
 # rc.elv de l'utilisateur : on l'évalue nous-mêmes en premier).
 # Niveau partiel : marques A, C, D et OSC 7 seulement. Pas de marque B : elvish affiche en clair
 # les caractères de contrôle placés dans l'invite. Pas de code de sortie dans D (elvish ne le
-# fournit pas aux crochets). Rien n'est écrit dans HOME.
+# fournit pas aux crochets) : pour la même raison PUPITRE_CODE n'est pas posé, donc le symbole
+# de l'invite Starship n'y devient jamais rouge. Rien n'est écrit dans HOME.
 #
 # Limite connue : le rc de l'utilisateur est évalué dans son propre espace de noms (`eval`) ;
 # ses réglages d'éditeur, variables d'environnement et invites s'appliquent, mais les fonctions
