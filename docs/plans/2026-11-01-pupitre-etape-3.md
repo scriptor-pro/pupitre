@@ -15,7 +15,8 @@
 ## Global Constraints
 
 - Tout ce qui figure dans les Global Constraints des étapes 1 et 2 reste valable (X11 et Wayland, GTK ≥ 4.18, VTE ≥ 0.80, SPDX `GPL-3.0-or-later`, pas de `unwrap`/`expect`/`panic!` hors tests, `ecrire_atomique`, textes en français, jamais de secret en clair, `suivi-tokens.md` à jour).
-- **Aide à jour** : chaque tâche qui change un comportement visible met à jour `assets/aide/aide.md` (et retire la mention « (à venir) » des fonctions livrées). La Task 9 vérifie qu'il n'en reste plus pour l'étape 3.
+- **Aucun texte affiché écrit en dur** (à partir de la Task 0bis) : chaque texte vu ou entendu par l'utilisateur (interface, annonces d'Orca, messages, sortie des commandes, aide) passe par `pupitre-i18n` avec un identifiant ; le texte français est dans `crates/i18n/langues/fr/pupitre.ftl`. Les tests qui comparent des phrases fixent `LANGUAGE=fr`.
+- **Aide à jour** : chaque tâche qui change un comportement visible met à jour `assets/aide/fr.md` (et retire la mention « (à venir) » des fonctions livrées). La Task 9 vérifie qu'il n'en reste plus pour l'étape 3.
 - **Fichiers de l'utilisateur jamais modifiés ni remplacés** : `~/.bashrc`, `~/.zshrc`, `~/.config/fish/`, `~/.config/nushell/`, `~/.config/starship.toml`… Ce dernier n'est **jamais lu** (invite configurée par `STARSHIP_CONFIG`).
 - **Les fichiers d'intégration chargent d'abord la configuration habituelle de l'utilisateur**, puis ajoutent l'intégration Pupitre.
 - **Rien n'est téléchargé à l'exécution** : Starship n'est jamais installé par Pupitre (dépendance recommandée du paquet) ; Pupitre affiche une commande d'installation pour un shell absent, sans jamais l'exécuter.
@@ -78,6 +79,26 @@ But : figer les mécanismes dont dépend le plan. **Point de décision** : si un
 - [ ] **Step 4 : niveau 2.** elvish (`-rc`), xonsh (`--rc`), tcsh (existe-t-il un moyen sans toucher `~/.tcshrc` ? sinon tcsh passe « tel quel » et on le note).
 - [ ] **Step 5 : Starship** (celui du système, `/usr/bin/starship`). `starship init bash|zsh|fish|nu|elvish|xonsh|tcsh --print-full-init` : émet-il de l'OSC 133 lui-même ? `STARSHIP_CONFIG` respecté, `~/.config/starship.toml` ignoré (vérifié par `strace -e openat`).
 - [ ] **Step 6 : Consigner** dans `RESULTATS.md`. **Critères :** pour bash, zsh, fish, nushell, un mécanisme charge la configuration de l'utilisateur puis la nôtre sans écrire dans `HOME` ; Starship n'ouvre pas `~/.config/starship.toml`.
+
+---
+
+### Task 0bis : Traduction — mise en place (français seulement)
+
+Décidé par le porteur le 2026-11-01 : Pupitre sera traduit en anglais, espagnol, italien, allemand et néerlandais. Cette tâche pose le système ; les traductions sont une étape à part (conception §15). Elle passe **avant** les autres pour que les nouveaux textes de l'étape 3 y entrent directement.
+
+**Files :** Create: `crates/i18n/` (crate `pupitre-i18n`, sans GTK), `crates/i18n/langues/fr/pupitre.ftl`, `crates/i18n/langues/{en,es,it,de,nl}/pupitre.ftl` (vides, avec un en-tête) ; Move: `assets/aide/fr.md` → `assets/aide/fr.md` ; Modify: tous les fichiers de `crates/pupitre/src/`, `crates/fond/src/` et `crates/ssh/src/` qui contiennent des textes affichés, `crates/config/src/` (messages d'erreur), `assets/config/pupitre.toml` → produit depuis `fr.ftl` (commentaires), `assets/fr.pupitre.Pupitre.desktop` (`Name[fr]`, `Comment[fr]`, + entrées vides prêtes).
+
+**Interfaces :**
+- Produces : `fn langues_demandees(env: &dyn Fn(&str) -> Option<String>) -> Vec<LanguageIdentifier>` (ordre : `LANGUAGE` (liste séparée par `:`), puis `LC_ALL`, `LC_MESSAGES`, `LANG` ; `C`/`POSIX` ignorés ; `de_AT.UTF-8` → `de-AT` puis `de`) ; `fn init(langues: &[LanguageIdentifier])` (une fois au démarrage, chaque binaire) ; `fn t(id: &str) -> String` ; `fn ta(id: &str, args: &[(&str, ArgI18n)]) -> String` avec `enum ArgI18n { Texte(String), Nombre(i64) }` (pluriels Fluent) ; `fn langue_active() -> LanguageIdentifier` ; `fn aide() -> &'static str` (aide de la langue active, sinon anglais, sinon français). Bibliothèques : `fluent-bundle`, `unic-langid` (licences MIT/Apache, compatibles GPL-3.0). Fichiers `.ftl` **intégrés à l'exécutable** (`include_str!`) : traduction toujours disponible, hors ligne.
+- Repli, par phrase : langue demandée → **anglais** (pour une langue que Pupitre ne connaît pas, l'anglais est plus souvent compris que le français) → **français** (langue source, toujours complète). Un identifiant inconnu partout donne l'identifiant lui-même, jamais de plantage.
+- Réglage `langue = ""` dans `pupitre.toml` (vide : langue du système ; sinon `"fr"`, `"en"`, `"es"`, `"it"`, `"de"`, `"nl"`), appliqué au prochain lancement.
+- Ce qui **n'est pas traduit** : les noms des réglages et des valeurs de `pupitre.toml` (`police`, `theme`, `"sombre"`…), les sous-commandes (`check`, `aide`, `shells` ; alias anglais `help` accepté), les noms de fichiers.
+
+- [ ] **Step 1 : Tests** : `langues_par_variables` (`LANGUAGE=nl:de`, `LANG=fr_BE.UTF-8` → `[nl, de]` ; `LANG=de_AT.UTF-8` seul → `[de-AT, de]` ; `LANG=C` → `[]`) ; `repli_par_phrase` (identifiant présent seulement en `fr` + langue `de` → texte français ; présent en `en` → texte anglais) ; `identifiant_inconnu_sans_plantage` ; `pluriel` (`fr` : 1 → « 1 problème », 3 → « 3 problèmes ») ; `sans_marques_d_isolement` (aucun U+2068/U+2069 dans un texte avec argument : `set_use_isolating(false)`, sinon Orca et le terminal les afficheraient) ; `tous_les_ftl_valides` (chaque fichier se lit sans erreur) ; `identifiants_utilises_existent_en_fr` (chaque `t("…")` / `ta("…"` du dépôt existe dans `fr.ftl`, recherche dans les sources) ; `aucun_identifiant_orphelin` (chaque identifiant de `fr.ftl` est utilisé) ; `memes_arguments_partout` (une traduction n'utilise que les arguments de la phrase française) ; `textes_inchanges` : tous les tests existants (unitaires, graphiques, Orca 1 à 16) passent avec `LANGUAGE=fr` **sans modifier une seule phrase attendue**.
+- [ ] **Step 2 :** échec.
+- [ ] **Step 3 : Implémenter.** Remplacer chaque texte affiché par un identifiant (noms en français, en tirets : `onglet-fermer-question`). `pupitre-fond` et `pupitre-askpass` appellent `init` avec les variables reçues. Le `.desktop` reste un fichier (les bureaux lisent `Name[de]`…) : un test vérifie que `Name[fr]` et `Comment[fr]` correspondent à `fr.ftl`.
+- [ ] **Step 4 :** tests verts ; `LANGUAGE=de cargo run` → interface en français (aucune traduction encore), sans avertissement ni plantage.
+- [ ] **Step 5 : Commit** `feat(i18n): système de traduction (Fluent), textes français extraits`.
 
 ---
 
@@ -193,10 +214,10 @@ Ligne 1 : heure (`bright-black`), charge 1 min lue dans `/proc/loadavg` (module 
 
 Demandée par le porteur le 2026-11-01.
 
-**Files :** Create: `crates/pupitre/src/aide.rs` ; Modify: `crates/pupitre/src/fenetre.rs` (menu, action `win.aide`), `crates/pupitre/src/raccourcis.rs` (`Raccourci::Aide`), `crates/pupitre/src/main.rs` (`pupitre aide` affiche l'aide complète), `assets/aide/aide.md`.
+**Files :** Create: `crates/pupitre/src/aide.rs` ; Modify: `crates/pupitre/src/fenetre.rs` (menu, action `win.aide`), `crates/pupitre/src/raccourcis.rs` (`Raccourci::Aide`), `crates/pupitre/src/main.rs` (`pupitre aide` affiche l'aide complète), `assets/aide/fr.md`.
 
 **Interfaces :**
-- Produces : `const AIDE: &str = include_str!("../../../assets/aide/aide.md")` (l'aide est **dans l'exécutable** : toujours disponible, sans réseau ni fichier installé) ; `struct Section { titre: String, niveau: u8, texte: String }` ; `fn sections(aide: &str) -> Vec<Section>` (découpe aux titres `#`, `##`, `###`) ; `fn ouvrir_aide(app: &gtk::Application, parent: Option<&gtk::Window>, section: Option<&str>)` (une seule fenêtre d'aide : la rouvrir la ramène au premier plan).
+- Produces : `aide de la langue active par `pupitre_i18n::aide()` (Task 0bis ; `assets/aide/<langue>.md`, **dans l'exécutable** : toujours disponible, sans réseau ni fichier installé) ; `struct Section { titre: String, niveau: u8, texte: String }` ; `fn sections(aide: &str) -> Vec<Section>` (découpe aux titres `#`, `##`, `###`) ; `fn ouvrir_aide(app: &gtk::Application, parent: Option<&gtk::Window>, section: Option<&str>)` (une seule fenêtre d'aide : la rouvrir la ramène au premier plan).
 
 **Fenêtre « Aide de Pupitre »** : à gauche, la liste des sections (`GtkListBox`, chaque ligne rôle titre et niveau) ; à droite, le texte de la section choisie dans un `GtkTextView` en lecture seule, curseur visible (Orca le lit ligne par ligne et mot par mot). Mise en forme minimale : titres en gras, blocs de code en police du terminal, tableaux rendus en lignes « Action : raccourci » (un tableau Markdown n'est pas lisible tel quel par Orca). Champ « Rechercher dans l'aide » (filtre les sections contenant le texte). Échap ferme. Ctrl+Tab passe d'une zone à l'autre. Taille du texte : suit le zoom de la configuration de police. Couleurs : celles du thème de Pupitre (contraste vérifié).
 
@@ -214,7 +235,7 @@ Demandée par le porteur le 2026-11-01.
 
 Demandé par le porteur le 2026-11-01 (la fenêtre de réglages complète est à l'étape 4).
 
-**Files :** Create: `crates/pupitre/src/preferences.rs` ; Modify: `crates/pupitre/src/fenetre.rs` (sous-menu, actions), `assets/aide/aide.md`.
+**Files :** Create: `crates/pupitre/src/preferences.rs` ; Modify: `crates/pupitre/src/fenetre.rs` (sous-menu, actions), `assets/aide/fr.md`.
 
 **Interfaces :**
 - Consumes : `chemin_config()`, `creer_defaut_si_absent` (config) ; `creer_config_starship_si_absente` (Task 3) ; `MessagesFenetre` (bandeau).

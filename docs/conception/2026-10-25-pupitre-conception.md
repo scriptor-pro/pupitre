@@ -392,6 +392,12 @@ de l'affichage. Assistant local : piste future. Assistant en ligne : exclu.
   4. Bandeau de disposition clavier, notifications complètes, OSC 52, thèmes clair et contraste
      élevé, autres polices, **fenêtre de réglages** (lit et écrit `pupitre.toml` en gardant ses
      commentaires) [Décidé par le porteur, 2026-11-01], paquet `.deb`.
+  5. **Traductions** [Décidé par le porteur, 2026-11-01] : anglais, espagnol, italien, allemand,
+     néerlandais — interface, annonces d'Orca, aide, commandes, commentaires de la configuration,
+     fichier `.desktop`. Langue du système par défaut, réglage `langue` pour la forcer. Système
+     (Fluent, textes intégrés à l'exécutable, repli anglais puis français) mis en place dès
+     l'étape 3. Relecture de chaque langue par une personne qui la parle, avec Orca dans cette
+     langue, avant publication.
 - **Disposition clavier du porteur** : français Dvorak (`fr`, variante `dvorak`), testée en priorité.
   Raccourcis [Choix du concepteur] : reconnus par le caractère produit, avec repli sur la position
   physique de la touche quand le caractère n'existe pas sans Maj (ex. Alt+1…9 = rangée des chiffres).
