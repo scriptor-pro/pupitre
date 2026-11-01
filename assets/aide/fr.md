@@ -213,6 +213,8 @@ Messages possibles :
 - « Trousseau verrouillé : la phrase ne peut pas être mémorisée. » — déverrouillez votre
   trousseau (en général à l'ouverture de session) ;
 - « Aucun trousseau disponible : la phrase sera demandée à chaque fois. » ;
+- « Le trousseau ne répond pas pour l'instant : la phrase ne peut pas être mémorisée cette
+  fois. » (à venir) — la connexion fonctionne, la phrase sera redemandée la prochaine fois ;
 - « La phrase de passe mémorisée pour … ne fonctionne plus ; elle a été oubliée. Elle sera
   redemandée. » — par exemple après un changement de phrase de passe.
 
