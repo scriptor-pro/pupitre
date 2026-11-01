@@ -74,6 +74,10 @@ fn main() {
     ex.lancer("navigation_sans_saisie", navigation_sans_saisie);
     ex.lancer("navigation_commande_vide", navigation_commande_vide);
     ex.lancer("navigation_historique_borne", navigation_historique_borne);
+    ex.lancer("onglet_cache_puis_navigation", onglet_cache_puis_navigation);
+    ex.lancer("largeur_changee_garde_la_navigation", largeur_changee);
+    ex.lancer("reponse_tardive_pas_envoyee", reponse_tardive);
+    ex.lancer("sortie_sans_c_non_lue", sortie_sans_c);
     ex.lancer("raccourcis_sans_conflit", raccourcis_sans_conflit);
     ex.conclure();
 }
@@ -336,14 +340,28 @@ fn trois_commandes(b: &Banc) -> Resultat {
 
 fn annonce_commande_longue() -> Resultat {
     let b = Banc::nouveau(Config::default(), None);
-    // Écoute AT-SPI : l'annonce part vraiment vers le lecteur d'écran.
+    // Écoute AT-SPI : l'annonce part vraiment vers le lecteur d'écran. On attend que
+    // l'écoute soit abonnée (quelques secondes, machine chargée) avant d'envoyer la marque.
     let mut ecoute = Command::new("python3")
         .arg(racine().join("tests/a11y/ecoute.py"))
-        .args(["--app", NOM_APPLI, "--duree", "7"])
+        .args(["--app", NOM_APPLI, "--duree", "12"])
         .stdout(Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-    patienter(Duration::from_secs(2));
+    let lignes = Arc::new(Mutex::new(String::new()));
+    if let Some(mut s) = ecoute.stdout.take() {
+        let l = lignes.clone();
+        thread::spawn(move || {
+            let mut t = String::new();
+            let _ = s.read_to_string(&mut t);
+            l.lock().unwrap().push_str(&t);
+        });
+    }
+    patienter(Duration::from_secs(4));
+    // Comme Orca, interroger l'arbre d'accessibilité : l'objet du terminal n'est publié
+    // qu'à la première interrogation (sans elle, l'annonce y est perdue sous Weston).
+    let _ = sonder(NOM_APPLI);
+    patienter(Duration::from_secs(1));
     b.fond.marque(1, Execution, false);
     b.fond.marque(
         1,
@@ -354,15 +372,13 @@ fn annonce_commande_longue() -> Resultat {
         false,
     );
     let r = b.attendre_annonces(1);
-    attendre(Duration::from_secs(15), || {
+    attendre(Duration::from_secs(20), || {
         matches!(ecoute.try_wait(), Ok(Some(_)))
     });
     let _ = ecoute.kill();
-    let mut sortie = String::new();
-    if let Some(mut s) = ecoute.stdout.take() {
-        let _ = s.read_to_string(&mut sortie);
-    }
     let _ = ecoute.wait();
+    patienter(Duration::from_millis(300));
+    let sortie = lignes.lock().unwrap().clone();
     let annonces = b.o.annonces();
     b.fermer();
     r?;
@@ -374,7 +390,11 @@ fn annonce_commande_longue() -> Resultat {
             .lines()
             .any(|l| l == "annonce\tCommande terminée en 6 s."),
         || format!("annonce non reçue par AT-SPI ; écoute : {sortie:?}"),
-    )
+    )?;
+    // Faite sur l'objet accessible du terminal (rôle « terminal »), pas sur la fenêtre.
+    verifier(sortie.lines().any(|l| l == "source\tterminal"), || {
+        format!("annonce pas faite sur le terminal ; écoute : {sortie:?}")
+    })
 }
 
 fn pas_d_annonce_commande_courte() -> Resultat {
@@ -674,4 +694,126 @@ fn raccourcis_sans_conflit() -> Resultat {
     verifier(recu.is_empty(), || {
         format!("octets envoyés au shell : {recu:?}")
     })
+}
+
+/// Marques reçues pendant que l'onglet est caché : les lignes notées sont les bonnes.
+fn onglet_cache_puis_navigation() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        b.f.ouvrir_session();
+        verifier(attendre(DELAI, || b.f.onglets().len() == 2), || {
+            "deuxième onglet jamais ouvert".into()
+        })?;
+        patienter(Duration::from_millis(300));
+        for t in ["echo un", "echo deux", "echo trois"] {
+            b.fond.commande(1, t, 40, 0, Some(100));
+        }
+        b.fond.marque(1, Invite, false);
+        b.fond.octets(1, "$ ");
+        b.fond.marque(1, Saisie, false);
+        patienter(Duration::from_millis(700));
+        // De retour sur l'onglet 1.
+        b.f.traiter_touche(gdk::Key::_1, 10, gdk::ModifierType::ALT_MASK);
+        b.attendre_commandes(4)?;
+        patienter(Duration::from_millis(300));
+        attendu(b.naviguer(true), "Commande : echo trois")?;
+        attendu(b.naviguer(true), "Commande : echo deux")?;
+        verifier(b.haut_visible() == "$ echo deux", || {
+            format!("haut de la vue : « {} »", b.haut_visible())
+        })
+    })();
+    b.fermer();
+    res
+}
+
+/// Zoom (donc largeur de grille) changé : une commande trop longue pour une ligne, repliée
+/// puis dépliée par VTE, est retrouvée avec son texte entier.
+fn largeur_changee() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let longue = format!("echo {}", "x".repeat(115));
+    let res = (|| {
+        for t in [longue.as_str(), "echo deux", "echo trois"] {
+            b.fond.commande(1, t, 30, 0, Some(100));
+        }
+        b.attendre_commandes(3)?;
+        patienter(Duration::from_millis(400));
+        let avant = b.o.terminal().grille().map(|g| g.0).unwrap_or(0);
+        // Plus petit : plus de colonnes, la ligne repliée se déplie.
+        b.o.terminal().zoomer(Some(-5), 200);
+        patienter(Duration::from_millis(800));
+        let apres = b.o.terminal().grille().map(|g| g.0).unwrap_or(0);
+        verifier(apres > avant, || format!("colonnes {avant} puis {apres}"))?;
+        verifier(b.o.nombre_commandes() == 3, || {
+            format!("{} commandes après le zoom", b.o.nombre_commandes())
+        })?;
+        attendu(b.naviguer(true), "Commande : echo trois")?;
+        attendu(b.naviguer(true), "Commande : echo deux")?;
+        attendu(b.naviguer(true), &format!("Commande : {longue}"))?;
+        // Plus grand : repli de nouveau.
+        b.o.terminal().zoomer(Some(10), 200);
+        patienter(Duration::from_millis(800));
+        attendu(b.naviguer(false), "Commande : echo deux")?;
+        attendu(b.naviguer(false), "Commande : echo trois")?;
+        attendu(b.naviguer(true), "Commande : echo deux")?;
+        attendu(b.naviguer(true), &format!("Commande : {longue}"))?;
+        verifier(b.haut_visible().starts_with("$ echo xxx"), || {
+            format!("haut de la vue : « {} »", b.haut_visible())
+        })
+    })();
+    b.fermer();
+    res
+}
+
+/// La réponse de VTE à la demande de position arrive après l'expiration de l'attente : elle
+/// est gardée, jamais envoyée au programme.
+fn reponse_tardive() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        b.fond.commande(1, "echo un", 3, 0, Some(10));
+        b.attendre_commandes(1)?;
+        patienter(Duration::from_millis(300));
+        // Délai nul : l'attente expire avant que VTE n'ait répondu.
+        b.o.terminal().definir_delai_attente(Duration::ZERO);
+        let avant = b.o.terminal().reponses_gardees();
+        verifier(
+            b.f.traiter_touche(gdk::Key::Up, CODE_HAUT, CTRL_MAJ),
+            || "touche non consommée".into(),
+        )?;
+        let ok = attendre(DELAI, || b.o.terminal().reponses_gardees() > avant);
+        verifier(ok, || "réponse de position jamais reçue".into())?;
+        patienter(Duration::from_millis(500));
+        let recu = b.fond.entrees.lock().unwrap().clone();
+        verifier(recu.is_empty(), || {
+            format!("octets envoyés au shell : {recu:?}")
+        })
+    })();
+    b.fermer();
+    res
+}
+
+/// La marque C a été perdue : seul le texte saisi est lu, pas la sortie qui suit.
+fn sortie_sans_c() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    b.fond.marque(1, Invite, false);
+    b.fond.octets(1, "$ ");
+    b.fond.marque(1, Saisie, false);
+    b.fond.octets(1, "ls -l\r\n");
+    let sortie: String = (0..40).map(|i| format!("fichier {i}\r\n")).collect();
+    b.fond.octets(1, &sortie);
+    b.fond.marque(
+        1,
+        Fin {
+            code: Some(0),
+            duree_ms: None,
+        },
+        false,
+    );
+    b.fond.marque(1, Invite, false);
+    b.fond.octets(1, "$ ");
+    b.fond.marque(1, Saisie, false);
+    let res = b
+        .attendre_commandes(2)
+        .and_then(|()| attendu(b.naviguer(true), "Commande : ls -l"));
+    b.fermer();
+    res
 }

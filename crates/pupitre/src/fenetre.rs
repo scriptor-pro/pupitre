@@ -159,7 +159,10 @@ impl Onglet {
             }
             a.push_back(texte.to_string());
         }
-        crate::messages::annoncer(self.terminal.terminal(), texte);
+        // Sur l'objet accessible du terminal de l'onglet, poliment.
+        self.terminal
+            .terminal()
+            .announce(texte, gtk::AccessibleAnnouncementPriority::Medium);
     }
 
     /// L'onglet est affiché dans une fenêtre active (les autres : à l'étape 4).

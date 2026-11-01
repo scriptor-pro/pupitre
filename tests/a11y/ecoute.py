@@ -31,6 +31,10 @@ def main():
             return
         texte = e.any_data if isinstance(e.any_data, str) else str(e.any_data)
         print(f"annonce\t{texte}", flush=True)
+        try:
+            print(f"source\t{e.source.get_role_name()}", flush=True)
+        except Exception:
+            pass
 
     ecouteur = Atspi.EventListener.new(recu)
     ecouteur.register("object:announcement")

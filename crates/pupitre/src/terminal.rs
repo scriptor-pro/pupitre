@@ -79,11 +79,18 @@ mod imp {
 
     /// Rappel prévenu de la nouvelle grille `(colonnes, lignes)`.
     pub type SurTaille = Box<dyn Fn(u16, u16)>;
+    /// Rappel prévenu juste avant ou après un changement de largeur.
+    pub type SurLargeur = Box<dyn Fn()>;
 
     pub struct CadreTerminal {
         pub terminal: vte4::Terminal,
         pub grille: Cell<(i64, i64)>,
         pub sur_taille: RefCell<Option<SurTaille>>,
+        pub largeur: Cell<i32>,
+        /// Police ou zoom changé : la prochaine allocation peut changer le nombre de colonnes.
+        pub probable: Cell<bool>,
+        /// Avant et après l'allocation d'une nouvelle largeur (VTE réagence ses lignes).
+        pub autour_largeur: RefCell<Option<(SurLargeur, SurLargeur)>>,
     }
 
     impl Default for CadreTerminal {
@@ -92,6 +99,9 @@ mod imp {
                 terminal: vte4::Terminal::new(),
                 grille: Cell::new((0, 0)),
                 sur_taille: RefCell::new(None),
+                largeur: Cell::new(0),
+                probable: Cell::new(false),
+                autour_largeur: RefCell::new(None),
             }
         }
     }
@@ -123,7 +133,18 @@ mod imp {
 
         fn size_allocate(&self, largeur: i32, hauteur: i32, ligne_de_base: i32) {
             let t = &self.terminal;
+            let change = largeur != self.largeur.replace(largeur) || self.probable.replace(false);
+            if change {
+                if let Some((avant, _)) = self.autour_largeur.borrow().as_ref() {
+                    avant();
+                }
+            }
             t.allocate(largeur, hauteur, ligne_de_base, None);
+            if change {
+                if let Some((_, apres)) = self.autour_largeur.borrow().as_ref() {
+                    apres();
+                }
+            }
             let g = (t.column_count(), t.row_count());
             if g.0 > 0 && g.1 > 0 && g != self.grille.replace(g) {
                 if let Some(f) = self.sur_taille.borrow().as_ref() {
@@ -158,6 +179,17 @@ impl Default for CadreTerminal {
 impl CadreTerminal {
     pub fn terminal(&self) -> &vte4::Terminal {
         &self.imp().terminal
+    }
+
+    /// La police ou le zoom change : la prochaine allocation sera encadrée même si sa largeur
+    /// en pixels est la même (le nombre de colonnes change).
+    pub fn reagencement_probable(&self) {
+        self.imp().probable.set(true);
+    }
+
+    /// `avant()` puis `apres()` encadrent chaque allocation d'une largeur nouvelle.
+    pub fn autour_largeur(&self, avant: impl Fn() + 'static, apres: impl Fn() + 'static) {
+        *self.imp().autour_largeur.borrow_mut() = Some((Box::new(avant), Box::new(apres)));
     }
 
     /// `f(colonnes, lignes)` est appelé à chaque nouvelle grille (y compris la première).
@@ -227,9 +259,8 @@ impl TerminalOnglet {
                 });
             }
         });
-        let (c, i, m, fl) = (client.clone(), id.clone(), muet.clone(), flux.clone());
+        let (c, i, m) = (client.clone(), id.clone(), muet.clone());
         cadre.connecter_taille(move |cols, rows| {
-            fl.grille_changee(i64::from(cols));
             if !m.get() {
                 let _ = c.send(ClientMsg::Resize {
                     id: i.get(),
@@ -238,6 +269,22 @@ impl TerminalOnglet {
                 });
             }
         });
+
+        // Largeur changée (zoom, fenêtre, plein écran) : VTE réagence ses lignes ; les
+        // lignes des commandes sont suivies à travers ce réagencement.
+        let (avant, apres) = (Rc::downgrade(&flux), Rc::downgrade(&flux));
+        cadre.autour_largeur(
+            move || {
+                if let Some(f) = avant.upgrade() {
+                    f.avant_reagencement();
+                }
+            },
+            move || {
+                if let Some(f) = apres.upgrade() {
+                    f.apres_reagencement();
+                }
+            },
+        );
 
         // Adresses en texte brut : reconnues, ouvertes seulement au Ctrl+clic.
         match vte4::Regex::for_match(REGEX_URL, PCRE2_UTF | PCRE2_MULTILINE | PCRE2_CASELESS) {
@@ -344,6 +391,7 @@ impl TerminalOnglet {
             }
         };
         self.zoom.set(z);
+        self.cadre.reagencement_probable();
         self.terminal().set_font_scale(f64::from(z) / 100.0);
     }
 
@@ -481,6 +529,18 @@ impl TerminalOnglet {
         }
     }
 
+    /// Change le délai de secours des attentes de VTE (tests).
+    #[doc(hidden)]
+    pub fn definir_delai_attente(&self, delai: Duration) {
+        self.flux.definir_delai_attente(delai);
+    }
+
+    /// Réponses de position du curseur gardées pour soi depuis la création (tests).
+    #[doc(hidden)]
+    pub fn reponses_gardees(&self) -> u32 {
+        self.flux.reponses_gardees()
+    }
+
     /// Nombre de commandes repérées dans le flux.
     pub fn nombre_commandes(&self) -> usize {
         self.flux.nombre_commandes()
@@ -511,6 +571,7 @@ impl TerminalOnglet {
         t.set_color_cursor_foreground(Some(&rgba(theme.fond)));
         t.set_color_highlight(Some(&rgba(theme.selection_fond)));
         t.set_color_highlight_foreground(Some(&rgba(theme.selection_texte)));
+        self.cadre.reagencement_probable();
         t.set_font(Some(&pango::FontDescription::from_string(&config.police)));
         self.clignote.set(config.curseur_clignote);
         t.set_cursor_blink_mode(mode_curseur(config.curseur_clignote));

@@ -27,10 +27,12 @@ use vte4::prelude::*;
 pub const SEUIL_LONGUE_MS: u64 = 5_000;
 /// Délai après lequel une attente de VTE est abandonnée (VTE ne répond jamais : on ne
 /// bloque pas pour autant les octets qui suivent).
-const DELAI_ATTENTE: Duration = Duration::from_millis(250);
+const DELAI_ATTENTE: Duration = Duration::from_millis(1000);
 /// Octets en attente au-delà desquels les marques sont abandonnées pour ne pas retenir la
 /// sortie (mémoire bornée).
 const FILE_MAX_OCTETS: usize = 8 * 1024 * 1024;
+/// Lignes de terminal lues au plus pour le texte d'une commande.
+const LIGNES_LUES_MAX: i64 = 200;
 /// Propriété de terminal servant de repère (valeur : le numéro du repère).
 const REPERE: &str = "vte.shell.postexec";
 
@@ -54,7 +56,8 @@ thread_local! {
 }
 
 /// Pour les tests sous un compositeur sans clavier (Weston sans écran), où aucune fenêtre
-/// ne devient jamais « active » : toute fenêtre est alors tenue pour active.
+/// ne devient jamais « active » : toute fenêtre est alors tenue pour active. Réservé aux tests.
+#[doc(hidden)]
 pub fn forcer_fenetre_active(oui: bool) {
     ACTIVE_FORCEE.with(|a| a.set(oui));
 }
@@ -257,10 +260,17 @@ impl MarquesOnglet {
                         c.fin = Some(code);
                         Some((code, duree_ms))
                     }
-                    // Fin sans exécution connue (marque C perdue) : annoncée si le fond a
-                    // mesuré une durée ; sinon c'est l'invite initiale d'un shell (D sans
-                    // commande), rien à dire.
-                    None => duree_ms.map(|d| (code, Some(d))),
+                    // Fin sans exécution connue (marque C perdue) : l'invite affichée a bien
+                    // été validée, la commande est close pour que l'invite suivante en
+                    // ouvre une autre. Annoncée si le fond a mesuré une durée ; sinon c'est
+                    // l'invite initiale d'un shell (D sans commande), rien à dire.
+                    None => {
+                        self.courant = None;
+                        if let Some(c) = self.commandes.back_mut().filter(|c| c.en_saisie()) {
+                            c.fin = Some(code);
+                        }
+                        duree_ms.map(|d| (code, Some(d)))
+                    }
                 }
             }
         }
@@ -275,6 +285,30 @@ impl MarquesOnglet {
             .enumerate()
             .filter(move |(i, c)| c.execution.is_some() || i + 1 < n)
             .map(|(_, c)| c)
+    }
+
+    /// Toutes les positions notées, dans un ordre fixe (commande par commande : invite,
+    /// saisie, exécution).
+    pub fn positions(&self) -> Vec<Pos> {
+        self.commandes
+            .iter()
+            .flat_map(|c| [c.invite, c.saisie, c.execution])
+            .flatten()
+            .collect()
+    }
+
+    /// Remplace chaque position, dans l'ordre de `positions` ; `None` : position perdue.
+    /// Une commande qui n'a plus aucune position est oubliée.
+    pub fn remplacer_positions(&mut self, mut f: impl FnMut(Pos) -> Option<Pos>) {
+        for c in &mut self.commandes {
+            for p in [&mut c.invite, &mut c.saisie, &mut c.execution] {
+                if let Some(q) = *p {
+                    *p = f(q);
+                }
+            }
+        }
+        self.commandes
+            .retain(|c| c.invite.is_some() || c.saisie.is_some() || c.execution.is_some());
     }
 
     /// Passe à la commande précédente ou suivante ; `None` au bout de la liste.
@@ -362,6 +396,65 @@ struct Calibrage {
     premiere: i64,
 }
 
+/// Rangée (`g`) de la ligne logique d'une position, comptée à partir de celle du curseur, et
+/// décalage en cellules dans cette ligne logique : ne dépend pas de la largeur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PosLogique {
+    g: usize,
+    decalage: i64,
+}
+
+/// Positions notées avant un réagencement de VTE (changement de largeur).
+struct Instantane {
+    positions: Vec<Option<PosLogique>>,
+    g_max: usize,
+}
+
+/// Première ligne de chaque ligne logique en remontant du curseur : `debuts[g]` pour la
+/// ligne logique du curseur (`g = 0`), la précédente (`g = 1`)… `dur(r)` dit si un vrai retour
+/// à la ligne sépare les lignes `r - 1` et `r`. S'arrête à la ligne `borne` ou quand
+/// `debuts[g_max]` est complet.
+fn debuts_logiques(curseur: i64, borne: i64, g_max: usize, dur: &dyn Fn(i64) -> bool) -> Vec<i64> {
+    let mut debuts = vec![curseur];
+    let mut r = curseur;
+    while r > borne.max(0) {
+        let p = r - 1;
+        if dur(r) {
+            if debuts.len() > g_max {
+                break;
+            }
+            debuts.push(p);
+        } else if let Some(d) = debuts.last_mut() {
+            *d = p;
+        }
+        r = p;
+    }
+    debuts
+}
+
+/// Position logique de `pos`, ou `None` si elle est hors de la zone connue.
+fn vers_logique(pos: Pos, curseur: i64, debuts: &[i64], colonnes: i64) -> Option<PosLogique> {
+    if pos.ligne > curseur {
+        return None;
+    }
+    // La plus petite rangée dont la première ligne ne dépasse pas la position.
+    let g = debuts.iter().position(|&d| d <= pos.ligne)?;
+    let debut = *debuts.get(g)?;
+    Some(PosLogique {
+        g,
+        decalage: (pos.ligne - debut) * colonnes + pos.col,
+    })
+}
+
+fn depuis_logique(l: PosLogique, debuts: &[i64], colonnes: i64) -> Option<Pos> {
+    let debut = *debuts.get(l.g)?;
+    let colonnes = colonnes.max(1);
+    Some(Pos {
+        ligne: debut + l.decalage / colonnes,
+        col: l.decalage % colonnes,
+    })
+}
+
 type RappelCalibrage = Box<dyn FnOnce(&Flux, Option<Calibrage>)>;
 /// Remet des octets à VTE.
 type Donneur = Box<dyn Fn(&[u8])>;
@@ -394,6 +487,10 @@ struct Etat {
     derniere_pos: Option<Pos>,
     /// Des octets sont arrivés depuis la dernière position relevée.
     octets_depuis_pos: bool,
+    /// Demandes de position du curseur dont la réponse n'est pas encore revenue (repères,
+    /// dans l'ordre) : la réponse est gardée pour soi même si l'attente a expiré.
+    reponses_attendues: VecDeque<u32>,
+    reponses_gardees: u32,
 }
 
 /// File ordonnée des octets et des marques d'un onglet, avec les lignes des commandes.
@@ -403,7 +500,8 @@ pub struct Flux {
     etat: RefCell<Etat>,
     marques: RefCell<MarquesOnglet>,
     sur_fin: RefCell<Option<RappelFin>>,
-    colonnes: Cell<i64>,
+    delai: Cell<Duration>,
+    instantane: RefCell<Option<Instantane>>,
     soi: RefCell<Weak<Flux>>,
 }
 
@@ -416,7 +514,8 @@ impl Flux {
             etat: RefCell::new(Etat::default()),
             marques: RefCell::new(MarquesOnglet::new(10_000)),
             sur_fin: RefCell::new(None),
-            colonnes: Cell::new(0),
+            delai: Cell::new(DELAI_ATTENTE),
+            instantane: RefCell::new(None),
             soi: RefCell::new(Weak::new()),
         });
         *f.soi.borrow_mut() = Rc::downgrade(&f);
@@ -428,6 +527,12 @@ impl Flux {
                     f.repere_atteint(valeur);
                 }
             });
+        let faible = Rc::downgrade(&f);
+        f.terminal.connect_map(move |_| {
+            if let Some(f) = faible.upgrade() {
+                f.affiche();
+            }
+        });
         f
     }
 
@@ -444,12 +549,56 @@ impl Flux {
         *self.sur_fin.borrow_mut() = Some(Rc::new(f));
     }
 
-    /// La largeur de la grille change : VTE réagence les lignes et les lignes notées ne
-    /// valent plus ; les commandes connues sont oubliées.
-    pub fn grille_changee(&self, colonnes: i64) {
-        if self.colonnes.replace(colonnes) != colonnes {
-            self.marques.borrow_mut().vider();
+    /// Vrai retour à la ligne (et non repli de VTE) entre les lignes `r - 1` et `r`.
+    fn retour_dur(&self, r: i64) -> bool {
+        let (t, _) = self
+            .terminal
+            .text_range_format(vte4::Format::Text, r - 1, 0, r, 0);
+        t.is_some_and(|t| t.contains('\n'))
+    }
+
+    /// À appeler juste avant que VTE réagence ses lignes (largeur de la grille changée) :
+    /// note les positions en lignes logiques.
+    pub fn avant_reagencement(&self) {
+        let positions = self.marques.borrow().positions();
+        let colonnes = self.terminal.column_count();
+        let (_, curseur) = self.terminal.cursor_position();
+        if positions.is_empty() || colonnes <= 0 {
+            *self.instantane.borrow_mut() = None;
+            return;
         }
+        let haut = positions.iter().map(|p| p.ligne).min().unwrap_or(curseur);
+        let debuts = debuts_logiques(curseur, haut, usize::MAX, &|r| self.retour_dur(r));
+        let logiques: Vec<Option<PosLogique>> = positions
+            .iter()
+            .map(|&p| vers_logique(p, curseur, &debuts, colonnes))
+            .collect();
+        let g_max = logiques.iter().flatten().map(|l| l.g).max().unwrap_or(0);
+        *self.instantane.borrow_mut() = Some(Instantane {
+            positions: logiques,
+            g_max,
+        });
+        // Les positions relevées plus tard ne dépendent pas de celles-ci.
+        let mut e = self.etat.borrow_mut();
+        e.derniere_pos = None;
+    }
+
+    /// À appeler juste après le réagencement : retrouve les lignes des positions notées.
+    pub fn apres_reagencement(&self) {
+        let Some(inst) = self.instantane.borrow_mut().take() else {
+            return;
+        };
+        let colonnes = self.terminal.column_count();
+        let (_, curseur) = self.terminal.cursor_position();
+        let debuts = debuts_logiques(curseur, 0, inst.g_max, &|r| self.retour_dur(r));
+        let mut suivantes = inst.positions.iter();
+        self.marques.borrow_mut().remplacer_positions(|_| {
+            suivantes
+                .next()
+                .copied()
+                .flatten()
+                .and_then(|l| depuis_logique(l, &debuts, colonnes))
+        });
     }
 
     /// Octets reçus du shell, dans l'ordre.
@@ -556,17 +705,6 @@ impl Flux {
 
     /// Donne `avant` (éventuellement vide) puis le repère à VTE et attend qu'il le signale.
     fn attendre(&self, genre: Genre, avant: &[u8]) -> bool {
-        // Terminal pas encore affiché : VTE ne traite pas ses octets, inutile d'attendre.
-        if !self.terminal.is_mapped() {
-            match genre {
-                Genre::Marque(m, rejouee) => {
-                    let (col, ligne) = self.terminal.cursor_position();
-                    self.noter(m, Pos { ligne, col }, rejouee);
-                }
-                Genre::Calibrage(f) => f(self, None),
-            }
-            return false;
-        }
         let repere = {
             let mut e = self.etat.borrow_mut();
             e.repere = e.repere % 1_000_000_000 + 1;
@@ -579,14 +717,46 @@ impl Flux {
         };
         let mut data = avant.to_vec();
         data.extend_from_slice(format!("\x1b]666;{REPERE}={repere}\x1b\\").as_bytes());
+        if avant.starts_with(b"\x1b[6n") {
+            self.etat.borrow_mut().reponses_attendues.push_back(repere);
+        }
         self.terminal.feed(&data);
+        self.armer_delai(repere);
+        true
+    }
+
+    /// Délai de secours : si VTE n'a pas signalé le repère, on reprend quand même. Un
+    /// terminal non affiché ne traite rien : le délai ne court qu'une fois affiché.
+    fn armer_delai(&self, repere: u32) {
+        if !self.terminal.is_mapped() {
+            return;
+        }
         let faible = self.soi.borrow().clone();
-        gtk::glib::timeout_add_local_once(DELAI_ATTENTE, move || {
+        gtk::glib::timeout_add_local_once(self.delai.get(), move || {
             if let Some(f) = faible.upgrade() {
                 f.repere_expire(repere);
             }
         });
-        true
+    }
+
+    /// Le terminal vient d'être affiché : le délai de l'attente en cours démarre.
+    fn affiche(&self) {
+        let repere = self.etat.borrow().attente.as_ref().map(|a| a.repere);
+        if let Some(r) = repere {
+            self.armer_delai(r);
+        }
+    }
+
+    /// Change le délai de secours (tests).
+    #[doc(hidden)]
+    pub fn definir_delai_attente(&self, delai: Duration) {
+        self.delai.set(delai);
+    }
+
+    /// Nombre de réponses de position gardées pour soi depuis la création (tests).
+    #[doc(hidden)]
+    pub fn reponses_gardees(&self) -> u32 {
+        self.etat.borrow().reponses_gardees
     }
 
     fn repere_atteint(&self, valeur: Option<u64>) {
@@ -606,7 +776,7 @@ impl Flux {
             .attente
             .as_ref()
             .is_some_and(|a| a.repere == repere);
-        if en_cours {
+        if en_cours && self.terminal.is_mapped() {
             self.resoudre();
         }
     }
@@ -663,20 +833,22 @@ impl Flux {
     /// Réponse de VTE à notre demande de position du curseur : vraie (et gardée) si elle
     /// est attendue, sinon c'est une réponse du programme, qui doit aller au shell.
     pub fn garder_reponse(&self, texte: &str) -> bool {
-        let mut e = self.etat.borrow_mut();
-        let Some(a) = e.attente.as_mut() else {
+        let Some(ligne) = ligne_de_reponse(texte) else {
             return false;
         };
-        if !matches!(a.genre, Genre::Calibrage(_)) || a.reponse.is_some() {
+        let mut e = self.etat.borrow_mut();
+        // Les réponses reviennent dans l'ordre des demandes ; une réponse tardive (attente
+        // expirée) est gardée aussi, sans quoi elle partirait au programme comme une frappe.
+        let Some(repere) = e.reponses_attendues.pop_front() else {
             return false;
-        }
-        match ligne_de_reponse(texte) {
-            Some(l) => {
-                a.reponse = Some(l);
-                true
+        };
+        e.reponses_gardees += 1;
+        if let Some(a) = e.attente.as_mut() {
+            if a.repere == repere && matches!(a.genre, Genre::Calibrage(_)) {
+                a.reponse = Some(ligne);
             }
-            None => false,
         }
+        true
     }
 
     /// Va à la commande précédente ou suivante : défile pour mettre sa ligne en haut puis
@@ -725,6 +897,16 @@ impl Flux {
         if (fin.ligne, fin.col) <= (debut.ligne, debut.col) {
             return String::new();
         }
+        // Sans marque C, `fin` peut être très loin (toute la sortie de la commande) : on ne
+        // lit pas plus de quelques lignes.
+        let fin = if fin.ligne > debut.ligne + LIGNES_LUES_MAX {
+            Pos {
+                ligne: debut.ligne + LIGNES_LUES_MAX,
+                col: 0,
+            }
+        } else {
+            fin
+        };
         let (texte, _) = self.terminal.text_range_format(
             vte4::Format::Text,
             debut.ligne,
@@ -733,7 +915,10 @@ impl Flux {
             fin.col,
         );
         let texte = texte.map(|t| t.to_string()).unwrap_or_default();
-        texte.split_whitespace().collect::<Vec<_>>().join(" ")
+        // Fin de la ligne logique : le texte n'a de saut de ligne qu'aux vrais retours à la
+        // ligne, pas aux lignes repliées par VTE.
+        let ligne = texte.lines().next().unwrap_or_default();
+        ligne.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 }
 
@@ -920,6 +1105,85 @@ mod tests {
         m.appliquer(Execution, p(9, 0));
         let n = m.deplacer(Sens::Precedente).unwrap().numero;
         assert_eq!(m.plage_texte(n), Some((p(8, 0), Some(p(9, 0)))));
+    }
+
+    #[test]
+    fn fin_sans_c_ferme_la_commande() {
+        // A B (C perdue) sortie D A : deux commandes, la première close.
+        let mut m = MarquesOnglet::new(100);
+        m.appliquer(Invite, p(0, 0));
+        m.appliquer(Saisie, p(0, 2));
+        m.appliquer(
+            Fin {
+                code: Some(0),
+                duree_ms: None,
+            },
+            p(40, 0),
+        );
+        m.appliquer(Invite, p(41, 0));
+        assert_eq!(m.len(), 2);
+        let n = m.deplacer(Sens::Precedente).unwrap();
+        // Sans C, le texte s'arrête au début de la commande suivante (puis à sa ligne).
+        assert_eq!(m.plage_texte(n.numero), Some((p(0, 2), Some(p(41, 0)))));
+    }
+
+    #[test]
+    fn lignes_logiques_traversent_un_reagencement() {
+        // Avant : 80 colonnes. Lignes 0-1 : une ligne logique repliée (100 caractères) ;
+        // 2 : une ligne ; 3-4 : une ligne repliée ; curseur ligne 5.
+        let dur_avant = |r: i64| matches!(r, 2 | 3 | 5);
+        let debuts = debuts_logiques(5, 0, usize::MAX, &dur_avant);
+        assert_eq!(debuts, [5, 3, 2, 0]);
+        let marque = p(1, 20); // 100e cellule de la première ligne logique : 80 + 20
+        let l = vers_logique(marque, 5, &debuts, 80).unwrap();
+        assert_eq!(
+            l,
+            PosLogique {
+                g: 3,
+                decalage: 100
+            }
+        );
+        let l2 = vers_logique(p(4, 10), 5, &debuts, 80).unwrap();
+        assert_eq!(l2, PosLogique { g: 1, decalage: 90 });
+        // Après : 120 colonnes, plus de repli : la première ligne logique tient sur une ligne.
+        // Lignes 0 : première ; 1 : deuxième ; 2 : troisième (3-4 réunies) ; curseur 3.
+        let dur_apres = |r: i64| (1..=3).contains(&r);
+        let debuts2 = debuts_logiques(3, 0, 3, &dur_apres);
+        assert_eq!(debuts2, [3, 2, 1, 0]);
+        assert_eq!(
+            depuis_logique(l, &debuts2, 120),
+            Some(Pos { ligne: 0, col: 100 })
+        );
+        assert_eq!(
+            depuis_logique(l2, &debuts2, 120),
+            Some(Pos { ligne: 2, col: 90 })
+        );
+        // Ligne logique plus ancienne que ce qui est connu : perdue.
+        assert_eq!(
+            depuis_logique(PosLogique { g: 9, decalage: 0 }, &debuts2, 120),
+            None
+        );
+        // Position après le curseur : pas de ligne logique.
+        assert_eq!(vers_logique(p(9, 0), 5, &debuts, 80), None);
+    }
+
+    #[test]
+    fn remplacement_des_positions() {
+        let mut m = MarquesOnglet::new(100);
+        commande(&mut m, 0);
+        commande(&mut m, 10);
+        assert_eq!(m.positions().len(), 6);
+        let mut n = 0;
+        m.remplacer_positions(|q| {
+            n += 1;
+            // La première commande est perdue (trois positions), la seconde décalée.
+            (n > 3).then_some(Pos {
+                ligne: q.ligne + 1,
+                col: q.col,
+            })
+        });
+        assert_eq!(m.len(), 1);
+        assert_eq!(m.deplacer(Sens::Precedente).unwrap().ligne(), Some(11));
     }
 
     #[test]
