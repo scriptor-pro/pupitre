@@ -336,7 +336,7 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
 
 ---
 
-## Choix du concepteur (à valider par le porteur)
+## Choix du concepteur (validés par le porteur le 2026-11-01)
 
 1. **La fenêtre de demande s'affiche dans Pupitre** (relais par le processus de fond), pas comme une fenêtre séparée : sous Wayland, une fenêtre lancée par un autre programme peut ne pas recevoir le focus clavier, ce qui la rendrait inutilisable avec Orca.
 2. **`SSH_ASKPASS_REQUIRE=force`** : OpenSSH ne vérifie `prefer` que par `DISPLAY`, absent sous Wayland pur. Conséquence : dans Pupitre, toutes les questions de `ssh` (phrase, mot de passe, serveur inconnu) passent par la fenêtre, et git peut aussi y poser ses questions de nom d'utilisateur et de mot de passe HTTPS.
