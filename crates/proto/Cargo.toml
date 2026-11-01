@@ -10,6 +10,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+pupitre-i18n = { path = "../i18n" }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 zeroize = { version = "1", features = ["serde"] }

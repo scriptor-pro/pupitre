@@ -1392,6 +1392,7 @@ name = "pupitre-proto"
 version = "0.1.0"
 dependencies = [
  "postcard",
+ "pupitre-i18n",
  "serde",
  "zeroize",
 ]

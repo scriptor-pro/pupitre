@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Trames : longueur `u32` petit-boutiste suivie d'une charge postcard.
 
+use pupitre_i18n::{t, ta, ArgI18n};
 use serde::{de::DeserializeOwned, Serialize};
 use std::io::{self, Read, Write};
 use zeroize::Zeroizing;
@@ -21,12 +22,18 @@ pub enum FrameError {
 impl std::fmt::Display for FrameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FrameError::Io(e) => write!(f, "erreur d'entrée-sortie : {e}"),
-            FrameError::TooLarge(n) => {
-                write!(f, "trame trop grande : {n} octets (max. {MAX_FRAME})")
+            FrameError::Io(e) => {
+                f.write_str(&ta("trame-io", &[("erreur", ArgI18n::from(e.to_string()))]))
             }
-            FrameError::Decode(e) => write!(f, "trame illisible : {e}"),
-            FrameError::Closed => write!(f, "connexion fermée"),
+            FrameError::TooLarge(n) => f.write_str(&ta(
+                "trame-trop-grande",
+                &[("n", ArgI18n::from(*n)), ("max", ArgI18n::from(MAX_FRAME))],
+            )),
+            FrameError::Decode(e) => f.write_str(&ta(
+                "trame-illisible",
+                &[("erreur", ArgI18n::from(e.as_str()))],
+            )),
+            FrameError::Closed => f.write_str(&t("trame-fermee")),
         }
     }
 }
@@ -68,9 +75,9 @@ pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> Result<T, FrameErr
     lire_exactement(r, &mut charge)?;
     match postcard::take_from_bytes::<T>(charge.as_slice()) {
         Ok((msg, [])) => Ok(msg),
-        Ok((_, reste)) => Err(FrameError::Decode(format!(
-            "{} octet(s) en trop après le message",
-            reste.len()
+        Ok((_, reste)) => Err(FrameError::Decode(ta(
+            "trame-octets-en-trop",
+            &[("n", ArgI18n::from(reste.len()))],
         ))),
         Err(e) => Err(FrameError::Decode(e.to_string())),
     }

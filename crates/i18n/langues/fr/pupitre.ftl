@@ -269,3 +269,11 @@ bureau-nom-generique = Terminal
 bureau-commentaire = Terminal à onglets accessible
 bureau-mots-cles = terminal;shell;console;ssh;commande;invite;
 bureau-nouvelle-fenetre = Nouvelle fenêtre
+
+## Protocole (trames entre l'interface et le processus de fond)
+
+trame-io = erreur d'entrée-sortie : { $erreur }
+trame-trop-grande = trame trop grande : { $n } octets (max. { $max })
+trame-illisible = trame illisible : { $erreur }
+trame-fermee = connexion fermée
+trame-octets-en-trop = { $n } octet(s) en trop après le message
