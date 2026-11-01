@@ -84,3 +84,34 @@ askpass-envoi-echec = échec de l'envoi de la demande
 askpass-connexion-fermee = connexion fermée avant la réponse
 askpass-non-memorisee = phrase non mémorisée : { $erreur }
 askpass-sortie-inutilisable = sortie standard inutilisable : { $erreur }
+
+## Processus de fond (pupitre-fond)
+
+fond-usage = usage : pupitre-fond [--socket CHEMIN]
+fond-socket-attend-chemin = pupitre-fond : --socket attend un chemin
+fond-option-inconnue = pupitre-fond : option inconnue { $option }
+fond-erreur = pupitre-fond : { $socket } : { $erreur }
+
+chargement-trousseau-verrouille = Trousseau verrouillé : les clés mémorisées n'ont pas été chargées.
+chargement-memorisee-oubliee = La phrase de passe mémorisée pour { $cle } ne fonctionne plus ; elle a été oubliée. Elle sera redemandée.
+chargement-non-memorisee = La phrase de passe saisie pour { $cle } n'a pas été mémorisée : elle n'ouvre pas la clé.
+chargement-ssh-add-lancement = ssh-add impossible à lancer : { $erreur }
+chargement-ssh-add-echec = ssh-add a échoué ({ $etat })
+chargement-ssh-add-delai = ssh-add : délai dépassé
+
+ssh-sans-agent = Agent SSH indisponible : les phrases de passe seront demandées à chaque connexion.
+
+serveur-socket-sans-dossier = chemin de socket sans dossier
+serveur-dossier-refuse = { $dossier } : { $raison }
+serveur-pas-un-dossier = ce n'est pas un dossier
+serveur-autre-utilisateur = appartient à un autre utilisateur
+serveur-droits-larges = droits trop larges (0700 attendu)
+serveur-arret = serveur en cours d'arrêt
+serveur-version-incompatible = version du protocole incompatible : interface { $interface }, processus de fond { $fond }
+serveur-hello-attendu = protocole : Hello attendu en premier
+serveur-hello-deja = protocole : Hello déjà reçu
+serveur-ressources = ressources insuffisantes : { $erreur }
+serveur-session-inconnue = session { $id } inconnue
+
+session-terminal-impossible = impossible de créer le terminal : { $erreur }
+session-shell-impossible = impossible de lancer le shell : { $erreur }

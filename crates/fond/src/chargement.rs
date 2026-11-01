@@ -7,6 +7,7 @@
 
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
+use pupitre_i18n::{t, ta, ArgI18n};
 use pupitre_ssh::trousseau::{chemin_lisible, Coffre, EtatTrousseau};
 use std::collections::HashSet;
 use std::os::unix::process::CommandExt;
@@ -21,22 +22,23 @@ const DELAI_LISTE: Duration = Duration::from_secs(5);
 const SONDE: Duration = Duration::from_millis(20);
 
 /// Texte du bandeau quand le trousseau est verrouillé.
-pub const MESSAGE_VERROUILLE: &str =
-    "Trousseau verrouillé : les clés mémorisées n'ont pas été chargées.";
+pub fn message_verrouille() -> String {
+    t("chargement-trousseau-verrouille")
+}
 
 /// Texte du bandeau quand une phrase mémorisée a été refusée.
 pub fn message_oubliee(cle: &Path) -> String {
-    format!(
-        "La phrase de passe mémorisée pour {} ne fonctionne plus ; elle a été oubliée. Elle sera redemandée.",
-        chemin_lisible(cle)
+    ta(
+        "chargement-memorisee-oubliee",
+        &[("cle", ArgI18n::from(chemin_lisible(cle)))],
     )
 }
 
 /// Texte du bandeau quand la phrase qu'on vient de saisir (et de mémoriser) n'ouvre pas la clé.
 pub fn message_non_memorisee(cle: &Path) -> String {
-    format!(
-        "La phrase de passe saisie pour {} n'a pas été mémorisée : elle n'ouvre pas la clé.",
-        chemin_lisible(cle)
+    ta(
+        "chargement-non-memorisee",
+        &[("cle", ArgI18n::from(chemin_lisible(cle)))],
     )
 }
 
@@ -124,11 +126,19 @@ pub fn charger_cle_delai(
         .stderr(Stdio::null())
         .process_group(0)
         .spawn()
-        .map_err(|e| format!("ssh-add impossible à lancer : {e}"))?;
+        .map_err(|e| {
+            ta(
+                "chargement-ssh-add-lancement",
+                &[("erreur", ArgI18n::from(e.to_string()))],
+            )
+        })?;
     match attendre(&mut enfant, delai) {
         Some(s) if s.success() => Ok(()),
-        Some(s) => Err(format!("ssh-add a échoué ({s})")),
-        None => Err("ssh-add : délai dépassé".to_string()),
+        Some(s) => Err(ta(
+            "chargement-ssh-add-echec",
+            &[("etat", ArgI18n::from(s.to_string()))],
+        )),
+        None => Err(t("chargement-ssh-add-delai")),
     }
 }
 

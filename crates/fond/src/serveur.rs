@@ -15,6 +15,7 @@ use crate::session::{Session, SessionEvent};
 use crate::ssh::{EntreesSsh, EtatSsh};
 use nix::errno::Errno;
 use nix::fcntl::{Flock, FlockArg};
+use pupitre_i18n::{t, ta, ArgI18n};
 use pupitre_proto::{
     read_frame, write_frame, ClientMsg, DemandeId, ServerMsg, SessionId, SessionInfo, VERSION,
     VERSION_MIN,
@@ -62,7 +63,10 @@ pub fn socket_path() -> PathBuf {
 /// n'y a accès. Refuse sinon : sous `/tmp`, un autre compte pourrait l'avoir préparé.
 pub fn preparer_dossier(socket: &Path) -> io::Result<()> {
     let dossier = socket.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "chemin de socket sans dossier")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            t("serveur-socket-sans-dossier"),
+        )
     })?;
     match DirBuilder::new().mode(0o700).create(dossier) {
         Ok(()) => {}
@@ -73,17 +77,23 @@ pub fn preparer_dossier(socket: &Path) -> io::Result<()> {
     let refus = |raison: &str| {
         Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            format!("{} : {raison}", dossier.display()),
+            ta(
+                "serveur-dossier-refuse",
+                &[
+                    ("dossier", ArgI18n::from(dossier.display().to_string())),
+                    ("raison", ArgI18n::from(raison)),
+                ],
+            ),
         ))
     };
     if !m.is_dir() {
-        return refus("ce n'est pas un dossier");
+        return refus(&t("serveur-pas-un-dossier"));
     }
     if m.uid() != nix::unistd::getuid().as_raw() {
-        return refus("appartient à un autre utilisateur");
+        return refus(&t("serveur-autre-utilisateur"));
     }
     if m.mode() & 0o077 != 0 {
-        return refus("droits trop larges (0700 attendu)");
+        return refus(&t("serveur-droits-larges"));
     }
     Ok(())
 }
@@ -218,7 +228,7 @@ fn demarrer_client(id: ClientId, flux: UnixStream, evt_tx: &SyncSender<Evt>) -> 
         .send(Evt::Arrivee(id, file_tx, pour_coupure))
         .is_err()
     {
-        return Err(io::Error::other("serveur en cours d'arrêt"));
+        return Err(io::Error::other(t("serveur-arret")));
     }
     let evt_lecture = evt_tx.clone();
     let mut lecture = flux;
@@ -375,23 +385,22 @@ impl Etat {
                 } else {
                     self.envoyer(
                         cid,
-                        ServerMsg::Error(format!(
-                            "version du protocole incompatible : interface {version}, processus de fond {VERSION}"
+                        ServerMsg::Error(ta(
+                            "serveur-version-incompatible",
+                            &[
+                                ("interface", ArgI18n::from(i64::from(version))),
+                                ("fond", ArgI18n::from(i64::from(VERSION))),
+                            ],
                         )),
                     );
                     self.congedier(cid);
                 }
             }
             _ if !accueilli => {
-                self.envoyer(
-                    cid,
-                    ServerMsg::Error("protocole : Hello attendu en premier".into()),
-                );
+                self.envoyer(cid, ServerMsg::Error(t("serveur-hello-attendu")));
                 self.congedier(cid);
             }
-            ClientMsg::Hello { .. } => {
-                self.envoyer(cid, ServerMsg::Error("protocole : Hello déjà reçu".into()))
-            }
+            ClientMsg::Hello { .. } => self.envoyer(cid, ServerMsg::Error(t("serveur-hello-deja"))),
             // Un client qui parle sans être demandeur est une interface : elle reçoit ce
             // que le chargement n'a pu dire plus tôt (le demandeur, lui, ne reçoit rien).
             // Après la réponse à sa requête : la réponse à `List` (`Sessions`) crée la
@@ -528,7 +537,7 @@ impl Etat {
             // Une seule fois.
             if !self.chargement.verrouille_signale {
                 self.chargement.verrouille_signale = true;
-                self.notifier(chargement::MESSAGE_VERROUILLE.to_string());
+                self.notifier(chargement::message_verrouille());
             }
         } else {
             self.chargement.verrouille_signale = false;
@@ -713,7 +722,10 @@ impl Etat {
             return self.envoyer(
                 cid,
                 ServerMsg::OpenFailed {
-                    error: format!("ressources insuffisantes : {e}"),
+                    error: ta(
+                        "serveur-ressources",
+                        &[("erreur", ArgI18n::from(e.to_string()))],
+                    ),
                 },
             );
         }
@@ -749,7 +761,13 @@ impl Etat {
     }
 
     fn inconnue(&mut self, cid: ClientId, id: SessionId) {
-        self.envoyer(cid, ServerMsg::Error(format!("session {id} inconnue")));
+        self.envoyer(
+            cid,
+            ServerMsg::Error(ta(
+                "serveur-session-inconnue",
+                &[("id", ArgI18n::from(i64::try_from(id).unwrap_or(0)))],
+            )),
+        );
     }
 
     /// Met un message dans la file d'un client ; un client qui ne suit plus est coupé.

@@ -16,7 +16,7 @@ use gtk::prelude::*;
 use pupitre::fenetre::Pupitre;
 use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
 use pupitre_config::Config;
-use pupitre_fond::chargement::MESSAGE_VERROUILLE;
+use pupitre_fond::chargement::message_verrouille;
 use pupitre_fond::serveur::{run_avec_coffre, CoffreCommun};
 use pupitre_fond::ssh::EntreesSsh;
 use pupitre_proto::{read_frame, write_frame, ClientMsg, EtatTrousseau, Genre, ServerMsg};
@@ -292,7 +292,7 @@ fn message_garde() -> Resultat {
             .first()
             .map(|f| f.messages())
             .unwrap_or_default();
-        messages.iter().any(|m| m == MESSAGE_VERROUILLE)
+        messages.iter().any(|m| *m == message_verrouille())
     });
     let resultat = verifier(vu, || {
         format!(

@@ -7,6 +7,7 @@ use nix::unistd::{Pid, User};
 use portable_pty::{
     native_pty_system, ChildKiller, CommandBuilder, ExitStatus, MasterPty, PtySize,
 };
+use pupitre_i18n::{ta, ArgI18n};
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -55,8 +56,14 @@ pub enum OpenError {
 impl fmt::Display for OpenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OpenError::Pty(e) => write!(f, "impossible de créer le terminal : {e}"),
-            OpenError::Spawn(e) => write!(f, "impossible de lancer le shell : {e}"),
+            OpenError::Pty(e) => f.write_str(&ta(
+                "session-terminal-impossible",
+                &[("erreur", ArgI18n::from(e.as_str()))],
+            )),
+            OpenError::Spawn(e) => f.write_str(&ta(
+                "session-shell-impossible",
+                &[("erreur", ArgI18n::from(e.as_str()))],
+            )),
         }
     }
 }

@@ -3,12 +3,13 @@
 //! Usage : `pupitre-fond [--socket CHEMIN]`.
 
 use pupitre_fond::serveur::{run, socket_path, ARRET_SI_INACTIF};
+use pupitre_i18n::{init, langues_demandees, t, ta, ArgI18n};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage : pupitre-fond [--socket CHEMIN]";
-
 fn main() -> ExitCode {
+    init(&langues_demandees(&|n| std::env::var(n).ok()));
+    let usage = t("fond-usage");
     let mut args = std::env::args_os().skip(1);
     let mut socket = None;
     while let Some(a) = args.next() {
@@ -16,16 +17,22 @@ fn main() -> ExitCode {
             Some("--socket") => match args.next() {
                 Some(p) => socket = Some(PathBuf::from(p)),
                 None => {
-                    eprintln!("pupitre-fond : --socket attend un chemin\n{USAGE}");
+                    eprintln!("{}\n{usage}", t("fond-socket-attend-chemin"));
                     return ExitCode::from(2);
                 }
             },
             Some("--help" | "-h") => {
-                println!("{USAGE}");
+                println!("{usage}");
                 return ExitCode::SUCCESS;
             }
             _ => {
-                eprintln!("pupitre-fond : option inconnue {a:?}\n{USAGE}");
+                eprintln!(
+                    "{}\n{usage}",
+                    ta(
+                        "fond-option-inconnue",
+                        &[("option", ArgI18n::from(format!("{a:?}")))]
+                    )
+                );
                 return ExitCode::from(2);
             }
         }
@@ -34,7 +41,16 @@ fn main() -> ExitCode {
     match run(&socket, ARRET_SI_INACTIF) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("pupitre-fond : {} : {e}", socket.display());
+            eprintln!(
+                "{}",
+                ta(
+                    "fond-erreur",
+                    &[
+                        ("socket", ArgI18n::from(socket.display().to_string())),
+                        ("erreur", ArgI18n::from(e.to_string()))
+                    ]
+                )
+            );
             ExitCode::FAILURE
         }
     }

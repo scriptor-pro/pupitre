@@ -17,8 +17,9 @@ const INTERVALLE_SANS_AGENT: Duration = Duration::from_secs(60);
 const SANS_RUNTIME: &str = "/nonexistent-pupitre-runtime";
 
 /// Texte envoyé une fois au client quand aucun agent n'est possible.
-pub const MESSAGE_SANS_AGENT: &str =
-    "Agent SSH indisponible : les phrases de passe seront demandées à chaque connexion.";
+pub fn message_sans_agent() -> String {
+    pupitre_i18n::t("ssh-sans-agent")
+}
 
 /// Ce dont dépend la recherche d'agent ; construit depuis l'environnement en production,
 /// injectable dans les tests (les variables d'environnement sont communes au processus).
@@ -140,7 +141,7 @@ impl EtatSsh {
     pub fn message_a_envoyer(&mut self) -> Option<String> {
         if self.message_du && !self.message_envoye {
             self.message_envoye = true;
-            return Some(MESSAGE_SANS_AGENT.to_string());
+            return Some(message_sans_agent());
         }
         None
     }

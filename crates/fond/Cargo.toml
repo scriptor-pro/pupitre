@@ -20,6 +20,7 @@ path = "src/main.rs"
 [dependencies]
 portable-pty = "0.9"
 nix = { version = "0.30", features = ["user", "signal", "process", "fs"] }
+pupitre-i18n = { path = "../i18n" }
 pupitre-proto = { path = "../proto" }
 pupitre-ssh = { path = "../ssh" }
 zeroize = { version = "1", features = ["serde"] }
