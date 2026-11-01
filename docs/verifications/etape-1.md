@@ -39,8 +39,8 @@ remplissent leur cache dans `~/.cache` : Mesa (`mesa_shader_cache`, `mesa_shader
 et fontconfig (`fontconfig`). Ce n'est pas le code de Pupitre ; le script les signale à
 part, sans échec.
 
-**Non fait** : l'essai sur machine virtuelle KDE/Wayland. Sway et GNOME : faits le
-2026-11-01, voir « Essais en VM » plus bas. Le scénario « 3 onglets, `kill -9`, relance » est
+Essais sur machines virtuelles Sway, GNOME et KDE : faits le 2026-11-01, voir « Essais en
+VM » plus bas. Le scénario « 3 onglets, `kill -9`, relance » est
 couvert par le test automatique ci-dessus sur X11 et Weston.
 
 ### Défauts trouvés par le test Orca automatisé, et corrigés
@@ -115,3 +115,20 @@ Pupitre, comme le ferait un utilisateur.
 **13 réussis sur 13**, mêmes essais que sous Sway. Aucun défaut propre à GNOME. Même
 particularité d'outil que `wtype` : chaque nouveau clavier virtuel perd sa première touche
 (contourné par une touche neutre).
+
+### KDE Plasma 6.3 (KWin 6.3.6)
+
+`scripts/vm.sh kde tout` : même VM Debian 13 (3 Go), avec le noyau Debian standard (le noyau
+« cloud » de l'image n'a ni pilote graphique ni uinput) et une carte graphique virtio. KWin
+tourne sur cette carte dans une session ouverte automatiquement sur la console, et lit par
+libinput un clavier simulé au niveau du noyau (uinput, `tests/vm/kde.py`), comme un clavier
+branché. Plan de clavier QWERTY américain dans cette VM (le simulateur traduit pour ce
+plan). État des fenêtres par un petit script KWin (D-Bus `/Scripting`), captures par
+`spectacle` (contrôle de permission levé pour KWin dans la VM d'essai seulement). Seul
+KWin est lancé, pas le panneau Plasma : c'est KWin qui décide du focus et des dialogues.
+
+**13 réussis sur 13**, mêmes essais que sous Sway et GNOME. Aucun défaut propre à KDE.
+
+Limite : la VM KDE a été mise au point en partie à la main (noyau, carte graphique) ; ces
+étapes sont reportées dans `scripts/vm.sh`, mais la création complète d'une VM KDE neuve
+par le script n'a pas encore été rejouée.
