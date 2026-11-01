@@ -3,6 +3,8 @@
 # Lance tous les tests sur un écran X11 virtuel (Xvfb), avec un bus D-Bus et AT-SPI propres.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Les phrases attendues par les tests sont françaises, quelle que soit la langue de la machine.
+export LANGUAGE=fr
 # Pas de gvfs : il monterait un système de fichiers FUSE dans le dossier temporaire.
 export GIO_USE_VFS=local
 # Pas de portails : le portail de documents tenterait un montage FUSE.

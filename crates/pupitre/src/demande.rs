@@ -8,6 +8,7 @@ use crate::messages::annoncer_focus_une_fois_affiche;
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
+use pupitre_i18n::{t, ta, ArgI18n};
 use pupitre_proto::{EtatTrousseau, Genre};
 use pupitre_ssh::trousseau::chemin_lisible;
 use std::cell::Cell;
@@ -26,11 +27,6 @@ pub struct DemandeAffichee {
 /// Réponse rendue à l'appelant : `None` = refus ou annulation.
 type Reponse = Option<Zeroizing<String>>;
 
-const MEMORISER: &str = "Mémoriser dans le trousseau";
-const TROUSSEAU_VERROUILLE: &str = "Trousseau verrouillé : la phrase ne peut pas être mémorisée.";
-const TROUSSEAU_ABSENT: &str =
-    "Aucun trousseau disponible : la phrase sera demandée à chaque fois.";
-
 /// Ouvre la fenêtre de la demande `d`, modale sur `parent`. `repondre(reponse, memoriser)`
 /// est appelé exactement une fois, quelle que soit la façon de fermer la fenêtre (sauf si
 /// l'appelant la détruit lui-même : demande réglée ailleurs). Le texte saisi est effacé de
@@ -42,14 +38,14 @@ pub fn ouvrir_demande(
     repondre: impl Fn(Option<Zeroizing<String>>, bool) + 'static,
 ) -> gtk::Window {
     let titre = match &d.genre {
-        Genre::PhraseCle { .. } => "Phrase de passe SSH",
-        Genre::HoteInconnu => "Serveur inconnu",
-        Genre::Confirmation => "Confirmer l'usage de la clé",
-        Genre::Texte { .. } => "Question de SSH",
-        Genre::Information => "Information de SSH",
+        Genre::PhraseCle { .. } => t("demande-titre-phrase"),
+        Genre::HoteInconnu => t("demande-titre-hote"),
+        Genre::Confirmation => t("demande-titre-confirmation"),
+        Genre::Texte { .. } => t("demande-titre-question"),
+        Genre::Information => t("demande-titre-information"),
     };
     let dialogue = gtk::Window::builder()
-        .title(titre)
+        .title(&titre)
         .modal(true)
         .transient_for(parent)
         .destroy_with_parent(true)
@@ -95,25 +91,27 @@ pub fn ouvrir_demande(
 
     let focus: gtk::Widget = match &d.genre {
         Genre::PhraseCle { cle, nouvel_essai } => {
-            let mut question = format!("Phrase de passe de la clé {} : ", chemin_lisible(cle));
-            if *nouvel_essai {
-                question.insert_str(0, "Phrase incorrecte. ");
-            }
+            let id = if *nouvel_essai {
+                "demande-phrase-question-incorrecte"
+            } else {
+                "demande-phrase-question"
+            };
+            let question = ta(id, &[("cle", ArgI18n::from(chemin_lisible(cle)))]);
             let (etiquette, saisie) = question_et_saisie(&question, true);
             boite.append(&etiquette);
             boite.append(&saisie);
-            let case = gtk::CheckButton::with_label(MEMORISER);
+            let case = gtk::CheckButton::with_label(&t("demande-memoriser"));
             case.set_active(d.trousseau == EtatTrousseau::Disponible);
             case.set_sensitive(d.trousseau == EtatTrousseau::Disponible);
             boite.append(&case);
             let explication = match d.trousseau {
                 EtatTrousseau::Disponible => None,
-                EtatTrousseau::Verrouille => Some(TROUSSEAU_VERROUILLE),
-                EtatTrousseau::Absent => Some(TROUSSEAU_ABSENT),
+                EtatTrousseau::Verrouille => Some(t("demande-trousseau-verrouille")),
+                EtatTrousseau::Absent => Some(t("demande-trousseau-absent")),
             };
             if let Some(texte) = explication {
                 let e = gtk::Label::builder()
-                    .label(texte)
+                    .label(&texte)
                     .wrap(true)
                     .max_width_chars(56)
                     .xalign(0.0)
@@ -153,12 +151,12 @@ pub fn ouvrir_demande(
             let texte = texte_openssh(&d.invite);
             boite.append(&texte);
             let (refus, accord) = if d.genre == Genre::HoteInconnu {
-                ("Refuser", "Faire confiance et se connecter")
+                (t("demande-refuser"), t("demande-faire-confiance"))
             } else {
-                ("Refuser", "Autoriser")
+                (t("demande-refuser"), t("demande-autoriser"))
             };
-            let refuser = gtk::Button::with_label(refus);
-            let autoriser = gtk::Button::with_label(accord);
+            let refuser = gtk::Button::with_label(&refus);
+            let autoriser = gtk::Button::with_label(&accord);
             boutons.append(&refuser);
             boutons.append(&autoriser);
             // Le texte d'OpenSSH (empreinte, usage de la clé) est ce qu'on décide : il est
@@ -180,7 +178,7 @@ pub fn ouvrir_demande(
         }
         Genre::Information => {
             boite.append(&texte_openssh(&d.invite));
-            let fermer = gtk::Button::with_label("Fermer");
+            let fermer = gtk::Button::with_label(&t("bouton-fermer"));
             boutons.append(&fermer);
             let f = finir.clone();
             fermer.connect_clicked(move |_| f(None, false));
@@ -261,8 +259,8 @@ fn ajouter_annuler_valider(
     dialogue: &gtk::Window,
     finir: &Rc<dyn Fn(Reponse, bool)>,
 ) -> gtk::Button {
-    let annuler = gtk::Button::with_label("Annuler");
-    let valider = gtk::Button::with_label("Valider");
+    let annuler = gtk::Button::with_label(&t("bouton-annuler"));
+    let valider = gtk::Button::with_label(&t("bouton-valider"));
     valider.add_css_class("suggested-action");
     boutons.append(&annuler);
     boutons.append(&valider);

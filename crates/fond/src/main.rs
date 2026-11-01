@@ -9,7 +9,7 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     init(&langues_demandees(&|n| std::env::var(n).ok()));
-    let usage = t("fond-usage");
+    let mut usage = t("fond-usage");
     let mut args = std::env::args_os().skip(1);
     let mut socket = None;
     while let Some(a) = args.next() {
@@ -18,6 +18,18 @@ fn main() -> ExitCode {
                 Some(p) => socket = Some(PathBuf::from(p)),
                 None => {
                     eprintln!("{}\n{usage}", t("fond-socket-attend-chemin"));
+                    return ExitCode::from(2);
+                }
+            },
+            Some("--langue") => match args.next().and_then(|l| l.into_string().ok()) {
+                Some(l) => {
+                    if let Ok(id) = l.parse() {
+                        init(&[id]);
+                        usage = t("fond-usage");
+                    }
+                }
+                None => {
+                    eprintln!("{}\n{usage}", t("fond-langue-attend-code"));
                     return ExitCode::from(2);
                 }
             },

@@ -1347,6 +1347,7 @@ dependencies = [
  "notify",
  "pupitre-config",
  "pupitre-fond",
+ "pupitre-i18n",
  "pupitre-proto",
  "pupitre-ssh",
  "tempfile",
@@ -1382,6 +1383,7 @@ name = "pupitre-i18n"
 version = "0.1.0"
 dependencies = [
  "fluent-bundle",
+ "fluent-syntax",
  "unic-langid",
 ]
 

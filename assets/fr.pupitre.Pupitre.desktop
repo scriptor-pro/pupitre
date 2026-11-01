@@ -2,6 +2,7 @@
 Type=Application
 Version=1.5
 Name=Pupitre
+Name[fr]=Pupitre
 GenericName=Terminal
 GenericName[fr]=Terminal
 Comment=Accessible tabbed terminal

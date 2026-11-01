@@ -87,8 +87,9 @@ askpass-sortie-inutilisable = sortie standard inutilisable : { $erreur }
 
 ## Processus de fond (pupitre-fond)
 
-fond-usage = usage : pupitre-fond [--socket CHEMIN]
+fond-usage = usage : pupitre-fond [--socket CHEMIN] [--langue CODE]
 fond-socket-attend-chemin = pupitre-fond : --socket attend un chemin
+fond-langue-attend-code = pupitre-fond : --langue attend un code de langue (ex. fr)
 fond-option-inconnue = pupitre-fond : option inconnue { $option }
 fond-erreur = pupitre-fond : { $socket } : { $erreur }
 
@@ -115,3 +116,156 @@ serveur-session-inconnue = session { $id } inconnue
 
 session-terminal-impossible = impossible de créer le terminal : { $erreur }
 session-shell-impossible = impossible de lancer le shell : { $erreur }
+
+## Client du processus de fond (côté interface)
+
+client-lancement = impossible de lancer pupitre-fond : { $erreur }
+client-injoignable = pupitre-fond ne répond pas : { $erreur }
+client-refus = pupitre-fond refuse la connexion : { $erreur }
+client-io = erreur de connexion à pupitre-fond : { $erreur }
+client-deconnecte = connexion à pupitre-fond fermée
+client-reponse-inattendue = réponse inattendue : { $nom }
+
+## Boutons communs
+
+bouton-fermer = Fermer
+bouton-annuler = Annuler
+bouton-valider = Valider
+message-fermer-aide = Fermer ce message
+
+## Demandes SSH (fenêtre modale)
+
+demande-titre-phrase = Phrase de passe SSH
+demande-titre-hote = Serveur inconnu
+demande-titre-confirmation = Confirmer l'usage de la clé
+demande-titre-question = Question de SSH
+demande-titre-information = Information de SSH
+demande-phrase-question = Phrase de passe de la clé { $cle } :{ " " }
+demande-phrase-question-incorrecte = Phrase incorrecte. Phrase de passe de la clé { $cle } :{ " " }
+demande-memoriser = Mémoriser dans le trousseau
+demande-trousseau-verrouille = Trousseau verrouillé : la phrase ne peut pas être mémorisée.
+demande-trousseau-absent = Aucun trousseau disponible : la phrase sera demandée à chaque fois.
+demande-refuser = Refuser
+demande-faire-confiance = Faire confiance et se connecter
+demande-autoriser = Autoriser
+
+## Recherche dans l'historique
+
+recherche-placeholder = Rechercher dans l'historique
+recherche-expression = Expression régulière
+recherche-precedent = Précédent
+recherche-precedent-aide = Occurrence précédente (Entrée)
+recherche-suivant = Suivant
+recherche-suivant-aide = Occurrence suivante (Maj+Entrée)
+recherche-fermer = Fermer la recherche
+recherche-fermer-aide = Fermer la recherche (Échap)
+recherche-expression-invalide = Expression invalide : { $detail }
+recherche-aucun-resultat = Aucun résultat
+
+## Surveillance des fichiers de configuration
+
+surveillance-impossible = surveillance des fichiers impossible : { $erreur }
+surveillance-dossier-impossible = surveillance de { $dossier } impossible : { $erreur }
+
+## Fenêtre des connexions SSH
+
+connexions-titre = Connexions SSH
+connexions-liste = Connexions
+connexions-vide = Aucune connexion. Ajoutez-en une, ou décrivez vos serveurs dans ~/.ssh/config.
+connexions-vide-invalide = Aucune connexion utilisable : corrigez connexions.toml, ou décrivez vos serveurs dans ~/.ssh/config.
+connexions-se-connecter = Se connecter
+connexions-ajouter = Ajouter…
+connexions-modifier = Modifier…
+connexions-supprimer = Supprimer
+connexions-hote-ssh-config = { $alias } (~/.ssh/config)
+connexions-supprimer-titre = Supprimer ?
+connexions-supprimer-question = Supprimer la connexion « { $nom } » ?
+connexions-suppression-impossible = Suppression impossible : { $erreur }
+connexions-champ-nom = Nom
+connexions-champ-hote = Hôte
+connexions-champ-utilisateur = Utilisateur (facultatif)
+connexions-champ-port = Port (facultatif)
+connexions-champ-cle = Clé
+connexions-cle-par-defaut = Par défaut
+connexions-formulaire-modifier = Modifier la connexion
+connexions-formulaire-ajouter = Ajouter une connexion
+connexions-enregistrer = Enregistrer
+connexions-enregistrement-invalide = Enregistrement impossible : connexions.toml est invalide ({ $erreur }).
+connexions-enregistrement-disparue = Enregistrement impossible : cette connexion n'existe plus.
+connexions-enregistrement-impossible = Enregistrement impossible : { $erreur }
+
+## Fenêtre principale, onglets, menu
+
+fenetre-nom = Pupitre
+fenetre-titre = { $titre } — Pupitre
+onglet-titre-defaut = Terminal
+onglet-infobulle-cloche = { $titre } (cloche)
+onglet-nom-cloche = { $titre }, cloche
+onglet-nom = Nom de l'onglet
+onglet-nom-aide = Nom de l'onglet (vide : titre automatique)
+onglets-nom = Onglets
+onglets-position = { $nom }, onglet { $i } sur { $n }
+onglets-autre-cloche = { $titre } (onglet { $i })
+onglets-cloche-dans = { $texte } ; cloche dans : { $liste }
+
+shell-termine = Le shell s'est terminé (code { $code }). Appuyez sur Entrée pour en ouvrir un nouveau.
+shell-termine-signal = Le shell s'est terminé (code signal). Appuyez sur Entrée pour en ouvrir un nouveau.
+shell-lancement-impossible = Le shell n'a pas pu être lancé : { $erreur }
+
+fond-injoignable = Pupitre ne peut pas joindre le processus de fond : { $erreur }
+fond-arrete = Le processus de fond s'est arrêté : les shells ouverts sont perdus.
+fond-nouveau-terminal = Ouvrir un nouveau terminal
+fond-relance-impossible = Impossible de relancer le processus de fond : { $erreur }
+fond-ancien = Le processus de fond est d'une version plus ancienne : les fonctions SSH de Pupitre seront actives quand tous les onglets auront été fermés.
+
+config-invalide = Configuration invalide, { $erreur }
+config-rechargement-indisponible = Rechargement automatique de la configuration indisponible : { $erreur }
+theme-illisible = Thème { $chemin } illisible, { $erreur }
+theme-illisible-conserve = Thème { $chemin } illisible, { $erreur } : thème précédent conservé
+theme-contraste-insuffisant = Thème « { $nom } » : contraste insuffisant — { $liste }
+police-introuvable = Police « { $famille } » introuvable : { $secours } utilisée.
+
+fermeture-titre = Fermer ?
+fermeture-fenetre-une-commande = Une commande est en cours dans un onglet de cette fenêtre. Fermer quand même ?
+fermeture-fenetre-commandes = Des commandes sont en cours dans { $n } onglets de cette fenêtre. Fermer quand même ?
+fermeture-onglet-commande = Une commande est en cours dans cet onglet. Fermer quand même ?
+
+menu-nom = Menu
+menu-aide = Menu (Ctrl+Tab puis Entrée)
+menu-nouvel-onglet = Nouvel onglet
+menu-nouvelle-fenetre = Nouvelle fenêtre
+menu-connexions = Connexions SSH…
+menu-copier = Copier
+menu-coller = Coller
+menu-rechercher = Rechercher…
+menu-agrandir = Agrandir le texte
+menu-reduire = Réduire le texte
+menu-taille-normale = Taille normale
+menu-plein-ecran = Plein écran
+menu-renommer-onglet = Renommer l'onglet
+menu-detacher-onglet = Détacher dans une nouvelle fenêtre
+menu-fermer-onglet = Fermer l'onglet
+
+connexions-fichier-invalide = Le fichier connexions.toml est invalide ({ $erreur }). Il n'est pas modifié : corrigez-le pour retrouver vos connexions.
+
+## Ligne de commande : pupitre check, aide
+
+usage =
+    Usage :
+      pupitre                        ouvrir une fenêtre
+      pupitre check                  vérifier la configuration et le contraste des thèmes
+      pupitre check --theme CHEMIN   vérifier un fichier de thème
+arguments-incorrects = Arguments incorrects.
+argument-inconnu = Argument inconnu « { $argument } ».
+check-config-invalide = Configuration invalide ({ $chemin }), { $erreur }
+check-pas-de-fichier = Pas de fichier { $chemin } : valeurs par défaut.
+check-theme-ok = Thème « { $nom } » : aucun problème de contraste.
+check-theme-problemes = Thème « { $nom } » : { $n } problème(s) de contraste :
+
+## Lanceur du bureau (assets/fr.pupitre.Pupitre.desktop : un test vérifie la concordance)
+
+bureau-nom = Pupitre
+bureau-nom-generique = Terminal
+bureau-commentaire = Terminal à onglets accessible
+bureau-mots-cles = terminal;shell;console;ssh;commande;invite;
+bureau-nouvelle-fenetre = Nouvelle fenêtre

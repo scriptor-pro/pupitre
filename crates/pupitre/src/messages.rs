@@ -6,6 +6,7 @@
 
 use gtk::glib;
 use gtk::prelude::*;
+use pupitre_i18n::t;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
@@ -207,8 +208,8 @@ impl BandeauMessages {
             b
         });
         if persistant {
-            let fermer = gtk::Button::with_label("Fermer");
-            fermer.set_tooltip_text(Some("Fermer ce message"));
+            let fermer = gtk::Button::with_label(&t("bouton-fermer"));
+            fermer.set_tooltip_text(Some(&t("message-fermer-aide")));
             decrire(&fermer);
             let soi = self.soi.borrow().clone();
             fermer.connect_clicked(move |_| {

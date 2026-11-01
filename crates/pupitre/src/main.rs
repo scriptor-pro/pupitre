@@ -10,14 +10,27 @@ use gtk::prelude::*;
 use pupitre::fenetre::Pupitre;
 use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
 use pupitre::verification;
-use pupitre_config::{charger, chemin_config, creer_defaut_si_absent, Config};
+use pupitre_config::{charger, chemin_config, creer_defaut_si_absent, langue_configuree, Config};
 use pupitre_fond::serveur::socket_path;
+use pupitre_i18n::{init, langues_demandees, ta, ArgI18n, LanguageIdentifier};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 const ID_APPLICATION: &str = "fr.pupitre.Pupitre";
 
+/// Langues demandées : le réglage `langue` de `pupitre.toml` s'il est renseigné, sinon celles
+/// du système. Lecture tolérante : un fichier absent ou invalide donne la langue du système.
+fn langues_choisies() -> Vec<LanguageIdentifier> {
+    if let Some(l) = langue_configuree(&chemin_config()) {
+        if let Ok(id) = l.parse() {
+            return vec![id];
+        }
+    }
+    langues_demandees(&|nom| std::env::var(nom).ok())
+}
+
 fn main() -> glib::ExitCode {
+    init(&langues_choisies());
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None => {}
@@ -25,12 +38,16 @@ fn main() -> glib::ExitCode {
             let code = verification::executer(&args[1..], &mut std::io::stdout());
             return glib::ExitCode::from(u8::try_from(code).unwrap_or(1));
         }
-        Some("-h" | "--help" | "aide") => {
-            print!("{}", verification::USAGE);
+        Some("-h" | "--help" | "aide" | "help") => {
+            print!("{}", verification::usage());
             return glib::ExitCode::SUCCESS;
         }
         Some(autre) => {
-            eprint!("Argument inconnu « {autre} ».\n{}", verification::USAGE);
+            eprint!(
+                "{}\n{}",
+                ta("argument-inconnu", &[("argument", ArgI18n::from(autre))]),
+                verification::usage()
+            );
             return glib::ExitCode::from(2);
         }
     }
@@ -39,7 +56,7 @@ fn main() -> glib::ExitCode {
         Some(d) if enregistrer_polices_embarquees(&d) => {}
         _ => eprintln!("pupitre: polices embarquées introuvables ; police du système utilisée"),
     }
-    glib::set_application_name("Pupitre");
+    glib::set_application_name(&pupitre_i18n::t("fenetre-nom"));
     let app = gtk::Application::builder()
         .application_id(ID_APPLICATION)
         .build();

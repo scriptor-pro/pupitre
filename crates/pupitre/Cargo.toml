@@ -13,6 +13,7 @@ workspace = true
 gtk.workspace = true
 vte4.workspace = true
 async-channel = "2"
+pupitre-i18n = { path = "../i18n" }
 pupitre-proto = { path = "../proto" }
 pupitre-fond = { path = "../fond" }
 pupitre-config = { path = "../config" }

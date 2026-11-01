@@ -3,6 +3,7 @@
 //! bloquer GTK, réception sur un canal `async_channel` lu par la boucle GTK.
 
 use pupitre_fond::serveur::{preparer_dossier, socket_path};
+use pupitre_i18n::{langue_active, t, ta, ArgI18n};
 use pupitre_proto::{
     read_frame, write_frame, ClientMsg, FrameError, ServerMsg, VERSION, VERSION_MIN,
 };
@@ -24,9 +25,8 @@ const DELAI_DEMARRAGE: Duration = Duration::from_secs(2);
 /// sien) passe avant l'accueil, et plus encore sur une machine chargée.
 const DELAI_ACCUEIL: Duration = Duration::from_secs(5);
 const PAS: Duration = Duration::from_millis(25);
-/// Début du texte d'erreur d'un processus de fond qui refuse la version proposée.
-const REFUS_VERSION: &str = "version du protocole incompatible";
-/// Message placé sur le canal quand la connexion est perdue.
+/// Message placé sur le canal quand la connexion est perdue (repère interne : l'interface le
+/// reconnaît et affiche son propre texte traduit, jamais celui-ci).
 pub const CONNEXION_PERDUE: &str = "connexion perdue";
 
 #[derive(Debug)]
@@ -45,13 +45,17 @@ pub enum ClientError {
 impl fmt::Display for ClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ClientError::Lancement(e) => write!(f, "impossible de lancer pupitre-fond : {e}"),
-            ClientError::Injoignable(e) => write!(f, "pupitre-fond ne répond pas : {e}"),
-            ClientError::Refus(e) => write!(f, "pupitre-fond refuse la connexion : {e}"),
-            ClientError::Io(e) => write!(f, "erreur de connexion à pupitre-fond : {e}"),
-            ClientError::Deconnecte => f.write_str("connexion à pupitre-fond fermée"),
+            ClientError::Lancement(e) => f.write_str(&erreur("client-lancement", e)),
+            ClientError::Injoignable(e) => f.write_str(&erreur("client-injoignable", e)),
+            ClientError::Refus(e) => f.write_str(&erreur("client-refus", e)),
+            ClientError::Io(e) => f.write_str(&erreur("client-io", &e.to_string())),
+            ClientError::Deconnecte => f.write_str(&t("client-deconnecte")),
         }
     }
+}
+
+fn erreur(id: &str, e: &str) -> String {
+    ta(id, &[("erreur", ArgI18n::from(e))])
 }
 
 impl std::error::Error for ClientError {}
@@ -118,8 +122,10 @@ pub fn connect_or_spawn_with(
     };
     match demarrer(flux, VERSION) {
         // Processus de fond plus ancien (qui tourne encore avec des onglets) : il ferme la
-        // connexion refusée, on en ouvre une autre en proposant la version 1.
-        Err(ClientError::Refus(e)) if e.starts_with(REFUS_VERSION) && VERSION > VERSION_MIN => {
+        // connexion refusée, on en ouvre une autre en proposant la version 1. Le texte du refus
+        // n'est pas examiné : il dépend de la langue du processus de fond, qui peut différer
+        // de la nôtre (ou être celui d'une version sans traduction).
+        Err(ClientError::Refus(_)) if VERSION > VERSION_MIN => {
             demarrer(UnixStream::connect(socket)?, VERSION_MIN)
         }
         autre => autre,
@@ -133,6 +139,8 @@ fn lancer_fond(socket: &Path, binaire: PathBuf) -> Result<(), ClientError> {
     let mut enfant = Command::new(&binaire)
         .arg("--socket")
         .arg(socket)
+        .arg("--langue")
+        .arg(langue_active().language.as_str())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -185,9 +193,9 @@ fn demarrer(
         Ok(m @ ServerMsg::Welcome { .. }) => m,
         Ok(ServerMsg::Error(e)) => return Err(ClientError::Refus(e)),
         Ok(autre) => {
-            return Err(ClientError::Refus(format!(
-                "réponse inattendue : {}",
-                autre.nom()
+            return Err(ClientError::Refus(ta(
+                "client-reponse-inattendue",
+                &[("nom", ArgI18n::from(autre.nom()))],
             )))
         }
         Err(FrameError::Io(e)) => return Err(ClientError::Injoignable(e.to_string())),

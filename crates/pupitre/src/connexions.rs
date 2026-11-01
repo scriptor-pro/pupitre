@@ -17,16 +17,11 @@ use pupitre_config::{
     analyser_port, argv_ssh, charger_connexions, chemin_connexions, enregistrer_connexions,
     valider_connexions, ChampConnexion, Connexion,
 };
+use pupitre_i18n::{t as tr, ta, ArgI18n};
 use pupitre_ssh::hotes::hotes_ssh_config;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
-
-const TITRE: &str = "Connexions SSH";
-const TEXTE_VIDE: &str =
-    "Aucune connexion. Ajoutez-en une, ou décrivez vos serveurs dans ~/.ssh/config.";
-const TEXTE_VIDE_INVALIDE: &str = "Aucune connexion utilisable : corrigez connexions.toml, ou décrivez vos serveurs dans ~/.ssh/config.";
-const PAR_DEFAUT: &str = "Par défaut";
 
 /// État de la fenêtre de la liste.
 struct Etat {
@@ -50,7 +45,7 @@ struct Etat {
 /// Ouvre la fenêtre des connexions, modale sur `parent`.
 pub fn ouvrir_connexions(parent: &FenetrePupitre) -> gtk::Window {
     let dialogue = gtk::Window::builder()
-        .title(TITRE)
+        .title(tr("connexions-titre"))
         .modal(true)
         .transient_for(parent.fenetre())
         .destroy_with_parent(true)
@@ -66,14 +61,14 @@ pub fn ouvrir_connexions(parent: &FenetrePupitre) -> gtk::Window {
         .activate_on_single_click(false)
         .build();
     liste.set_widget_name("liste");
-    liste.update_property(&[gtk::accessible::Property::Label("Connexions")]);
+    liste.update_property(&[gtk::accessible::Property::Label(&tr("connexions-liste"))]);
     let defile = gtk::ScrolledWindow::builder()
         .child(&liste)
         .vexpand(true)
         .hexpand(true)
         .build();
     let vide = gtk::Label::builder()
-        .label(TEXTE_VIDE)
+        .label(tr("connexions-vide"))
         .wrap(true)
         .max_width_chars(56)
         .xalign(0.0)
@@ -94,11 +89,11 @@ pub fn ouvrir_connexions(parent: &FenetrePupitre) -> gtk::Window {
         liste,
         vide,
         explication,
-        se_connecter: bouton("Se connecter"),
-        ajouter: bouton("Ajouter…"),
-        modifier: bouton("Modifier…"),
-        supprimer: bouton("Supprimer"),
-        fermer: bouton("Fermer"),
+        se_connecter: bouton(&tr("connexions-se-connecter")),
+        ajouter: bouton(&tr("connexions-ajouter")),
+        modifier: bouton(&tr("connexions-modifier")),
+        supprimer: bouton(&tr("connexions-supprimer")),
+        fermer: bouton(&tr("bouton-fermer")),
         connexions: RefCell::new(Vec::new()),
         hotes: RefCell::new(Vec::new()),
         invalide: Cell::new(false),
@@ -209,7 +204,10 @@ fn libelle_connexion(c: &Connexion) -> String {
 }
 
 fn libelle_hote(alias: &str) -> String {
-    format!("{alias} (~/.ssh/config)")
+    ta(
+        "connexions-hote-ssh-config",
+        &[("alias", ArgI18n::from(alias))],
+    )
 }
 
 fn nouvelle_ligne(texte: &str) -> gtk::ListBoxRow {
@@ -235,9 +233,9 @@ fn recharger(etat: &Rc<Etat>, selection: Option<usize>) {
         Ok(v) => (v, None),
         Err(e) => (
             Vec::new(),
-            Some(format!(
-                "Le fichier connexions.toml est invalide ({e}). Il n'est pas modifié : \
-                 corrigez-le pour retrouver vos connexions."
+            Some(ta(
+                "connexions-fichier-invalide",
+                &[("erreur", ArgI18n::from(e.to_string()))],
             )),
         ),
     };
@@ -268,10 +266,10 @@ fn recharger(etat: &Rc<Etat>, selection: Option<usize>) {
     *etat.hotes.borrow_mut() = hotes;
 
     let vide = total == 0;
-    etat.vide.set_label(if etat.invalide.get() {
-        TEXTE_VIDE_INVALIDE
+    etat.vide.set_label(&if etat.invalide.get() {
+        tr("connexions-vide-invalide")
     } else {
-        TEXTE_VIDE
+        tr("connexions-vide")
     });
     etat.vide.set_visible(vide);
     let mut decrit: Vec<gtk::Accessible> = Vec::new();
@@ -363,12 +361,15 @@ fn demander_suppression(etat: &Rc<Etat>) {
         return;
     };
     let faible = Rc::downgrade(etat);
-    let question = format!("Supprimer la connexion « {nom} » ?");
+    let question = ta(
+        "connexions-supprimer-question",
+        &[("nom", ArgI18n::from(nom.as_str()))],
+    );
     confirmer_action(
         &etat.dialogue,
-        "Supprimer ?",
+        &tr("connexions-supprimer-titre"),
         &question,
-        "Supprimer",
+        &tr("connexions-supprimer"),
         move || {
             if let Some(e) = faible.upgrade() {
                 supprimer(&e, &nom);
@@ -388,7 +389,10 @@ fn supprimer(etat: &Rc<Etat>, nom: &str) {
         });
     let position = indice_selectionne(etat);
     if let Err(e) = resultat {
-        let m = format!("Suppression impossible : {e}");
+        let m = ta(
+            "connexions-suppression-impossible",
+            &[("erreur", ArgI18n::from(e))],
+        );
         if let Some(f) = fenetre_pupitre(etat) {
             f.afficher_message(&m);
         }
@@ -423,16 +427,17 @@ fn cles_privees() -> Vec<(String, PathBuf)> {
     v
 }
 
+/// Champ, nom du widget (pour les tests) et identifiant du libellé affiché.
 const CHAMPS: [(ChampConnexion, &str, &str); 5] = [
-    (ChampConnexion::Nom, "nom", "Nom"),
-    (ChampConnexion::Hote, "hote", "Hôte"),
+    (ChampConnexion::Nom, "nom", "connexions-champ-nom"),
+    (ChampConnexion::Hote, "hote", "connexions-champ-hote"),
     (
         ChampConnexion::Utilisateur,
         "utilisateur",
-        "Utilisateur (facultatif)",
+        "connexions-champ-utilisateur",
     ),
-    (ChampConnexion::Port, "port", "Port (facultatif)"),
-    (ChampConnexion::Cle, "cle", "Clé"),
+    (ChampConnexion::Port, "port", "connexions-champ-port"),
+    (ChampConnexion::Cle, "cle", "connexions-champ-cle"),
 ];
 
 /// État du formulaire d'ajout ou de modification.
@@ -453,12 +458,12 @@ fn ouvrir_formulaire(etat: &Rc<Etat>, indice: Option<usize>) {
         return;
     }
     let titre = if existante.is_some() {
-        "Modifier la connexion"
+        tr("connexions-formulaire-modifier")
     } else {
-        "Ajouter une connexion"
+        tr("connexions-formulaire-ajouter")
     };
     let fenetre = gtk::Window::builder()
-        .title(titre)
+        .title(&titre)
         .modal(true)
         .transient_for(&etat.dialogue)
         .destroy_with_parent(true)
@@ -483,7 +488,8 @@ fn ouvrir_formulaire(etat: &Rc<Etat>, indice: Option<usize>) {
             cles.push((a.to_string_lossy().into_owned(), a.clone()));
         }
     }
-    let noms: Vec<&str> = std::iter::once(PAR_DEFAUT)
+    let par_defaut = tr("connexions-cle-par-defaut");
+    let noms: Vec<&str> = std::iter::once(par_defaut.as_str())
         .chain(cles.iter().map(|(n, _)| n.as_str()))
         .collect();
     let cle = gtk::DropDown::from_strings(&noms);
@@ -495,9 +501,9 @@ fn ouvrir_formulaire(etat: &Rc<Etat>, indice: Option<usize>) {
     }
 
     let mut saisies = Vec::new();
-    for (champ, nom, libelle) in CHAMPS {
+    for (champ, nom, id_libelle) in CHAMPS {
         let etiquette = gtk::Label::builder()
-            .label(libelle)
+            .label(tr(id_libelle))
             .xalign(0.0)
             .margin_top(6)
             .build();
@@ -547,8 +553,8 @@ fn ouvrir_formulaire(etat: &Rc<Etat>, indice: Option<usize>) {
     general.add_css_class("error");
     boite.append(&general);
 
-    let annuler = gtk::Button::with_label("Annuler");
-    let enregistrer = gtk::Button::with_label("Enregistrer");
+    let annuler = gtk::Button::with_label(&tr("bouton-annuler"));
+    let enregistrer = gtk::Button::with_label(&tr("connexions-enregistrer"));
     enregistrer.add_css_class("suggested-action");
     let boutons = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
@@ -609,7 +615,7 @@ fn ouvrir_formulaire(etat: &Rc<Etat>, indice: Option<usize>) {
     let faible_fenetre = fenetre.downgrade();
     glib::timeout_add_local_once(std::time::Duration::from_millis(40), move || {
         if let Some(f) = faible_fenetre.upgrade() {
-            annoncer(&f, titre);
+            annoncer(&f, &titre);
         }
     });
     if let Some((_, premier, _)) = form.saisies.first() {
@@ -676,19 +682,16 @@ impl Formulaire {
         let mut liste = match charger_connexions(&chemin) {
             Ok(v) => v,
             Err(e) => {
-                return self.signaler_general(&format!(
-                    "Enregistrement impossible : connexions.toml est invalide ({e})."
+                return self.signaler_general(&ta(
+                    "connexions-enregistrement-invalide",
+                    &[("erreur", ArgI18n::from(e.to_string()))],
                 ))
             }
         };
         match &self.original {
             Some(nom) => match liste.iter_mut().find(|c| &c.nom == nom) {
                 Some(c) => *c = nouvelle.clone(),
-                None => {
-                    return self.signaler_general(
-                        "Enregistrement impossible : cette connexion n'existe plus.",
-                    )
-                }
+                None => return self.signaler_general(&tr("connexions-enregistrement-disparue")),
             },
             None => liste.push(nouvelle.clone()),
         }
@@ -696,7 +699,10 @@ impl Formulaire {
             return self.signaler(e.champ, &e.message);
         }
         if let Err(e) = enregistrer_connexions(&chemin, &liste) {
-            return self.signaler_general(&format!("Enregistrement impossible : {e}"));
+            return self.signaler_general(&ta(
+                "connexions-enregistrement-impossible",
+                &[("erreur", ArgI18n::from(e.to_string()))],
+            ));
         }
         let position = liste.iter().position(|c| c.nom == nouvelle.nom);
         self.fenetre.destroy();

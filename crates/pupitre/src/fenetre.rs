@@ -24,6 +24,7 @@ use gtk::prelude::*;
 use pupitre_config::{
     charger_theme, check_theme, theme_clair, theme_sombre, Config, ErreurConfig, Theme, ThemeChoix,
 };
+use pupitre_i18n::{t as tr, ta, ArgI18n};
 use pupitre_proto::{ClientMsg, DemandeId, Genre, ServerMsg, SessionId};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -36,7 +37,6 @@ use vte4::prelude::*;
 const GRILLE_PAR_DEFAUT: (u16, u16) = (80, 24);
 /// Délai avant de provoquer un redessin après la relecture (le temps d'une allocation).
 const DELAI_REDESSIN: Duration = Duration::from_millis(150);
-const TITRE_PAR_DEFAUT: &str = "Terminal";
 const GROUPE_ONGLETS: &str = "pupitre-onglets";
 /// Marque d'un onglet où la cloche a sonné (doublée de « , cloche » pour le lecteur d'écran).
 const MARQUE_CLOCHE: &str = "● ";
@@ -55,9 +55,6 @@ const CLE_CONNEXIONS: &str = "connexions-invalides";
 /// Police embarquée, utilisée si celle demandée est introuvable.
 const POLICE_DE_SECOURS: &str = "B612 Mono";
 const TAILLE_DE_SECOURS: i32 = 11;
-
-const MSG_FOND_ARRETE: &str = "Le processus de fond s'est arrêté : les shells ouverts sont perdus.";
-const BOUTON_NOUVEAU_TERMINAL: &str = "Ouvrir un nouveau terminal";
 
 /// Un onglet : un terminal et son étiquette (titre ou nom choisi, modifiable sur place).
 pub struct Onglet {
@@ -111,7 +108,7 @@ impl Onglet {
         }
         self.terminal
             .titre()
-            .unwrap_or_else(|| TITRE_PAR_DEFAUT.to_string())
+            .unwrap_or_else(|| tr("onglet-titre-defaut"))
     }
 
     /// Donne un nom à l'onglet (`None` : revenir au titre automatique).
@@ -145,12 +142,12 @@ impl Onglet {
         if self.signale.get() {
             // Le ● est doublé d'un texte pour le lecteur d'écran.
             self.etiquette.set_text(&format!("{MARQUE_CLOCHE}{titre}"));
+            self.etiquette.set_tooltip_text(Some(&ta(
+                "onglet-infobulle-cloche",
+                &[("titre", ArgI18n::from(titre.as_str()))],
+            )));
             self.etiquette
-                .set_tooltip_text(Some(&format!("{titre} (cloche)")));
-            self.etiquette
-                .update_property(&[gtk::accessible::Property::Label(&format!(
-                    "{titre}, cloche"
-                ))]);
+                .update_property(&[gtk::accessible::Property::Label(&nom_avec_cloche(&titre))]);
         } else {
             self.etiquette.set_text(&titre);
             self.etiquette.set_tooltip_text(Some(&titre));
@@ -166,7 +163,7 @@ impl Onglet {
             decrire_onglets(&c);
             if c.page_num(&self.widget()) == c.current_page() {
                 if let Some(f) = c.root().and_downcast::<gtk::Window>() {
-                    f.set_title(Some(&format!("{titre} — Pupitre")));
+                    f.set_title(Some(&titre_fenetre(&titre)));
                 }
             }
         }
@@ -207,10 +204,10 @@ impl Onglet {
         self.termine.set(true);
         self.occupe.set(false);
         self.terminal.rendre_muet(true);
-        let code = code.map_or_else(|| "signal".to_string(), |c| c.to_string());
-        let message = format!(
-            "Le shell s'est terminé (code {code}). Appuyez sur Entrée pour en ouvrir un nouveau."
-        );
+        let message = match code {
+            Some(c) => ta("shell-termine", &[("code", ArgI18n::from(c.to_string()))]),
+            None => tr("shell-termine-signal"),
+        };
         self.terminal
             .on_output(format!("\r\n\x1b[0m{message}\r\n").as_bytes());
         crate::messages::annoncer(self.terminal.terminal(), &message);
@@ -321,8 +318,9 @@ impl Pupitre {
             }
             Err(e) => {
                 let f = FenetrePupitre::nouvelle(app, &p);
-                f.signaler_panne(&format!(
-                    "Pupitre ne peut pas joindre le processus de fond : {e}"
+                f.signaler_panne(&ta(
+                    "fond-injoignable",
+                    &[("erreur", ArgI18n::from(e.to_string()))],
                 ));
                 f.fenetre().present();
             }
@@ -339,7 +337,13 @@ impl Pupitre {
                 *self.config.borrow_mut() = c;
             }
             Err(e) => {
-                self.poser_message(CLE_CONFIG, Some(format!("Configuration invalide, {e}")));
+                self.poser_message(
+                    CLE_CONFIG,
+                    Some(ta(
+                        "config-invalide",
+                        &[("erreur", ArgI18n::from(e.to_string()))],
+                    )),
+                );
                 return;
             }
         }
@@ -361,8 +365,9 @@ impl Pupitre {
             }
             Err(e) => self.poser_message(
                 CLE_SURVEILLANCE,
-                Some(format!(
-                    "Rechargement automatique de la configuration indisponible : {e}"
+                Some(ta(
+                    "config-rechargement-indisponible",
+                    &[("erreur", ArgI18n::from(e))],
                 )),
             ),
         }
@@ -383,9 +388,12 @@ impl Pupitre {
                 Err(e) => {
                     self.poser_message(
                         CLE_THEME,
-                        Some(format!(
-                            "Thème {} illisible, {e} : thème précédent conservé",
-                            chemin.display()
+                        Some(ta(
+                            "theme-illisible-conserve",
+                            &[
+                                ("chemin", ArgI18n::from(chemin.display().to_string())),
+                                ("erreur", ArgI18n::from(e.to_string())),
+                            ],
                         )),
                     );
                     None
@@ -402,8 +410,12 @@ impl Pupitre {
             Some((famille, remplacement)) => {
                 self.poser_message(
                     CLE_POLICE,
-                    Some(format!(
-                        "Police « {famille} » introuvable : {POLICE_DE_SECOURS} utilisée."
+                    Some(ta(
+                        "police-introuvable",
+                        &[
+                            ("famille", ArgI18n::from(famille.as_str())),
+                            ("secours", ArgI18n::from(POLICE_DE_SECOURS)),
+                        ],
                     )),
                 );
                 effective.police = remplacement;
@@ -418,10 +430,12 @@ impl Pupitre {
             CLE_CONTRASTE,
             (!problemes.is_empty()).then(|| {
                 let liste: Vec<String> = problemes.iter().map(|p| p.to_string()).collect();
-                format!(
-                    "Thème « {} » : contraste insuffisant — {}",
-                    theme.nom,
-                    liste.join(" ; ")
+                ta(
+                    "theme-contraste-insuffisant",
+                    &[
+                        ("nom", ArgI18n::from(theme.nom.as_str())),
+                        ("liste", ArgI18n::from(liste.join(" ; "))),
+                    ],
                 )
             }),
         );
@@ -481,7 +495,7 @@ impl Pupitre {
         if self.client.borrow().is_some() {
             f.ouvrir_session();
         } else {
-            f.signaler_panne(MSG_FOND_ARRETE);
+            f.signaler_panne(&tr("fond-arrete"));
         }
         f.fenetre().present();
         f
@@ -511,11 +525,7 @@ impl Pupitre {
         // Même clé à chaque connexion : pas de doublon à la reconnexion.
         self.poser_message(
             CLE_FOND_ANCIEN,
-            (client.version() < 2).then(|| {
-                "Le processus de fond est d'une version plus ancienne : les fonctions SSH de \
-                 Pupitre seront actives quand tous les onglets auront été fermés."
-                    .to_string()
-            }),
+            (client.version() < 2).then(|| tr("fond-ancien")),
         );
         *self.client.borrow_mut() = Some(Rc::new(client));
         let faible = Rc::downgrade(self);
@@ -617,7 +627,10 @@ impl Pupitre {
                 }
             }
             ServerMsg::OpenFailed { error } => {
-                let message = format!("Le shell n'a pas pu être lancé : {error}");
+                let message = ta(
+                    "shell-lancement-impossible",
+                    &[("erreur", ArgI18n::from(error))],
+                );
                 let attente = self.attentes.borrow_mut().pop_front();
                 match attente {
                     Some(Attente::NouvelOnglet(f, _)) => {
@@ -816,7 +829,7 @@ impl Pupitre {
             f.fenetre().present();
         }
         for f in self.fenetres() {
-            f.signaler_panne(MSG_FOND_ARRETE);
+            f.signaler_panne(&tr("fond-arrete"));
         }
     }
 
@@ -824,8 +837,9 @@ impl Pupitre {
     /// des shells perdus sont fermés (les fenêtres vidées se ferment).
     fn reconnecter(self: &Rc<Self>, fenetre: &FenetrePupitre) {
         if let Err(e) = self.connecter() {
-            fenetre.signaler_panne(&format!(
-                "Impossible de relancer le processus de fond : {e}"
+            fenetre.signaler_panne(&ta(
+                "fond-relance-impossible",
+                &[("erreur", ArgI18n::from(e.to_string()))],
             ));
             return;
         }
@@ -888,7 +902,7 @@ impl FenetrePupitre {
         let (largeur, hauteur) = taille_ouverture(largeur_ecran().unwrap_or(0));
         let fenetre = gtk::ApplicationWindow::builder()
             .application(app)
-            .title("Pupitre")
+            .title(tr("fenetre-nom"))
             .default_width(largeur)
             .default_height(hauteur)
             .build();
@@ -903,7 +917,7 @@ impl FenetrePupitre {
         carnet.popup_enable();
         // Ctrl+Tab met le focus sur le carnet lui-même : sans nom, Orca dirait seulement
         // « groupement ». Sa description donne l'onglet courant (voir `decrire_onglets`).
-        carnet.update_property(&[gtk::accessible::Property::Label("Onglets")]);
+        carnet.update_property(&[gtk::accessible::Property::Label(&tr("onglets-nom"))]);
         let menu = bouton_menu();
         carnet.set_action_widget(&menu, gtk::PackType::End);
 
@@ -1105,7 +1119,7 @@ impl FenetrePupitre {
         self.0.bandeau.poser_avec_action(
             CLE_PANNE,
             Some(texte),
-            Some((BOUTON_NOUVEAU_TERMINAL, action)),
+            Some((&tr("fond-nouveau-terminal"), action)),
         );
         self.0.bandeau.donner_focus(CLE_PANNE);
     }
@@ -1353,8 +1367,7 @@ impl FenetrePupitre {
             let sur_les_onglets = c.has_focus();
             if let Some(o) = f.pupitre.upgrade().and_then(|p| p.onglet_de_widget(page)) {
                 o.signaler(false);
-                f.fenetre
-                    .set_title(Some(&format!("{} — Pupitre", o.titre())));
+                f.fenetre.set_title(Some(&titre_fenetre(&o.titre())));
                 if !sur_les_onglets {
                     o.terminal.widget().grab_focus();
                 }
@@ -1389,12 +1402,11 @@ impl FenetrePupitre {
                 return glib::Propagation::Proceed;
             }
             let question = if occupes == 1 {
-                "Une commande est en cours dans un onglet de cette fenêtre. Fermer quand même ?"
-                    .to_string()
+                tr("fermeture-fenetre-une-commande")
             } else {
-                format!(
-                    "Des commandes sont en cours dans {occupes} onglets de cette fenêtre. \
-                     Fermer quand même ?"
+                ta(
+                    "fermeture-fenetre-commandes",
+                    &[("n", ArgI18n::from(occupes))],
                 )
             };
             let g = f.clone();
@@ -1416,7 +1428,7 @@ impl FenetrePupitre {
         let pf = Rc::downgrade(&p);
         confirmer(
             self.fenetre(),
-            "Une commande est en cours dans cet onglet. Fermer quand même ?",
+            &tr("fermeture-onglet-commande"),
             move || {
                 if let (Some(o), Some(p)) = (faible.upgrade(), pf.upgrade()) {
                     p.fermer_onglet(&o);
@@ -1444,16 +1456,16 @@ impl FenetrePupitre {
 fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet> {
     let terminal = TerminalOnglet::new(client, id, &p.config_effective.borrow(), &p.theme.borrow());
     let etiquette = gtk::Label::builder()
-        .label(TITRE_PAR_DEFAUT)
+        .label(tr("onglet-titre-defaut"))
         .ellipsize(gtk::pango::EllipsizeMode::End)
         .width_chars(8)
         .max_width_chars(24)
         .build();
     let entree = gtk::Entry::builder()
         .width_chars(16)
-        .tooltip_text("Nom de l'onglet (vide : titre automatique)")
+        .tooltip_text(tr("onglet-nom-aide"))
         .build();
-    entree.update_property(&[gtk::accessible::Property::Label("Nom de l'onglet")]);
+    entree.update_property(&[gtk::accessible::Property::Label(&tr("onglet-nom"))]);
     entree.set_visible(false);
     let tete = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     tete.append(&etiquette);
@@ -1596,12 +1608,15 @@ fn police_de_secours(police: &str) -> Option<(String, String)> {
 
 fn menu_onglet() -> gio::Menu {
     let m = gio::Menu::new();
-    m.append(Some("Renommer l'onglet"), Some("win.renommer-onglet"));
     m.append(
-        Some("Détacher dans une nouvelle fenêtre"),
+        Some(&tr("menu-renommer-onglet")),
+        Some("win.renommer-onglet"),
+    );
+    m.append(
+        Some(&tr("menu-detacher-onglet")),
         Some("win.detacher-onglet"),
     );
-    m.append(Some("Fermer l'onglet"), Some("win.fermer-onglet"));
+    m.append(Some(&tr("menu-fermer-onglet")), Some("win.fermer-onglet"));
     m
 }
 
@@ -1616,56 +1631,72 @@ fn bouton_menu() -> gtk::MenuButton {
         i
     };
     m.append_item(&item(
-        "Nouvel onglet",
+        &tr("menu-nouvel-onglet"),
         "win.nouvel-onglet",
         Some("<Control><Shift>t"),
     ));
     m.append_item(&item(
-        "Nouvelle fenêtre",
+        &tr("menu-nouvelle-fenetre"),
         "win.nouvelle-fenetre",
         Some("<Control><Shift>n"),
     ));
     m.append_item(&item(
-        "Connexions SSH…",
+        &tr("menu-connexions"),
         "win.connexions",
         Some("<Control><Shift>o"),
     ));
     let edition = gio::Menu::new();
-    edition.append_item(&item("Copier", "win.copier", Some("<Control><Shift>c")));
-    edition.append_item(&item("Coller", "win.coller", Some("<Control><Shift>v")));
     edition.append_item(&item(
-        "Rechercher…",
+        &tr("menu-copier"),
+        "win.copier",
+        Some("<Control><Shift>c"),
+    ));
+    edition.append_item(&item(
+        &tr("menu-coller"),
+        "win.coller",
+        Some("<Control><Shift>v"),
+    ));
+    edition.append_item(&item(
+        &tr("menu-rechercher"),
         "win.rechercher",
         Some("<Control><Shift>f"),
     ));
     m.append_section(None, &edition);
     let affichage = gio::Menu::new();
     affichage.append_item(&item(
-        "Agrandir le texte",
+        &tr("menu-agrandir"),
         "win.zoom-plus",
         Some("<Control>plus"),
     ));
     affichage.append_item(&item(
-        "Réduire le texte",
+        &tr("menu-reduire"),
         "win.zoom-moins",
         Some("<Control>minus"),
     ));
     affichage.append_item(&item(
-        "Taille normale",
+        &tr("menu-taille-normale"),
         "win.zoom-normal",
         Some("<Control>0"),
     ));
-    affichage.append_item(&item("Plein écran", "win.plein-ecran", Some("F11")));
+    affichage.append_item(&item(
+        &tr("menu-plein-ecran"),
+        "win.plein-ecran",
+        Some("F11"),
+    ));
     m.append_section(None, &affichage);
     let onglet = gio::Menu::new();
-    onglet.append_item(&item("Renommer l'onglet", "win.renommer-onglet", None));
     onglet.append_item(&item(
-        "Détacher dans une nouvelle fenêtre",
+        &tr("menu-renommer-onglet"),
+        "win.renommer-onglet",
+        None,
+    ));
+    onglet.append_item(&item(
+        &tr("menu-detacher-onglet"),
         "win.detacher-onglet",
         None,
     ));
     onglet.append_item(&item(
-        "Fermer l'onglet",
+        &tr("menu-fermer-onglet"),
         "win.fermer-onglet",
         Some("<Control><Shift>w"),
     ));
@@ -1674,17 +1705,23 @@ fn bouton_menu() -> gtk::MenuButton {
         .icon_name("open-menu-symbolic")
         // Pas de F10 : la touche reste aux programmes (mc, htop… quittent par F10).
         // Le menu s'atteint par Ctrl+Tab puis Entrée.
-        .tooltip_text("Menu (Ctrl+Tab puis Entrée)")
+        .tooltip_text(tr("menu-aide"))
         .menu_model(&m)
         .primary(false)
         .build();
-    b.update_property(&[gtk::accessible::Property::Label("Menu")]);
+    b.update_property(&[gtk::accessible::Property::Label(&tr("menu-nom"))]);
     b
 }
 
 /// Dialogue modal « question ? » avec Annuler (par défaut, et Échap) et Fermer.
 fn confirmer(parent: &impl IsA<gtk::Window>, question: &str, si_oui: impl Fn() + 'static) {
-    confirmer_action(parent, "Fermer ?", question, "Fermer", si_oui);
+    confirmer_action(
+        parent,
+        &tr("fermeture-titre"),
+        question,
+        &tr("bouton-fermer"),
+        si_oui,
+    );
 }
 
 /// Dialogue modal de confirmation : Annuler (par défaut, et Échap) ou `action`.
@@ -1711,7 +1748,7 @@ pub(crate) fn confirmer_action(
         .wrap(true)
         .max_width_chars(48)
         .build();
-    let annuler = gtk::Button::with_label("Annuler");
+    let annuler = gtk::Button::with_label(&tr("bouton-annuler"));
     let fermer = gtk::Button::with_label(action);
     fermer.add_css_class("destructive-action");
     let boutons = gtk::Box::builder()
@@ -1759,13 +1796,33 @@ pub(crate) fn confirmer_action(
 
 /// Nom d'onglet tel que lu par le lecteur d'écran (« titre » ou « titre, cloche »).
 fn nom_onglet(c: &gtk::Notebook, page: &gtk::Widget) -> Option<String> {
+    let (titre, cloche) = titre_onglet(c, page)?;
+    Some(if cloche {
+        nom_avec_cloche(&titre)
+    } else {
+        titre
+    })
+}
+
+/// Titre d'un onglet et indication de cloche, lus sur son étiquette.
+fn titre_onglet(c: &gtk::Notebook, page: &gtk::Widget) -> Option<(String, bool)> {
     let tete = c.tab_label(page)?.downcast::<gtk::Box>().ok()?;
     let etiquette = tete.first_child()?.downcast::<gtk::Label>().ok()?;
     let texte = etiquette.text();
     Some(match texte.strip_prefix(MARQUE_CLOCHE) {
-        Some(titre) => format!("{titre}, cloche"),
-        None => texte.to_string(),
+        Some(titre) => (titre.to_string(), true),
+        None => (texte.to_string(), false),
     })
+}
+
+/// « titre, cloche » : le nom accessible d'un onglet où la cloche a sonné.
+fn nom_avec_cloche(titre: &str) -> String {
+    ta("onglet-nom-cloche", &[("titre", ArgI18n::from(titre))])
+}
+
+/// Titre de la fenêtre : celui de l'onglet courant, suivi du nom de l'application.
+fn titre_fenetre(titre: &str) -> String {
+    ta("fenetre-titre", &[("titre", ArgI18n::from(titre))])
 }
 
 /// Met à jour la description accessible du carnet : « essai, onglet 2 sur 3 », suivie
@@ -1782,14 +1839,31 @@ fn decrire_onglets(c: &gtk::Notebook) {
             continue;
         };
         let nom = nom_onglet(c, &page).unwrap_or_default();
+        let numero = ArgI18n::from(i64::from(i) + 1);
         if Some(i) == courant {
-            texte = format!("{nom}, onglet {} sur {n}", i + 1);
-        } else if let Some(titre) = nom.strip_suffix(", cloche") {
-            cloches.push(format!("{titre} (onglet {})", i + 1));
+            texte = ta(
+                "onglets-position",
+                &[
+                    ("nom", ArgI18n::from(nom)),
+                    ("i", numero),
+                    ("n", ArgI18n::from(i64::from(n))),
+                ],
+            );
+        } else if let Some((titre, true)) = titre_onglet(c, &page) {
+            cloches.push(ta(
+                "onglets-autre-cloche",
+                &[("titre", ArgI18n::from(titre)), ("i", numero)],
+            ));
         }
     }
     if !cloches.is_empty() {
-        texte.push_str(&format!(" ; cloche dans : {}", cloches.join(", ")));
+        texte = ta(
+            "onglets-cloche-dans",
+            &[
+                ("texte", ArgI18n::from(texte)),
+                ("liste", ArgI18n::from(cloches.join(", "))),
+            ],
+        );
     }
     c.update_property(&[gtk::accessible::Property::Description(&texte)]);
 }

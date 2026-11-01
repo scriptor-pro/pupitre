@@ -7,6 +7,7 @@ use crate::terminal::{PCRE2_CASELESS, PCRE2_MULTILINE, PCRE2_UTF};
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
+use pupitre_i18n::{t as tr, ta, ArgI18n};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use vte4::prelude::*;
@@ -26,17 +27,17 @@ pub struct BarreRecherche {
 impl BarreRecherche {
     pub fn new() -> Rc<Self> {
         let entree = gtk::SearchEntry::builder()
-            .placeholder_text("Rechercher dans l'historique")
+            .placeholder_text(tr("recherche-placeholder"))
             .hexpand(true)
             .build();
-        entree.update_property(&[gtk::accessible::Property::Label(
-            "Rechercher dans l'historique",
-        )]);
-        let expression = gtk::CheckButton::with_label("Expression régulière");
-        let precedent = gtk::Button::with_label("Précédent");
-        precedent.set_tooltip_text(Some("Occurrence précédente (Entrée)"));
-        let suivant = gtk::Button::with_label("Suivant");
-        suivant.set_tooltip_text(Some("Occurrence suivante (Maj+Entrée)"));
+        entree.update_property(&[gtk::accessible::Property::Label(&tr(
+            "recherche-placeholder",
+        ))]);
+        let expression = gtk::CheckButton::with_label(&tr("recherche-expression"));
+        let precedent = gtk::Button::with_label(&tr("recherche-precedent"));
+        precedent.set_tooltip_text(Some(&tr("recherche-precedent-aide")));
+        let suivant = gtk::Button::with_label(&tr("recherche-suivant"));
+        suivant.set_tooltip_text(Some(&tr("recherche-suivant-aide")));
         let etat = gtk::Label::new(None);
         let boite = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         boite.append(&entree);
@@ -46,8 +47,8 @@ impl BarreRecherche {
         boite.append(&suivant);
         // Bouton de fermeture nommé (celui de GtkSearchBar n'a pas de nom accessible).
         let fermer = gtk::Button::from_icon_name("window-close-symbolic");
-        fermer.set_tooltip_text(Some("Fermer la recherche (Échap)"));
-        fermer.update_property(&[gtk::accessible::Property::Label("Fermer la recherche")]);
+        fermer.set_tooltip_text(Some(&tr("recherche-fermer-aide")));
+        fermer.update_property(&[gtk::accessible::Property::Label(&tr("recherche-fermer"))]);
         boite.append(&fermer);
         let barre = gtk::SearchBar::builder()
             .child(&boite)
@@ -179,7 +180,10 @@ impl BarreRecherche {
                 *self.posee.borrow_mut() = cle;
             }
             Err(e) => {
-                self.signaler_erreur(Some(&format!("Expression invalide : {}", e.message())));
+                self.signaler_erreur(Some(&ta(
+                    "recherche-expression-invalide",
+                    &[("detail", ArgI18n::from(e.message().to_string()))],
+                )));
                 *self.posee.borrow_mut() = None;
                 t.search_set_regex(None, 0);
             }
@@ -222,8 +226,9 @@ impl BarreRecherche {
         if f(&t) {
             self.etat.set_text("");
         } else {
-            self.etat.set_text("Aucun résultat");
-            crate::messages::annoncer(&self.etat, "Aucun résultat");
+            let texte = tr("recherche-aucun-resultat");
+            self.etat.set_text(&texte);
+            crate::messages::annoncer(&self.etat, &texte);
         }
     }
 }

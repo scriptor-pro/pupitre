@@ -8,6 +8,7 @@
 use gtk::glib;
 use notify::{RecursiveMode, Watcher};
 use pupitre_config::{charger, Config, ErreurConfig};
+use pupitre_i18n::{ta, ArgI18n};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -43,14 +44,27 @@ pub fn surveiller_fichiers(
             }
         }
     })
-    .map_err(|e| format!("surveillance des fichiers impossible : {e}"))?;
+    .map_err(|e| {
+        ta(
+            "surveillance-impossible",
+            &[("erreur", ArgI18n::from(e.to_string()))],
+        )
+    })?;
     let mut dossiers: Vec<&Path> = cibles.iter().filter_map(|c| c.parent()).collect();
     dossiers.sort();
     dossiers.dedup();
     for d in dossiers {
         observateur
             .watch(d, RecursiveMode::NonRecursive)
-            .map_err(|e| format!("surveillance de {} impossible : {e}", d.display()))?;
+            .map_err(|e| {
+                ta(
+                    "surveillance-dossier-impossible",
+                    &[
+                        ("dossier", ArgI18n::from(d.display().to_string())),
+                        ("erreur", ArgI18n::from(e.to_string())),
+                    ],
+                )
+            })?;
     }
     glib::spawn_future_local(async move {
         // S'arrête quand l'observateur (donc l'émetteur) disparaît.

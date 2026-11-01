@@ -5,6 +5,8 @@
 # Options transmises au scénario, ex. : scripts/test-orca.sh --seulement 3 4
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Les phrases attendues par les tests sont françaises, quelle que soit la langue de la machine.
+export LANGUAGE=fr
 for outil in xvfb-run xdotool xfwm4 orca ssh-keygen gnome-keyring-daemon; do
   command -v "$outil" >/dev/null || { echo "$outil manquant" >&2; exit 2; }
 done
