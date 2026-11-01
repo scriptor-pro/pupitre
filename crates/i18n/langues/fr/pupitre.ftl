@@ -277,3 +277,9 @@ trame-trop-grande = trame trop grande : { $n } octets (max. { $max })
 trame-illisible = trame illisible : { $erreur }
 trame-fermee = connexion fermée
 trame-octets-en-trop = { $n } octet(s) en trop après le message
+
+## Shells (lancement)
+
+shell-integration-absente = L'intégration de Pupitre pour { $shell } est introuvable : le shell est lancé tel quel.
+shell-starship-absent = Starship introuvable : l'invite habituelle du shell est gardée.
+shell-starship-absent-installer = Starship introuvable : l'invite habituelle du shell est gardée. Pour l'installer : { $commande }

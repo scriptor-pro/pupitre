@@ -1398,6 +1398,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pupitre-shell"
+version = "0.1.0"
+dependencies = [
+ "pupitre-i18n",
+ "tempfile",
+]
+
+[[package]]
 name = "pupitre-ssh"
 version = "0.1.0"
 dependencies = [
