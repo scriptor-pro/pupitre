@@ -1057,6 +1057,88 @@ fn message_garde_livre_apres_la_reponse() {
     arreter(s);
 }
 
+/// Coffre verrouillé tant que `verrouille` est vrai ; compte les appels.
+#[derive(Default)]
+struct CoffreBascule {
+    verrouille: std::sync::atomic::AtomicBool,
+    etats: std::sync::atomic::AtomicUsize,
+    listes: std::sync::atomic::AtomicUsize,
+}
+
+impl Coffre for CoffreBascule {
+    fn etat(&self) -> EtatTrousseau {
+        use std::sync::atomic::Ordering;
+        self.etats.fetch_add(1, Ordering::SeqCst);
+        if self.verrouille.load(Ordering::SeqCst) {
+            EtatTrousseau::Verrouille
+        } else {
+            EtatTrousseau::Disponible
+        }
+    }
+    fn lire(
+        &self,
+        _: &Path,
+    ) -> Result<Option<zeroize::Zeroizing<String>>, pupitre_ssh::trousseau::ErreurTrousseau> {
+        Ok(None)
+    }
+    fn ecrire(&self, _: &Path, _: &str) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
+        Ok(())
+    }
+    fn oublier(&self, _: &Path) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
+        Ok(())
+    }
+    fn cles(&self) -> Vec<PathBuf> {
+        self.listes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Vec::new()
+    }
+}
+
+#[test]
+fn reessai_garde_apres_un_chargement_ponctuel() {
+    use std::sync::atomic::Ordering;
+    let coffre = Arc::new(CoffreBascule::default());
+    coffre.verrouille.store(true, Ordering::SeqCst);
+    let attendre_etats = |n: usize| {
+        let limite = Instant::now() + Duration::from_secs(10);
+        while coffre.etats.load(Ordering::SeqCst) < n {
+            assert!(Instant::now() < limite, "chargement jamais lancé");
+            thread::sleep(Duration::from_millis(20));
+        }
+        thread::sleep(Duration::from_millis(300));
+    };
+    let s = demarrer_coffre(
+        Duration::from_secs(5),
+        |e| e.askpass = Some("/bin/true".into()),
+        coffre.clone(),
+    );
+    // Démarrage : trousseau verrouillé, rien de chargé, nouvel essai prévu.
+    attendre_etats(1);
+    // Le trousseau est déverrouillé, puis une phrase est saisie et mémorisée : chargement
+    // de cette seule clé.
+    coffre.verrouille.store(false, Ordering::SeqCst);
+    let mut ask = demandeur(&s.socket);
+    assert_eq!(attendre_reponse(&mut ask), (None, false));
+    ask.envoyer(ClientMsg::ChargerCle {
+        cle: "/nonexistent/cle".into(),
+    });
+    attendre_etats(2);
+    assert_eq!(coffre.listes.load(Ordering::SeqCst), 0);
+    // Le nouvel onglet doit encore réessayer le chargement de TOUTES les clés.
+    let mut ui = Client::connecter(&s.socket);
+    ui.ouvrir(&["sh", "-c", "sleep 1"]);
+    let limite = Instant::now() + Duration::from_secs(5);
+    while coffre.listes.load(Ordering::SeqCst) == 0 {
+        assert!(
+            Instant::now() < limite,
+            "le nouvel essai a été effacé par le chargement ponctuel"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    drop((ui, ask));
+    arreter(s);
+}
+
 #[test]
 fn charger_cle_demande_par_l_askpass() {
     let Some(_exclusif) = exclusif() else {

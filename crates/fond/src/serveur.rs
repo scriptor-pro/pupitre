@@ -175,8 +175,9 @@ enum Evt {
     Message(ClientId, ClientMsg),
     Depart(ClientId),
     Session(SessionId, SessionEvent),
-    /// Fin d'un travail de chargement de clés.
-    Chargement(Rapport),
+    /// Fin d'un travail de chargement de clés ; le booléen dit si le travail portait sur
+    /// toutes les clés.
+    Chargement(Rapport, bool),
 }
 
 fn accepter(ecoute: &UnixListener, evt_tx: &SyncSender<Evt>, arret: &AtomicBool) {
@@ -346,7 +347,7 @@ impl Etat {
                     self.diffuser(&ServerMsg::Output { id: sid, data });
                 }
             }
-            Evt::Chargement(rapport) => self.fin_chargement(rapport),
+            Evt::Chargement(rapport, toutes) => self.fin_chargement(rapport, toutes),
             Evt::Session(sid, SessionEvent::Exited(code)) => {
                 if let Some(s) = self.sessions.remove(&sid) {
                     // Termine aussi ce qui tiendrait encore le terminal.
@@ -499,6 +500,7 @@ impl Etat {
         };
         let (agent, askpass) = (agent.to_path_buf(), askpass.to_path_buf());
         let travail = std::mem::take(&mut self.chargement.attente);
+        let toutes = travail.toutes;
         let coffre = self.coffre.clone();
         let evt_tx = self.evt_tx.clone();
         self.chargement.en_cours = true;
@@ -506,16 +508,22 @@ impl Etat {
             .name("pupitre-chargement".into())
             .spawn(move || {
                 let r = chargement::executer(coffre.as_ref(), &agent, &askpass, &travail);
-                let _ = evt_tx.send(Evt::Chargement(r));
+                let _ = evt_tx.send(Evt::Chargement(r, toutes));
             });
         if lance.is_err() {
             self.chargement.en_cours = false;
         }
     }
 
-    fn fin_chargement(&mut self, rapport: Rapport) {
+    fn fin_chargement(&mut self, rapport: Rapport, toutes: bool) {
         self.chargement.en_cours = false;
-        self.chargement.reessai = rapport.verrouille;
+        // Le nouvel essai n'est levé que par un chargement de TOUTES les clés réussi : un
+        // chargement ponctuel (une phrase qu'on vient de saisir) laisse les autres en plan.
+        if rapport.verrouille {
+            self.chargement.reessai = true;
+        } else if toutes {
+            self.chargement.reessai = false;
+        }
         if rapport.verrouille {
             // Une seule fois.
             if !self.chargement.verrouille_signale {
