@@ -517,7 +517,7 @@ fn client_v2_negocie_2() {
     assert_eq!(c.recevoir(), ServerMsg::Welcome { version: 2 });
     // Hors de la plage acceptée (trop récent, ou nul) : refus.
     let mut c = Client::brut(&s.socket);
-    c.envoyer(ClientMsg::Hello { version: 3 });
+    c.envoyer(ClientMsg::Hello { version: 4 });
     assert!(
         matches!(c.recevoir(), ServerMsg::Error(e) if e.contains("version du protocole incompatible"))
     );
@@ -1235,4 +1235,94 @@ fn phrase_saisie_fausse_pas_memorisee() {
     assert!(matches!(coffre.lire(&cle), Ok(None)));
     drop((ui, ask));
     arreter(s);
+}
+
+/// Un client en version 2 ne reçoit ni marque de commande ni état « lent » : le second
+/// devient « absent » pour lui, alors qu'une interface en version 3 le reçoit tel quel.
+#[test]
+fn client_v2_ne_recoit_ni_marque_ni_lent() {
+    use pupitre_fond::serveur::adapter_pour;
+    use pupitre_proto::MarqueCommande;
+
+    // Les marques sont écartées pour les versions 1 et 2, gardées pour la 3.
+    let marque = ServerMsg::Marque {
+        id: 1,
+        marque: MarqueCommande::Invite,
+        rejouee: false,
+    };
+    assert_eq!(adapter_pour(marque.clone(), 1), None);
+    assert_eq!(adapter_pour(marque.clone(), 2), None);
+    assert_eq!(adapter_pour(marque.clone(), 3), Some(marque));
+
+    // De bout en bout : la demande avec un trousseau lent.
+    let s = demarrer(Duration::from_secs(30));
+    let mut v2 = Client::brut(&s.socket);
+    v2.envoyer(ClientMsg::Hello { version: 2 });
+    assert_eq!(v2.recevoir(), ServerMsg::Welcome { version: 2 });
+    v2.envoyer(ClientMsg::List);
+    v2.attendre(|m| matches!(m, ServerMsg::Sessions(_)).then_some(()));
+    let mut v3 = Client::connecter(&s.socket);
+    v3.envoyer(ClientMsg::List);
+    v3.attendre(|m| matches!(m, ServerMsg::Sessions(_)).then_some(()));
+    let mut askpass = Client::connecter(&s.socket);
+    askpass.envoyer(ClientMsg::Demander {
+        session: None,
+        invite: "Enter passphrase for /tmp/x: ".into(),
+        genre: Genre::PhraseCle {
+            cle: "/tmp/x".into(),
+            nouvel_essai: false,
+        },
+        trousseau: EtatTrousseau::Lent,
+    });
+    let etat = |c: &mut Client| {
+        c.attendre(|m| match m {
+            ServerMsg::Demande { trousseau, .. } => Some(*trousseau),
+            _ => None,
+        })
+    };
+    assert_eq!(etat(&mut v2), EtatTrousseau::Absent);
+    assert_eq!(etat(&mut v3), EtatTrousseau::Lent);
+}
+
+/// `Ouvrir` : les variables du client arrivent dans le shell, mais ne remplacent jamais
+/// celles que le fond impose (agent, askpass, session) ; un nom invalide est ignoré.
+#[test]
+fn ouvrir_applique_les_variables_du_client() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    let script = "printf 'VAL=%s|%s|%s\\n' \"$MA_VARIABLE\" \"$PUPITRE_SESSION\" \"$SSH_AUTH_SOCK\"; sleep 1";
+    c.envoyer(ClientMsg::Ouvrir {
+        argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
+        cwd: None,
+        cols: 80,
+        rows: 24,
+        env: vec![
+            ("MA_VARIABLE".into(), "valeur é".into()),
+            ("PUPITRE_SESSION".into(), "999".into()),
+            ("SSH_AUTH_SOCK".into(), "/faux".into()),
+            ("A=B".into(), "x".into()),
+            (String::new(), "x".into()),
+            ("NUL".into(), "a\0b".into()),
+        ],
+    });
+    let id = c.attendre(|m| match m {
+        ServerMsg::Opened { id } => Some(*id),
+        ServerMsg::OpenFailed { error } => panic!("{error}"),
+        _ => None,
+    });
+    let mut tout = Vec::new();
+    let ligne = c.attendre(|m| match m {
+        ServerMsg::Output { id: i, data } if *i == id => {
+            tout.extend(data);
+            let t = String::from_utf8_lossy(&tout).into_owned();
+            let d = t.find("VAL=")? + 4;
+            let f = t[d..].find('\n')?;
+            Some(t[d..d + f].trim_end().to_string())
+        }
+        _ => None,
+    });
+    let champs: Vec<&str> = ligne.split('|').collect();
+    assert_eq!(champs[0], "valeur é");
+    assert_eq!(champs[1], id.to_string());
+    assert_ne!(champs[2], "/faux");
 }

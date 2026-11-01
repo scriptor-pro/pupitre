@@ -219,19 +219,19 @@ fn fond_introuvable_donne_une_erreur() {
 }
 
 #[test]
-fn client_v2_negocie_2() {
+fn client_v3_negocie_3() {
     let (_d, socket) = dossier();
     let (c, rx) = connect_or_spawn_at(&socket).unwrap();
-    assert_eq!(c.version(), 2);
+    assert_eq!(c.version(), 3);
     let v = attendre(&rx, |m| match m {
         ServerMsg::Welcome { version } => Some(*version),
         _ => None,
     });
-    assert_eq!(v, 2);
+    assert_eq!(v, 3);
 }
 
-/// Faux processus de fond de la version 1 : refuse `Hello { 2 }` avec le texte exact du
-/// vrai serveur puis ferme ; accepte `Hello { 1 }` à la connexion suivante.
+/// Faux processus de fond de la version 1 : refuse `Hello { 3 }` et `Hello { 2 }` avec le texte exact du
+/// vrai serveur puis ferme ; accepte `Hello { 1 }` à la connexion suivante (descente 3, 2, 1).
 #[test]
 fn repli_v1_face_a_un_fond_ancien() {
     use pupitre_proto::{read_frame, write_frame};
@@ -248,7 +248,7 @@ fn repli_v1_face_a_un_fond_ancien() {
     let ecoute = UnixListener::bind(&socket).unwrap();
     let serveur = std::thread::spawn(move || {
         let mut vus = Vec::new();
-        for _ in 0..2 {
+        for _ in 0..3 {
             let (mut f, _) = ecoute.accept().unwrap();
             let ClientMsg::Hello { version } = read_frame(&mut f).unwrap() else {
                 panic!("Hello attendu");
@@ -276,7 +276,7 @@ fn repli_v1_face_a_un_fond_ancien() {
         matches!(m, ServerMsg::Welcome { version: 1 }).then_some(())
     });
     drop(c);
-    assert_eq!(serveur.join().unwrap(), vec![2, 1]);
+    assert_eq!(serveur.join().unwrap(), vec![3, 2, 1]);
 }
 
 #[test]
@@ -331,4 +331,138 @@ fn accueil_lent_accepte() {
     let r = connect_or_spawn_at(&socket);
     assert!(r.is_ok(), "{:?}", r.err());
     drop(fond.join().unwrap());
+}
+
+/// Faux dossier de socket (mode 0700) et son écoute.
+fn faux_socket() -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    std::os::unix::net::UnixListener,
+) {
+    use std::os::unix::fs::DirBuilderExt;
+    let d = tempfile::tempdir().unwrap();
+    let dossier = d.path().join("pupitre");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&dossier)
+        .unwrap();
+    let socket = dossier.join("fond.sock");
+    let ecoute = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    (d, socket, ecoute)
+}
+
+/// Faux fond de la version 2 : refuse `Hello { 3 }`, accepte `Hello { 2 }` puis rend le
+/// premier message d'ouverture reçu.
+#[test]
+fn ouvrir_v3_ou_open_selon_le_fond() {
+    use pupitre_proto::{read_frame, write_frame};
+    let (_d, socket, ecoute) = faux_socket();
+    let serveur = std::thread::spawn(move || {
+        let (mut f, _) = ecoute.accept().unwrap();
+        assert_eq!(
+            read_frame::<_, ClientMsg>(&mut f).unwrap(),
+            ClientMsg::Hello { version: 3 }
+        );
+        write_frame(&mut f, &ServerMsg::Error("version incompatible".into())).unwrap();
+        drop(f);
+        let (mut f, _) = ecoute.accept().unwrap();
+        assert_eq!(
+            read_frame::<_, ClientMsg>(&mut f).unwrap(),
+            ClientMsg::Hello { version: 2 }
+        );
+        write_frame(&mut f, &ServerMsg::Welcome { version: 2 }).unwrap();
+        read_frame::<_, ClientMsg>(&mut f).unwrap()
+    });
+    let (c, _rx) = pupitre::client::connect_or_spawn_with(&socket, None).unwrap();
+    assert_eq!(c.version(), 2);
+    c.ouvrir(
+        Some(vec!["sh".into()]),
+        None,
+        80,
+        24,
+        vec![("A".into(), "1".into())],
+    )
+    .unwrap();
+    // Version 2 : l'ancien `Open`, sans les variables.
+    assert_eq!(
+        serveur.join().unwrap(),
+        ClientMsg::Open {
+            argv: Some(vec!["sh".into()]),
+            cwd: None,
+            cols: 80,
+            rows: 24,
+        }
+    );
+
+    // Vrai fond (version 3) : `Ouvrir`, avec les variables.
+    let (_d, socket) = dossier();
+    let (c, rx) = connect_or_spawn_at(&socket).unwrap();
+    assert_eq!(c.version(), 3);
+    c.ouvrir(
+        Some(vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "printf 'VAL=%s\\n' \"$MA_VAR\"; sleep 1".into(),
+        ]),
+        None,
+        80,
+        24,
+        vec![("MA_VAR".into(), "trois".into())],
+    )
+    .unwrap();
+    let mut tout = Vec::new();
+    attendre(&rx, |m| match m {
+        ServerMsg::Output { data, .. } => {
+            tout.extend(data);
+            String::from_utf8_lossy(&tout)
+                .contains("VAL=trois")
+                .then_some(())
+        }
+        _ => None,
+    });
+}
+
+/// Un fond qui ferme la connexion sans refuser explicitement ne fait pas rétrograder :
+/// l'erreur est montrée, une seule connexion est tentée.
+#[test]
+fn pas_de_retrogradation_sur_connexion_fermee() {
+    use pupitre_proto::read_frame;
+    let (_d, socket, ecoute) = faux_socket();
+    let serveur = std::thread::spawn(move || {
+        let mut vus = Vec::new();
+        // Ferme sans rien répondre, deux fois si le client réessayait.
+        ecoute.set_nonblocking(false).unwrap();
+        let (mut f, _) = ecoute.accept().unwrap();
+        if let ClientMsg::Hello { version } = read_frame(&mut f).unwrap() {
+            vus.push(version);
+        }
+        drop(f);
+        ecoute.set_nonblocking(true).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        if let Ok((mut f, _)) = ecoute.accept() {
+            f.set_nonblocking(false).unwrap();
+            if let Ok(ClientMsg::Hello { version }) = read_frame(&mut f) {
+                vus.push(version);
+            }
+        }
+        vus
+    });
+    let r = pupitre::client::connect_or_spawn_with(&socket, None);
+    assert!(r.is_err(), "l'erreur doit être montrée");
+    assert_eq!(serveur.join().unwrap(), vec![3]);
+
+    // Une réponse de trame illisible ne fait pas rétrograder non plus.
+    let (_d, socket, ecoute) = faux_socket();
+    let serveur = std::thread::spawn(move || {
+        use std::io::Write;
+        let (mut f, _) = ecoute.accept().unwrap();
+        let _ = read_frame::<_, ClientMsg>(&mut f);
+        f.write_all(&[2, 0, 0, 0, 255, 255]).unwrap();
+        drop(f);
+        ecoute.set_nonblocking(true).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        ecoute.accept().is_ok()
+    });
+    assert!(pupitre::client::connect_or_spawn_with(&socket, None).is_err());
+    assert!(!serveur.join().unwrap(), "pas de seconde connexion");
 }

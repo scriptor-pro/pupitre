@@ -37,6 +37,9 @@ pub enum ClientError {
     Injoignable(String),
     /// Le processus de fond a refusé la connexion (version différente…).
     Refus(String),
+    /// Réponse inattendue ou illisible à la poignée de main (pas un refus explicite : on
+    /// ne rétrograde pas).
+    Protocole(String),
     Io(io::Error),
     /// La connexion est fermée ; il faut se reconnecter.
     Deconnecte,
@@ -47,7 +50,9 @@ impl fmt::Display for ClientError {
         match self {
             ClientError::Lancement(e) => f.write_str(&erreur("client-lancement", e)),
             ClientError::Injoignable(e) => f.write_str(&erreur("client-injoignable", e)),
-            ClientError::Refus(e) => f.write_str(&erreur("client-refus", e)),
+            ClientError::Refus(e) | ClientError::Protocole(e) => {
+                f.write_str(&erreur("client-refus", e))
+            }
             ClientError::Io(e) => f.write_str(&erreur("client-io", &e.to_string())),
             ClientError::Deconnecte => f.write_str(&t("client-deconnecte")),
         }
@@ -80,6 +85,35 @@ impl Client {
     /// Version du protocole négociée (1 si le processus de fond est ancien).
     pub fn version(&self) -> u32 {
         self.version
+    }
+
+    /// Demande l'ouverture d'une session. Avec un processus de fond en version 3 ou plus :
+    /// `Ouvrir`, avec les variables d'environnement `env` ; avec une version 2 ou 1, l'ancien
+    /// `Open`, sans variables (le fond ne saurait pas les appliquer).
+    pub fn ouvrir(
+        &self,
+        argv: Option<Vec<String>>,
+        cwd: Option<PathBuf>,
+        cols: u16,
+        rows: u16,
+        env: Vec<(String, String)>,
+    ) -> Result<(), ClientError> {
+        self.send(if self.version >= 3 {
+            ClientMsg::Ouvrir {
+                argv: argv.unwrap_or_default(),
+                cwd,
+                cols,
+                rows,
+                env,
+            }
+        } else {
+            ClientMsg::Open {
+                argv,
+                cwd,
+                cols,
+                rows,
+            }
+        })
     }
 
     /// Met le message en file ; ne bloque jamais (un thread se charge de l'écriture).
@@ -120,15 +154,22 @@ pub fn connect_or_spawn_with(
             attendre_socket(socket)?
         }
     };
-    match demarrer(flux, VERSION) {
-        // Processus de fond plus ancien (qui tourne encore avec des onglets) : il ferme la
-        // connexion refusée, on en ouvre une autre en proposant la version 1. Le texte du refus
-        // n'est pas examiné : il dépend de la langue du processus de fond, qui peut différer
-        // de la nôtre (ou être celui d'une version sans traduction).
-        Err(ClientError::Refus(_)) if VERSION > VERSION_MIN => {
-            demarrer(UnixStream::connect(socket)?, VERSION_MIN)
+    // Un processus de fond plus ancien (qui tourne encore avec des onglets) refuse la version
+    // proposée par un `Error` puis ferme la connexion : on en ouvre une autre en proposant la
+    // version précédente, de la plus récente à la plus ancienne. Seul un refus explicite fait
+    // rétrograder : une connexion fermée ou une trame illisible est une vraie erreur, montrée
+    // telle quelle. Le texte du refus n'est pas examiné : il dépend de la langue du processus
+    // de fond, qui peut différer de la nôtre (ou être celui d'une version sans traduction).
+    let mut flux = flux;
+    let mut version = VERSION;
+    loop {
+        match demarrer(flux, version) {
+            Err(ClientError::Refus(_)) if version > VERSION_MIN => {
+                version -= 1;
+                flux = UnixStream::connect(socket)?;
+            }
+            autre => return autre,
         }
-        autre => autre,
     }
 }
 
@@ -193,13 +234,13 @@ fn demarrer(
         Ok(m @ ServerMsg::Welcome { .. }) => m,
         Ok(ServerMsg::Error(e)) => return Err(ClientError::Refus(e)),
         Ok(autre) => {
-            return Err(ClientError::Refus(ta(
+            return Err(ClientError::Protocole(ta(
                 "client-reponse-inattendue",
                 &[("nom", ArgI18n::from(autre.nom()))],
             )))
         }
         Err(FrameError::Io(e)) => return Err(ClientError::Injoignable(e.to_string())),
-        Err(e) => return Err(ClientError::Refus(e.to_string())),
+        Err(e) => return Err(ClientError::Protocole(e.to_string())),
     };
     lecture.set_read_timeout(None)?;
     let negociee = match accueil {

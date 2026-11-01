@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Un bus qui accepte la connexion mais ne répond jamais ne bloque pas Pupitre :
 //! le délai du trousseau est borné, et il est signalé comme tel (« le trousseau ne
-//! répond pas »), jamais comme une entrée ou un trousseau absents (sauf `etat()`, dont
-//! le type n'a que trois valeurs). Fichier à part (il modifie l'environnement).
+//! répond pas »), jamais comme une entrée ou un trousseau absents (`etat()` rend `Lent`).
+//! Fichier à part (il modifie l'environnement).
 
 use pupitre_ssh::trousseau::{
     Coffre, CoffreSecretService, ErreurTrousseau, EtatTrousseau, DELAI_TROUSSEAU,
@@ -30,7 +30,7 @@ fn bus_muet_signale_le_delai_en_temps_borne() {
     let coffre = CoffreSecretService::ouvrir();
     let cle = Path::new("/tmp/cle");
     let debut = Instant::now();
-    assert_eq!(coffre.etat(), EtatTrousseau::Absent);
+    assert_eq!(coffre.etat(), EtatTrousseau::Lent);
     assert!(
         debut.elapsed() < DELAI_TROUSSEAU + Duration::from_secs(1),
         "{:?}",

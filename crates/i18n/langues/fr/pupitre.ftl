@@ -145,6 +145,7 @@ demande-phrase-question-incorrecte = Phrase incorrecte. Phrase de passe de la cl
 demande-memoriser = Mémoriser dans le trousseau
 demande-trousseau-verrouille = Trousseau verrouillé : la phrase ne peut pas être mémorisée.
 demande-trousseau-absent = Aucun trousseau disponible : la phrase sera demandée à chaque fois.
+demande-trousseau-lent = Le trousseau ne répond pas pour l'instant : la phrase ne peut pas être mémorisée cette fois.
 demande-refuser = Refuser
 demande-faire-confiance = Faire confiance et se connecter
 demande-autoriser = Autoriser

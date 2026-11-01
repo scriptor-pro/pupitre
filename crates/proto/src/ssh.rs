@@ -12,6 +12,9 @@ pub enum EtatTrousseau {
     Verrouille,
     /// Pas de trousseau utilisable (service absent ou erreur).
     Absent,
+    /// Le trousseau n'a pas répondu dans le délai (version 3 ; un client en version 2 reçoit
+    /// `Absent` à la place).
+    Lent,
 }
 
 /// Nature d'une invite posée par OpenSSH (ou git) à travers `SSH_ASKPASS`.

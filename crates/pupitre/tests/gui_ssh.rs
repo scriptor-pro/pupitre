@@ -84,6 +84,7 @@ fn main() {
     ex.lancer("trousseau_absent_case_inactive", || {
         trousseau_absent(&pupitre, &cle)
     });
+    ex.lancer("trousseau_lent_texte", || trousseau_lent_texte(&pupitre));
     ex.lancer("fenetre_dans_la_bonne_fenetre", || {
         bonne_fenetre(&pupitre, &cle)
     });
@@ -559,6 +560,35 @@ fn trousseau_absent(p: &Rc<Pupitre>, cle: &Path) -> Resultat {
     verifier(
         etiq.iter()
             .any(|t| t == "Aucun trousseau disponible : la phrase sera demandée à chaque fois."),
+        || format!("explication absente : {etiq:?}"),
+    )
+}
+
+/// Trousseau lent : le texte validé, la case décochée et inactive.
+fn trousseau_lent_texte(p: &Rc<Pupitre>) -> Resultat {
+    use pupitre::demande::{ouvrir_demande, DemandeAffichee};
+    use pupitre_proto::{EtatTrousseau, Genre};
+    let parent = premiere_fenetre(p)?;
+    let d = DemandeAffichee {
+        invite: "Enter passphrase for /tmp/x: ".into(),
+        genre: Genre::PhraseCle {
+            cle: PathBuf::from("/tmp/x"),
+            nouvel_essai: false,
+        },
+        trousseau: EtatTrousseau::Lent,
+    };
+    let f = ouvrir_demande(parent.fenetre().upcast_ref(), &d, |_, _| {});
+    let c = case(&f);
+    let etiq = etiquettes(&f);
+    f.destroy();
+    let c = c?;
+    verifier(!c.is_sensitive() && !c.is_active(), || {
+        "la case devrait être inactive et décochée".into()
+    })?;
+    verifier(
+        etiq.iter().any(|t| {
+            t == "Le trousseau ne répond pas pour l'instant : la phrase ne peut pas être mémorisée cette fois."
+        }),
         || format!("explication absente : {etiq:?}"),
     )
 }

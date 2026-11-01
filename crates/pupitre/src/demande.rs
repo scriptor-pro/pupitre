@@ -101,6 +101,8 @@ pub fn ouvrir_demande(
             boite.append(&etiquette);
             boite.append(&saisie);
             let case = gtk::CheckButton::with_label(&t("demande-memoriser"));
+            // Seul un trousseau disponible permet de mémoriser : verrouillé, absent ou lent,
+            // la case est décochée et inactive.
             case.set_active(d.trousseau == EtatTrousseau::Disponible);
             case.set_sensitive(d.trousseau == EtatTrousseau::Disponible);
             boite.append(&case);
@@ -108,6 +110,7 @@ pub fn ouvrir_demande(
                 EtatTrousseau::Disponible => None,
                 EtatTrousseau::Verrouille => Some(t("demande-trousseau-verrouille")),
                 EtatTrousseau::Absent => Some(t("demande-trousseau-absent")),
+                EtatTrousseau::Lent => Some(t("demande-trousseau-lent")),
             };
             if let Some(texte) = explication {
                 let e = gtk::Label::builder()

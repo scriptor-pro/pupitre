@@ -12,8 +12,8 @@
 //! rend [`ErreurTrousseau::Delai`] (« le trousseau ne répond pas »), qui n'est
 //! jamais confondu avec une entrée absente ni avec un trousseau absent. Le fil
 //! en retard est abandonné et finit de lui-même (fuite bornée par le nombre
-//! d'opérations). Seul [`Coffre::etat`] rend « absent » dans ce cas : son type
-//! voyage dans le protocole et n'a que trois valeurs.
+//! d'opérations). [`Coffre::etat`] rend alors [`EtatTrousseau::Lent`], que l'interface
+//! explique à l'utilisateur ; toute autre panne y donne « absent ».
 //!
 //! Course connue : entre `is_locked` et `CreateItem`, le trousseau peut se
 //! verrouiller ; le démon afficherait alors sa propre demande de déverrouillage.
@@ -155,19 +155,7 @@ impl CoffreSecretService {
         &self,
         f: impl FnOnce(&Acces<'_>) -> T + Send + 'static,
     ) -> Result<T, ErreurTrousseau> {
-        let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("pupitre-trousseau".into())
-            .spawn(move || {
-                let _ = tx.send(Self::acceder(f));
-            })
-            .map_err(|e| ErreurTrousseau::Autre(e.to_string()))?;
-        rx.recv_timeout(DELAI_TROUSSEAU).map_err(|e| match e {
-            mpsc::RecvTimeoutError::Timeout => ErreurTrousseau::Delai,
-            mpsc::RecvTimeoutError::Disconnected => {
-                ErreurTrousseau::Autre(t("trousseau-fil-interrompu"))
-            }
-        })
+        borne(DELAI_TROUSSEAU, move || Self::acceder(f))
     }
 
     fn acceder<T>(f: impl FnOnce(&Acces<'_>) -> T) -> T {
@@ -186,19 +174,53 @@ impl CoffreSecretService {
     }
 }
 
+/// Exécute `f` sur un fil à part et attend au plus `delai`.
+fn borne<T: Send + 'static>(
+    delai: Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, ErreurTrousseau> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("pupitre-trousseau".into())
+        .spawn(move || {
+            let _ = tx.send(f());
+        })
+        .map_err(|e| ErreurTrousseau::Autre(e.to_string()))?;
+    rx.recv_timeout(delai).map_err(|e| match e {
+        mpsc::RecvTimeoutError::Timeout => ErreurTrousseau::Delai,
+        mpsc::RecvTimeoutError::Disconnected => {
+            ErreurTrousseau::Autre(t("trousseau-fil-interrompu"))
+        }
+    })
+}
+
+/// État calculé par `calcul` dans un délai de `delai` ; au-delà, `Lent`, et `Absent` si
+/// le calcul ne peut pas se faire.
+fn etat_borne(
+    delai: Duration,
+    calcul: impl FnOnce() -> EtatTrousseau + Send + 'static,
+) -> EtatTrousseau {
+    match borne(delai, calcul) {
+        Ok(e) => e,
+        Err(ErreurTrousseau::Delai) => EtatTrousseau::Lent,
+        Err(_) => EtatTrousseau::Absent,
+    }
+}
+
 fn attributs(cle: &str) -> HashMap<&str, &str> {
     HashMap::from([("application", APPLICATION), ("type", TYPE), ("cle", cle)])
 }
 
 impl Coffre for CoffreSecretService {
-    /// Délai dépassé : « absent » (voir la documentation du module).
+    /// Délai dépassé : « lent » (voir la documentation du module).
     fn etat(&self) -> EtatTrousseau {
-        self.avec_collection(|a| match a {
-            Acces::Pret(_) => EtatTrousseau::Disponible,
-            Acces::Verrouille => EtatTrousseau::Verrouille,
-            Acces::Absent => EtatTrousseau::Absent,
+        etat_borne(DELAI_TROUSSEAU, || {
+            Self::acceder(|a| match a {
+                Acces::Pret(_) => EtatTrousseau::Disponible,
+                Acces::Verrouille => EtatTrousseau::Verrouille,
+                Acces::Absent => EtatTrousseau::Absent,
+            })
         })
-        .unwrap_or(EtatTrousseau::Absent)
     }
 
     fn lire(&self, cle: &Path) -> Result<Option<Zeroizing<String>>, ErreurTrousseau> {
@@ -318,6 +340,22 @@ mod tests {
             Some("mot")
         );
         assert_eq!(c.etat(), EtatTrousseau::Disponible);
+    }
+
+    #[test]
+    fn etat_lent_si_delai_depasse() {
+        use std::time::Instant;
+        // Un coffre qui dort bien plus longtemps que le délai (injecté : pas de 10 s réelles).
+        let debut = Instant::now();
+        let etat = etat_borne(Duration::from_millis(50), || {
+            std::thread::sleep(Duration::from_millis(600));
+            EtatTrousseau::Disponible
+        });
+        assert_eq!(etat, EtatTrousseau::Lent);
+        assert!(debut.elapsed() < Duration::from_millis(400));
+        // Dans le délai : l'état calculé.
+        let etat = etat_borne(Duration::from_secs(5), || EtatTrousseau::Verrouille);
+        assert_eq!(etat, EtatTrousseau::Verrouille);
     }
 
     #[test]

@@ -94,29 +94,36 @@ fn mode_normal(
         dire(&t("askpass-socket-absent"));
         return 1;
     };
-    let mut flux = match UnixStream::connect(&socket) {
-        Ok(f) => f,
-        Err(e) => {
-            dire(&erreur("askpass-fond-injoignable", &e));
-            return 1;
+    // Poignée de main : un fond plus ancien (qui tourne encore avec des onglets après une
+    // mise à jour) refuse la version courante ; on retente alors en version 2.
+    let (mut flux, version) = match poignee(&socket, VERSION) {
+        Ok(r) => r,
+        Err(Poignee::Refus) if VERSION > VERSION_PRECEDENTE => {
+            match poignee(&socket, VERSION_PRECEDENTE) {
+                Ok(r) => r,
+                Err(e) => return e.dire(),
+            }
         }
+        Err(e) => return e.dire(),
     };
     let trousseau = match genre {
-        Genre::PhraseCle { .. } => coffre.etat(),
+        Genre::PhraseCle { .. } => match coffre.etat() {
+            // Un fond en version 2 ne connaît pas l'état « lent ».
+            EtatTrousseau::Lent if version < 3 => EtatTrousseau::Absent,
+            e => e,
+        },
         _ => EtatTrousseau::Absent,
     };
     let session = env("PUPITRE_SESSION").and_then(|s| s.parse().ok());
-    let envoi = write_frame(&mut flux, &ClientMsg::Hello { version: VERSION }).and_then(|()| {
-        write_frame(
-            &mut flux,
-            &ClientMsg::Demander {
-                session,
-                invite: invite.to_string(),
-                genre: genre.clone(),
-                trousseau,
-            },
-        )
-    });
+    let envoi = write_frame(
+        &mut flux,
+        &ClientMsg::Demander {
+            session,
+            invite: invite.to_string(),
+            genre: genre.clone(),
+            trousseau,
+        },
+    );
     if envoi.is_err() {
         dire(&t("askpass-envoi-echec"));
         return 1;
@@ -170,6 +177,41 @@ fn mode_normal(
     }
 }
 
+/// Dernière version du protocole avant la courante, où l'askpass sait encore parler.
+const VERSION_PRECEDENTE: u32 = 2;
+
+/// Échec de la poignée de main avec le processus de fond.
+enum Poignee {
+    /// Le fond a refusé la version proposée.
+    Refus,
+    /// Injoignable, connexion fermée ou réponse illisible.
+    Echec(String),
+}
+
+impl Poignee {
+    /// Dit l'échec sur la sortie d'erreur ; code de sortie de l'askpass.
+    fn dire(self) -> i32 {
+        match self {
+            Poignee::Refus => dire(&t("askpass-connexion-fermee")),
+            Poignee::Echec(m) => dire(&m),
+        }
+        1
+    }
+}
+
+/// Se connecte au fond et échange `Hello`/`Welcome` en proposant `version`.
+fn poignee(socket: &str, version: u32) -> Result<(UnixStream, u32), Poignee> {
+    let mut flux = UnixStream::connect(socket)
+        .map_err(|e| Poignee::Echec(erreur("askpass-fond-injoignable", &e)))?;
+    write_frame(&mut flux, &ClientMsg::Hello { version })
+        .map_err(|_| Poignee::Echec(t("askpass-envoi-echec")))?;
+    match read_frame::<_, ServerMsg>(&mut flux) {
+        Ok(ServerMsg::Welcome { version: v }) => Ok((flux, v.min(version))),
+        Ok(ServerMsg::Error(_)) => Err(Poignee::Refus),
+        Ok(_) | Err(_) => Err(Poignee::Echec(t("askpass-connexion-fermee"))),
+    }
+}
+
 /// Mémorise la phrase ; un échec est signalé mais n'empêche pas la connexion.
 fn memoriser_phrase(coffre: &dyn Coffre, cle: &std::path::Path, phrase: &str) -> bool {
     match coffre.ecrire(cle, phrase) {
@@ -216,7 +258,7 @@ mod tests {
             let (mut s, _) = l.accept().unwrap();
             let mut recus = Vec::new();
             recus.push(read_frame::<_, ClientMsg>(&mut s).unwrap()); // Hello
-            write_frame(&mut s, &ServerMsg::Welcome { version: 2 }).unwrap();
+            write_frame(&mut s, &ServerMsg::Welcome { version: VERSION }).unwrap();
             recus.push(read_frame::<_, ClientMsg>(&mut s).unwrap()); // Demander
             write_frame(&mut s, &ServerMsg::Message("à ignorer".into())).unwrap();
             write_frame(&mut s, &ServerMsg::DemandeClose { demande: 77 }).unwrap();
@@ -295,6 +337,107 @@ mod tests {
         assert!(sortie.is_empty());
         let _ = std::fs::remove_file(&socket);
         h.join().unwrap();
+    }
+
+    /// Coffre dont le trousseau est lent à répondre.
+    struct CoffreLent;
+    impl Coffre for CoffreLent {
+        fn etat(&self) -> EtatTrousseau {
+            EtatTrousseau::Lent
+        }
+        fn lire(
+            &self,
+            _: &Path,
+        ) -> Result<Option<Zeroizing<String>>, crate::trousseau::ErreurTrousseau> {
+            Err(crate::trousseau::ErreurTrousseau::Delai)
+        }
+        fn ecrire(&self, _: &Path, _: &str) -> Result<(), crate::trousseau::ErreurTrousseau> {
+            Err(crate::trousseau::ErreurTrousseau::Delai)
+        }
+        fn oublier(&self, _: &Path) -> Result<(), crate::trousseau::ErreurTrousseau> {
+            Err(crate::trousseau::ErreurTrousseau::Delai)
+        }
+        fn cles(&self) -> Vec<PathBuf> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn trousseau_lent_transmis_a_un_fond_v3_et_jamais_memorise() {
+        let t = tempfile::tempdir().unwrap();
+        let (socket, h) = faux_fond(t.path(), Some(Some("p")), true);
+        let mut vars = vec![("PUPITRE_SOCKET", socket.to_string_lossy().into_owned())];
+        vars.push(("PUPITRE_SESSION", "5".to_string()));
+        let mut sortie = Vec::new();
+        let code = executer(
+            &args(&invite_cle()),
+            &env_de(vars),
+            &CoffreLent,
+            &mut sortie,
+        );
+        assert_eq!(code, 0);
+        assert_eq!(sortie, b"p\n");
+        let recus = h.join().unwrap();
+        assert!(matches!(
+            &recus[1],
+            ClientMsg::Demander {
+                trousseau: EtatTrousseau::Lent,
+                ..
+            }
+        ));
+        // Pas de chargement dans l'agent : rien n'a été mémorisé.
+        assert_eq!(recus.len(), 2);
+    }
+
+    /// Fond en version 2 : refuse `Hello { 3 }` puis accepte `Hello { 2 }` ; il ne doit
+    /// jamais voir l'état « lent ».
+    #[test]
+    fn repli_v2_face_a_un_fond_ancien() {
+        let t = tempfile::tempdir().unwrap();
+        let socket = t.path().join("fond.sock");
+        let l = UnixListener::bind(&socket).unwrap();
+        let h = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            assert_eq!(
+                read_frame::<_, ClientMsg>(&mut s).unwrap(),
+                ClientMsg::Hello { version: 3 }
+            );
+            write_frame(&mut s, &ServerMsg::Error("version incompatible".into())).unwrap();
+            drop(s);
+            let (mut s, _) = l.accept().unwrap();
+            assert_eq!(
+                read_frame::<_, ClientMsg>(&mut s).unwrap(),
+                ClientMsg::Hello { version: 2 }
+            );
+            write_frame(&mut s, &ServerMsg::Welcome { version: 2 }).unwrap();
+            let demande = read_frame::<_, ClientMsg>(&mut s).unwrap();
+            write_frame(
+                &mut s,
+                &ServerMsg::Reponse {
+                    reponse: Some(Zeroizing::new("p".to_string())),
+                    memoriser: false,
+                },
+            )
+            .unwrap();
+            demande
+        });
+        let vars = vec![("PUPITRE_SOCKET", socket.to_string_lossy().into_owned())];
+        let mut sortie = Vec::new();
+        let code = executer(
+            &args(&invite_cle()),
+            &env_de(vars),
+            &CoffreLent,
+            &mut sortie,
+        );
+        assert_eq!(code, 0);
+        assert_eq!(sortie, b"p\n");
+        assert!(matches!(
+            h.join().unwrap(),
+            ClientMsg::Demander {
+                trousseau: EtatTrousseau::Absent,
+                ..
+            }
+        ));
     }
 
     #[test]

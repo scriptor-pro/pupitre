@@ -198,7 +198,8 @@ pub fn executer(coffre: &dyn Coffre, agent: &Path, askpass: &Path, travail: &Tra
             rapport.verrouille = true;
             return rapport;
         }
-        EtatTrousseau::Absent => return rapport,
+        // Absent ou lent : rien à charger cette fois (le réessai viendra plus tard).
+        EtatTrousseau::Absent | EtatTrousseau::Lent => return rapport,
         EtatTrousseau::Disponible => {}
     }
     let mut cles = if travail.toutes {

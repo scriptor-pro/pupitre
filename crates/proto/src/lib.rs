@@ -14,8 +14,10 @@ pub use ssh::{EtatTrousseau, Genre};
 pub use trame::{read_frame, write_frame, FrameError, MAX_FRAME};
 
 /// Version courante du protocole ; échangée dans `Hello`/`Welcome`.
-/// La version 2 ajoute les demandes de l'askpass SSH ; elle reste compatible avec la 1.
-pub const VERSION: u32 = 2;
+/// La version 2 ajoute les demandes de l'askpass SSH ; la version 3 l'ouverture d'un onglet
+/// avec des variables d'environnement, les marques de commandes et l'état « trousseau
+/// lent ». Chacune reste compatible avec les précédentes.
+pub const VERSION: u32 = 3;
 /// Plus ancienne version encore acceptée par le processus de fond.
 pub const VERSION_MIN: u32 = 1;
 
@@ -76,6 +78,16 @@ pub enum ClientMsg {
     ChargerCle {
         cle: PathBuf,
     },
+    // Variantes de la version 3 : à la fin, et jamais envoyées à un fond en version 2.
+    /// Ouvre une session avec des variables d'environnement en plus de celles du fond ;
+    /// `argv` vide = shell de connexion.
+    Ouvrir {
+        argv: Vec<String>,
+        cwd: Option<PathBuf>,
+        cols: u16,
+        rows: u16,
+        env: Vec<(String, String)>,
+    },
 }
 
 /// Messages envoyés par le processus de fond à l'interface.
@@ -128,6 +140,30 @@ pub enum ServerMsg {
     },
     /// Texte à montrer dans le bandeau de toutes les fenêtres.
     Message(String),
+    // Variante de la version 3 : jamais envoyée à un client en version 1 ou 2.
+    /// Une marque de commande a été vue dans la sortie de la session ; `rejouee` vrai si
+    /// elle vient du tampon de relecture et non du flux en direct.
+    Marque {
+        id: SessionId,
+        marque: MarqueCommande,
+        rejouee: bool,
+    },
+}
+
+/// Étape d'une commande, repérée dans la sortie du shell (séquences OSC 133 A, B, C, D).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarqueCommande {
+    /// A : l'invite commence.
+    Invite,
+    /// B : l'invite est finie, la saisie commence.
+    Saisie,
+    /// C : la commande saisie s'exécute.
+    Execution,
+    /// D : la commande est finie, avec son code de sortie et sa durée si le shell les donne.
+    Fin {
+        code: Option<i32>,
+        duree_ms: Option<u64>,
+    },
 }
 
 /// Réponse d'un utilisateur pour `Debug` : jamais son contenu (phrase de passe).
@@ -201,6 +237,25 @@ impl std::fmt::Debug for ClientMsg {
             ClientMsg::ChargerCle { cle } => {
                 f.debug_struct("ChargerCle").field("cle", cle).finish()
             }
+            // Les variables d'environnement peuvent porter des secrets : seuls les noms
+            // sont montrés.
+            ClientMsg::Ouvrir {
+                argv,
+                cwd,
+                cols,
+                rows,
+                env,
+            } => f
+                .debug_struct("Ouvrir")
+                .field("argv", argv)
+                .field("cwd", cwd)
+                .field("cols", cols)
+                .field("rows", rows)
+                .field(
+                    "env",
+                    &env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+                )
+                .finish(),
         }
     }
 }
@@ -261,6 +316,16 @@ impl std::fmt::Debug for ServerMsg {
                 .field("memoriser", memoriser)
                 .finish(),
             ServerMsg::Message(t) => f.debug_tuple("Message").field(t).finish(),
+            ServerMsg::Marque {
+                id,
+                marque,
+                rejouee,
+            } => f
+                .debug_struct("Marque")
+                .field("id", id)
+                .field("marque", marque)
+                .field("rejouee", rejouee)
+                .finish(),
         }
     }
 }
@@ -282,7 +347,14 @@ impl ServerMsg {
             ServerMsg::DemandeClose { .. } => "DemandeClose",
             ServerMsg::Reponse { .. } => "Reponse",
             ServerMsg::Message(_) => "Message",
+            ServerMsg::Marque { .. } => "Marque",
         }
+    }
+
+    /// Vrai pour les variantes introduites par la version 3, qu'un client en version 1 ou 2
+    /// ne sait pas décoder.
+    pub fn est_v3(&self) -> bool {
+        matches!(self, ServerMsg::Marque { .. })
     }
 
     /// Vrai pour les variantes introduites par la version 2, qu'un client en version 1
@@ -397,6 +469,123 @@ mod tests {
             postcard::to_stdvec(&ServerMsg::DemandeClose { demande: 0 }).unwrap()[0],
             10
         );
+    }
+
+    /// Octets de la version 2, figés avant l'ajout de la version 3.
+    #[test]
+    fn encodage_v2_inchange() {
+        let c = |m: &ClientMsg| postcard::to_stdvec(m).unwrap();
+        let s = |m: &ServerMsg| postcard::to_stdvec(m).unwrap();
+        assert_eq!(c(&ClientMsg::ChargerCle { cle: "a".into() }), [9, 1, 97]);
+        assert_eq!(
+            c(&ClientMsg::Demander {
+                session: Some(2),
+                invite: "x".into(),
+                genre: Genre::Texte { masque: true },
+                trousseau: EtatTrousseau::Absent,
+            }),
+            [7, 1, 2, 1, 120, 4, 1, 2]
+        );
+        assert_eq!(
+            c(&ClientMsg::Repondre {
+                demande: 1,
+                reponse: Some("y".to_string().into()),
+                memoriser: true,
+            }),
+            [8, 1, 1, 1, 121, 1]
+        );
+        assert_eq!(s(&ServerMsg::DemandeClose { demande: 5 }), [10, 5]);
+        assert_eq!(s(&ServerMsg::Message("x".into())), [12, 1, 120]);
+        assert_eq!(
+            s(&ServerMsg::Demande {
+                demande: 1,
+                session: None,
+                invite: String::new(),
+                genre: Genre::HoteInconnu,
+                trousseau: EtatTrousseau::Verrouille,
+            }),
+            [9, 1, 0, 0, 1, 1]
+        );
+    }
+
+    #[test]
+    fn nouvelles_variantes_v3_aller_retour() {
+        fn ar<T: Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(m: T) {
+            let o = postcard::to_stdvec(&m).unwrap();
+            assert_eq!(postcard::from_bytes::<T>(&o).unwrap(), m);
+        }
+        ar(ClientMsg::Ouvrir {
+            argv: vec!["sh".into()],
+            cwd: Some(PathBuf::from("/tmp")),
+            cols: 80,
+            rows: 24,
+            env: vec![("A".into(), "1".into()), ("B".into(), String::new())],
+        });
+        ar(ClientMsg::Ouvrir {
+            argv: vec![],
+            cwd: None,
+            cols: 1,
+            rows: 1,
+            env: vec![],
+        });
+        for marque in [
+            MarqueCommande::Invite,
+            MarqueCommande::Saisie,
+            MarqueCommande::Execution,
+            MarqueCommande::Fin {
+                code: Some(-1),
+                duree_ms: Some(1500),
+            },
+            MarqueCommande::Fin {
+                code: None,
+                duree_ms: None,
+            },
+        ] {
+            ar(ServerMsg::Marque {
+                id: 7,
+                marque,
+                rejouee: true,
+            });
+        }
+        ar(ClientMsg::Demander {
+            session: None,
+            invite: String::new(),
+            genre: Genre::HoteInconnu,
+            trousseau: EtatTrousseau::Lent,
+        });
+        // Indices : les nouvelles variantes suivent les anciennes.
+        let ouvrir = ClientMsg::Ouvrir {
+            argv: vec![],
+            cwd: None,
+            cols: 0,
+            rows: 0,
+            env: vec![],
+        };
+        assert_eq!(postcard::to_stdvec(&ouvrir).unwrap()[0], 10);
+        let marque = ServerMsg::Marque {
+            id: 0,
+            marque: MarqueCommande::Invite,
+            rejouee: false,
+        };
+        assert_eq!(postcard::to_stdvec(&marque).unwrap()[0], 13);
+        assert!(marque.est_v3() && !marque.est_v2());
+        assert_eq!(marque.nom(), "Marque");
+        assert_eq!(postcard::to_stdvec(&EtatTrousseau::Lent).unwrap(), [3]);
+        // Les valeurs v2 de l'état ne bougent pas.
+        assert_eq!(postcard::to_stdvec(&EtatTrousseau::Absent).unwrap(), [2]);
+    }
+
+    #[test]
+    fn debug_ouvrir_ne_montre_pas_les_valeurs() {
+        let m = ClientMsg::Ouvrir {
+            argv: vec![],
+            cwd: None,
+            cols: 1,
+            rows: 1,
+            env: vec![("JETON".into(), "VALEUR-SECRETE".into())],
+        };
+        let t = format!("{m:?}");
+        assert!(t.contains("JETON") && !t.contains("VALEUR-SECRETE"), "{t}");
     }
 
     #[test]

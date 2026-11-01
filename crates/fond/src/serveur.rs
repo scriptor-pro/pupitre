@@ -422,8 +422,22 @@ impl Etat {
                 cols,
                 rows,
             } => {
-                self.ouvrir(cid, &argv.unwrap_or_default(), cwd.as_deref(), cols, rows);
+                self.ouvrir(
+                    cid,
+                    &argv.unwrap_or_default(),
+                    cwd.as_deref(),
+                    cols,
+                    rows,
+                    Vec::new(),
+                );
             }
+            ClientMsg::Ouvrir {
+                argv,
+                cwd,
+                cols,
+                rows,
+                env,
+            } => self.ouvrir(cid, &argv, cwd.as_deref(), cols, rows, env),
             ClientMsg::Input { id, data } => match self.sessions.get(&id) {
                 // Envoi par un thread dédié : un programme qui ne lit pas sa saisie ne
                 // bloque pas le serveur.
@@ -677,8 +691,22 @@ impl Etat {
         Some(c)
     }
 
-    fn ouvrir(&mut self, cid: ClientId, argv: &[String], cwd: Option<&Path>, cols: u16, rows: u16) {
-        let env = self.ssh.variables(self.prochain_id);
+    fn ouvrir(
+        &mut self,
+        cid: ClientId,
+        argv: &[String],
+        cwd: Option<&Path>,
+        cols: u16,
+        rows: u16,
+        env_client: Vec<(String, String)>,
+    ) {
+        // Les variables du client d'abord : celles du fond (agent, askpass, session) passent
+        // après et l'emportent, pour que l'interface ne puisse pas détourner l'agent isolé.
+        let mut env: Vec<(String, String)> = env_client
+            .into_iter()
+            .filter(|(k, v)| !k.is_empty() && !k.contains(['=', '\0']) && !v.contains('\0'))
+            .collect();
+        env.extend(self.ssh.variables(self.prochain_id));
         if self.chargement.reessai {
             self.chargement.attente.toutes = true;
         }
@@ -771,14 +799,15 @@ impl Etat {
     }
 
     /// Met un message dans la file d'un client ; un client qui ne suit plus est coupé.
-    /// Un message de la version 2 n'est jamais envoyé à un client en version 1.
+    /// Un message d'une version plus récente que celle du client ne lui est jamais envoyé
+    /// (voir [`adapter_pour`]).
     fn envoyer(&mut self, cid: ClientId, m: ServerMsg) {
         let Some(c) = self.clients.get(&cid) else {
             return;
         };
-        if m.est_v2() && c.version < 2 {
+        let Some(m) = adapter_pour(m, c.version) else {
             return;
-        }
+        };
         match c.file.try_send(m) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => self.couper(cid),
@@ -811,6 +840,32 @@ impl Etat {
         if let Some(c) = self.retirer(cid) {
             let _ = c.flux.shutdown(Shutdown::Both);
         }
+    }
+}
+
+/// Message tel qu'un client en `version` peut le recevoir, ou `None` s'il ne doit rien
+/// recevoir : un message de la version 2 n'est jamais envoyé à un client en version 1, ni
+/// une marque de commande (version 3) à un client en version 1 ou 2 ; l'état « trousseau
+/// lent » (version 3) devient « absent » pour un client en version 2.
+pub fn adapter_pour(m: ServerMsg, version: u32) -> Option<ServerMsg> {
+    if (m.est_v2() && version < 2) || (m.est_v3() && version < 3) {
+        return None;
+    }
+    match m {
+        ServerMsg::Demande {
+            demande,
+            session,
+            invite,
+            genre,
+            trousseau: pupitre_proto::EtatTrousseau::Lent,
+        } if version < 3 => Some(ServerMsg::Demande {
+            demande,
+            session,
+            invite,
+            genre,
+            trousseau: pupitre_proto::EtatTrousseau::Absent,
+        }),
+        m => Some(m),
     }
 }
 

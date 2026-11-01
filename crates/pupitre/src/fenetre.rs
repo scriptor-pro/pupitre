@@ -510,12 +510,7 @@ impl Pupitre {
         self.attentes
             .borrow_mut()
             .push_back(Attente::Remplacer(Rc::downgrade(onglet)));
-        self.envoyer(ClientMsg::Open {
-            argv: None,
-            cwd: None,
-            cols,
-            rows,
-        });
+        self.ouvrir_session(None, cols, rows);
     }
 
     fn connecter(self: &Rc<Self>) -> Result<(), String> {
@@ -539,6 +534,14 @@ impl Pupitre {
             }
         });
         Ok(())
+    }
+
+    /// Demande l'ouverture d'une session (variables d'environnement : aucune pour l'instant).
+    fn ouvrir_session(&self, argv: Option<Vec<String>>, cols: u16, rows: u16) {
+        if let Some(c) = self.client.borrow().as_ref() {
+            // Échec = connexion perdue, signalée par ailleurs sur le canal.
+            let _ = c.ouvrir(argv, None, cols, rows, Vec::new());
+        }
     }
 
     fn envoyer(&self, m: ClientMsg) {
@@ -692,6 +695,8 @@ impl Pupitre {
                 },
             ),
             ServerMsg::DemandeClose { demande } => self.fermer_demande(demande),
+            // Les marques de commandes sont utilisées par la navigation entre commandes.
+            ServerMsg::Marque { .. } => {}
             ServerMsg::Message(t) => {
                 let fenetres = self.fenetres();
                 if fenetres.is_empty() {
@@ -1052,12 +1057,7 @@ impl FenetrePupitre {
         p.attentes
             .borrow_mut()
             .push_back(Attente::NouvelOnglet(Rc::downgrade(&self.0), titre));
-        p.envoyer(ClientMsg::Open {
-            argv,
-            cwd: None,
-            cols,
-            rows,
-        });
+        p.ouvrir_session(argv, cols, rows);
     }
 
     /// Déplace l'onglet de la session `id` dans une nouvelle fenêtre (s'il n'est pas seul).
