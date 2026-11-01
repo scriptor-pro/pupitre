@@ -45,7 +45,7 @@ fn isoler_ssh() -> &'static std::path::Path {
         std::env::set_var("TMPDIR", &tmp);
         // Le fond charge les clés mémorisées du trousseau : hors du trousseau jetable des
         // scripts de test, il ne doit voir aucun bus (donc jamais le vrai trousseau).
-        if std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_none() {
+        if !trousseau_jetable_verifie(std::env::var("PUPITRE_TROUSSEAU_JETABLE").ok()) {
             std::env::set_var(
                 "DBUS_SESSION_BUS_ADDRESS",
                 "unix:path=/nonexistent/pupitre-test",
@@ -56,12 +56,34 @@ fn isoler_ssh() -> &'static std::path::Path {
     .path()
 }
 
+/// Vrai seulement si `marque` (valeur de `PUPITRE_TROUSSEAU_JETABLE`, posée par
+/// `scripts/trousseau-test.sh`) est le PID du démon qui possède `org.freedesktop.secrets`
+/// sur le bus courant : une variable égarée (shell lancé sous le script, ancienne valeur
+/// « 1 ») ne suffit jamais à approcher un trousseau.
+fn trousseau_jetable_verifie(marque: Option<String>) -> bool {
+    let Some(pid) = marque.filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    else {
+        return false;
+    };
+    std::process::Command::new("busctl")
+        .args(["--user", "status", "org.freedesktop.secrets"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .is_some_and(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|l| l.strip_prefix("PID=") == Some(pid.as_str()))
+        })
+}
+
 fn dossier() -> (tempfile::TempDir, PathBuf) {
     binaire_fond();
     isoler_ssh();
     // Garde : le fond de ces tests ne voit jamais le trousseau réel de l'utilisateur.
     assert!(
-        std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_some()
+        trousseau_jetable_verifie(std::env::var("PUPITRE_TROUSSEAU_JETABLE").ok())
             || std::env::var("DBUS_SESSION_BUS_ADDRESS").is_ok_and(|a| a.contains("/nonexistent/")),
         "bus D-Bus réel visible par le fond des tests"
     );

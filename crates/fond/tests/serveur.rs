@@ -768,10 +768,33 @@ fn demandeur_ne_retient_pas_le_fond() {
 // Chargement des clés mémorisées dans l'agent
 // ---------------------------------------------------------------------------------------
 
-/// Garde : ces tests écrivent dans le trousseau, ils ne tournent que sous le trousseau
-/// jetable de `scripts/trousseau-test.sh` (voir `scripts/test-x11.sh`).
+/// Vrai seulement si `marque` (valeur de `PUPITRE_TROUSSEAU_JETABLE`, posée par
+/// `scripts/trousseau-test.sh`) est le PID du démon qui possède `org.freedesktop.secrets`
+/// sur le bus courant : une variable égarée (shell lancé sous le script, ancienne valeur
+/// « 1 ») ne suffit jamais à approcher un trousseau.
+fn trousseau_jetable_verifie(marque: Option<String>) -> bool {
+    let Some(pid) = marque.filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    else {
+        return false;
+    };
+    std::process::Command::new("busctl")
+        .args(["--user", "status", "org.freedesktop.secrets"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .is_some_and(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|l| l.strip_prefix("PID=") == Some(pid.as_str()))
+        })
+}
+
+/// Garde : ces tests écrivent dans le trousseau (et le vident), ils ne tournent que sous le
+/// trousseau jetable de `scripts/trousseau-test.sh` (voir `scripts/test-x11.sh`), vérifié
+/// par son PID.
 fn jetable() -> bool {
-    let ok = std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_some();
+    let ok = trousseau_jetable_verifie(std::env::var("PUPITRE_TROUSSEAU_JETABLE").ok());
     if !ok {
         println!("ignoré : trousseau jetable absent");
     }
@@ -1137,6 +1160,24 @@ fn reessai_garde_apres_un_chargement_ponctuel() {
     }
     drop((ui, ask));
     arreter(s);
+}
+
+#[test]
+fn garde_du_trousseau_exige_le_pid_du_demon() {
+    // L'ancien marqueur « 1 », une valeur quelconque ou absente : refus, sans exception.
+    for marque in [
+        None,
+        Some(""),
+        Some("1"),
+        Some("oui"),
+        Some("0"),
+        Some("12 34"),
+    ] {
+        assert!(
+            !trousseau_jetable_verifie(marque.map(str::to_string)),
+            "{marque:?}"
+        );
+    }
 }
 
 #[test]

@@ -46,8 +46,10 @@ fn main() {
     gtk::init().unwrap();
 
     let trousseau = TrousseauJetable::demarrer();
-    if trousseau.is_some() {
-        std::env::set_var("PUPITRE_TROUSSEAU_JETABLE", "1");
+    if let Some(t) = &trousseau {
+        // Le PID du démon jetable, comme `scripts/trousseau-test.sh` : les gardes le
+        // comparent au propriétaire du Secret Service du bus.
+        std::env::set_var("PUPITRE_TROUSSEAU_JETABLE", t.demon.id().to_string());
     }
     std::env::set_var("PUPITRE_FOND", fond_sans_trousseau());
 

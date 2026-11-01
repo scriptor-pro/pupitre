@@ -73,7 +73,7 @@ pub fn compiler() {
 pub fn fond_sans_trousseau() -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let reel = racine().join("target/debug/pupitre-fond");
-    if std::env::var_os("PUPITRE_TROUSSEAU_JETABLE").is_some() {
+    if trousseau_jetable_verifie(std::env::var("PUPITRE_TROUSSEAU_JETABLE").ok()) {
         return reel;
     }
     static DOSSIER: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
@@ -89,6 +89,28 @@ pub fn fond_sans_trousseau() -> PathBuf {
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
     script
+}
+
+/// Vrai seulement si `marque` (valeur de `PUPITRE_TROUSSEAU_JETABLE`, posée par
+/// `scripts/trousseau-test.sh`) est le PID du démon qui possède `org.freedesktop.secrets`
+/// sur le bus courant : une variable égarée (shell lancé sous le script, ancienne valeur
+/// « 1 ») ne suffit jamais à approcher un trousseau.
+pub fn trousseau_jetable_verifie(marque: Option<String>) -> bool {
+    let Some(pid) = marque.filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    else {
+        return false;
+    };
+    std::process::Command::new("busctl")
+        .args(["--user", "status", "org.freedesktop.secrets"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .is_some_and(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|l| l.strip_prefix("PID=") == Some(pid.as_str()))
+        })
 }
 
 /// Dossier personnel et dossiers XDG vides : rien de l'utilisateur n'est lu ni écrit.

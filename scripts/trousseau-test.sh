@@ -39,6 +39,7 @@ if [ "$PROPRIETAIRE" != "$DEMON" ]; then
   echo "trousseau-test.sh : le Secret Service du bus n'est pas le démon jetable (bus=$PROPRIETAIRE démon=$DEMON)" >&2
   exit 1
 fi
-# Marqueur : les tests réels refusent de tourner sans lui.
-export PUPITRE_TROUSSEAU_JETABLE=1
+# Marqueur : le PID du démon jetable. Les tests réels refusent de tourner si le
+# Secret Service du bus n'appartient pas à ce PID (busctl --user status).
+export PUPITRE_TROUSSEAU_JETABLE="$DEMON"
 "$@"
