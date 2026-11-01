@@ -189,11 +189,32 @@ Ligne 1 : heure (`bright-black`), charge 1 min lue dans `/proc/loadavg` (module 
 
 ---
 
+### Task 7bis : Aide dans Pupitre, disponible hors ligne
+
+Demandée par le porteur le 2026-11-01.
+
+**Files :** Create: `crates/pupitre/src/aide.rs` ; Modify: `crates/pupitre/src/fenetre.rs` (menu, action `win.aide`), `crates/pupitre/src/raccourcis.rs` (`Raccourci::Aide`), `crates/pupitre/src/main.rs` (`pupitre aide` affiche l'aide complète), `assets/aide/aide.md`.
+
+**Interfaces :**
+- Produces : `const AIDE: &str = include_str!("../../../assets/aide/aide.md")` (l'aide est **dans l'exécutable** : toujours disponible, sans réseau ni fichier installé) ; `struct Section { titre: String, niveau: u8, texte: String }` ; `fn sections(aide: &str) -> Vec<Section>` (découpe aux titres `#`, `##`, `###`) ; `fn ouvrir_aide(app: &gtk::Application, parent: Option<&gtk::Window>, section: Option<&str>)` (une seule fenêtre d'aide : la rouvrir la ramène au premier plan).
+
+**Fenêtre « Aide de Pupitre »** : à gauche, la liste des sections (`GtkListBox`, chaque ligne rôle titre et niveau) ; à droite, le texte de la section choisie dans un `GtkTextView` en lecture seule, curseur visible (Orca le lit ligne par ligne et mot par mot). Mise en forme minimale : titres en gras, blocs de code en police du terminal, tableaux rendus en lignes « Action : raccourci » (un tableau Markdown n'est pas lisible tel quel par Orca). Champ « Rechercher dans l'aide » (filtre les sections contenant le texte). Échap ferme. Ctrl+Tab passe d'une zone à l'autre. Taille du texte : suit le zoom de la configuration de police. Couleurs : celles du thème de Pupitre (contraste vérifié).
+
+**Raccourci : Ctrl+Maj+H** (et entrée de menu « Aide » en fin de menu). **F1 n'est pas pris** : comme F10, il reste aux programmes (aide de mc, htop, vim…).
+
+- [ ] **Step 1 : Tests** : `sections_decoupees` (titres de `AIDE` dans l'ordre, aucun texte perdu : la concaténation des textes et des titres redonne tout le contenu hors marques `#`) ; `tableau_lisible` (une ligne `| Nouvel onglet | Ctrl+Maj+T |` devient « Nouvel onglet : Ctrl+Maj+T ») ; `raccourcis_de_l_aide_conformes` (chaque raccourci cité dans la section 2 de `AIDE` est reconnu par `raccourci()` avec l'action annoncée — l'aide ne peut pas mentir sur les raccourcis) ; `raccourci_aide` (Ctrl+Maj+H → `Raccourci::Aide` ; F1 → `None`). Graphiques : `aide_ouverte_par_le_menu` (fenêtre « Aide de Pupitre », rattachée à l'application, liste non vide, focus sur la liste) ; `aide_unique` (deux ouvertures → une seule fenêtre) ; `aide_echap_ferme`. CLI : `pupitre aide` → code 0, contient « Raccourcis clavier ».
+- [ ] **Step 2 :** échec.
+- [ ] **Step 3 : Implémenter.** Pas de dépendance Markdown : le découpage et la mise en forme minimale ci-dessus suffisent pour ce fichier, écrit par nous.
+- [ ] **Step 4 :** tests verts ; Orca automatisé (Orca muet) : vérification 19 — Ctrl+Maj+H → Orca dit « Aide de Pupitre » puis le nom de la première section.
+- [ ] **Step 5 : Commit** `feat(pupitre): aide intégrée (Ctrl+Maj+H), disponible hors ligne`.
+
+---
+
 ### Task 8 : Orca, isolement, VM
 
 **Files :** Modify: `tests/a11y/orca/scenario.py`, `tests/a11y/orca/attendu/*.json`, `docs/orca-liste-de-controle.md`, `tests/isolement/verifier.py`, `tests/vm/commun.sh`.
 
-- [ ] **Step 1 : Orca (automatisé, Orca muet)** : vérification 17 — `sleep 6` dans un onglet bash intégré → Orca dit « Commande terminée en 6 s. » ; vérification 18 — après `echo un`, `echo deux`, Ctrl+Maj+↑ → Orca dit « Commande : echo deux », encore → « Commande : echo un ». 18/18 trois fois de suite.
+- [ ] **Step 1 : Orca (automatisé, Orca muet)** : vérification 17 — `sleep 6` dans un onglet bash intégré → Orca dit « Commande terminée en 6 s. » ; vérification 18 — après `echo un`, `echo deux`, Ctrl+Maj+↑ → Orca dit « Commande : echo deux », encore → « Commande : echo un ». 19/19 trois fois de suite.
 - [ ] **Step 2 : Isolement** : `starship` ajouté aux programmes jugés ; session type avec invite Starship dans un dépôt git → aucune connexion réseau, aucune écriture hors des dossiers de Pupitre, `~/.config/starship.toml` jamais ouvert.
 - [ ] **Step 3 : VM** : `tests/vm/commun.sh` gagne deux essais — « invite Starship affichée » (texte du terminal lu par AT-SPI contient `λ`) et « fin de commande annoncée » (événement d'annonce AT-SPI reçu après `sleep 6`). `scripts/vm.sh sway|gnome|kde essayer` → 15/15 chacun.
 - [ ] **Step 4 : Commit** `test(a11y): annonces et navigation des commandes, isolement de Starship, essais en VM`.
@@ -206,7 +227,7 @@ Ligne 1 : heure (`bright-black`), charge 1 min lue dans `/proc/loadavg` (module 
 - [ ] **Step 2 :** `scripts/test-x11.sh` et `scripts/test-wayland.sh` → tout passe (machine peu chargée ; relancer une fois un échec du trousseau et le signaler).
 - [ ] **Step 3 :** fuzzing `trame` et `marques`, 5 min chacun → aucun plantage.
 - [ ] **Step 4 :** `scripts/verifier-isolement.sh` → conforme ; `scripts/test-orca.sh` → 18/18 ; VM Sway, GNOME, KDE → 15/15.
-- [ ] **Step 5 : Essai sur le poste du porteur** (2 minutes, rien à écouter) : ouvrir Pupitre, vérifier que l'invite ressemble à l'actuelle ; `sleep 6` → (Orca, s'il est lancé, annonce la fin) ; menu ▸ « Nouvel onglet avec » ▸ fish ; `pupitre shells` dans un terminal.
+- [ ] **Step 5 : Essai sur le poste du porteur** (2 minutes, rien à écouter) : ouvrir Pupitre, vérifier que l'invite ressemble à l'actuelle ; `sleep 6` → (Orca, s'il est lancé, annonce la fin) ; menu ▸ « Nouvel onglet avec » ▸ fish ; `pupitre shells` dans un terminal ; Ctrl+Maj+H ouvre l'aide.
 - [ ] **Step 6 :** consigner dans `docs/verifications/etape-3.md`, cocher le plan, mettre à jour `suivi-tokens.md`, commit `docs: vérifications de l'étape 3`.
 
 ---

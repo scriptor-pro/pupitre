@@ -65,6 +65,7 @@ avec ceux d'Orca.
 | Revenir à l'élément précédent | Ctrl+Maj+Tab |
 | Commande précédente (à venir) | Ctrl+Maj+↑ |
 | Commande suivante (à venir) | Ctrl+Maj+↓ |
+| Ouvrir cette aide (à venir) | Ctrl+Maj+H |
 
 Les raccourcis suivent la lettre de votre disposition de clavier : Ctrl+Maj+T fonctionne là
 où se trouve la lettre T, en AZERTY, BÉPO ou Dvorak. Pour Alt+1…9 et Ctrl+0, c'est la
@@ -74,7 +75,7 @@ aussi.
 
 Touches laissées volontairement aux programmes :
 - **Tab** reste au shell (complétion) ;
-- **F10** reste aux programmes (mc, htop… quittent par F10) ;
+- **F1** et **F10** restent aux programmes (aide et sortie de mc, htop…) ;
 - **Ctrl+lettre** reste aux programmes.
 
 ## 3. Onglets et fenêtres
