@@ -280,5 +280,5 @@ Demandé par le porteur le 2026-11-01 (la fenêtre de réglages complète est à
 3. **[Validé le 2026-11-01 ; flèches seules écartées : elles restent au shell et aux programmes]** **Raccourcis de navigation : Ctrl+Maj+↑ et Ctrl+Maj+↓** (commande précédente / suivante).
 4. **Starship du système** (1.22.1 sous Debian 13), dépendance recommandée du futur paquet, rien de compilé ni d'embarqué ; **sans Starship, chaque shell garde l'invite habituelle de l'utilisateur** (décision du porteur, 2026-11-01), avec un avertissement unique donnant la commande d'installation.
 5. **[Validé le 2026-11-01]** **Fichier d'invite modifiable** : `~/.config/pupitre/starship.toml`, créé au premier lancement à partir de l'invite par défaut ; jamais écrasé ensuite.
-6. **Shells absents : commande d'installation affichée** dans `pupitre shells` et dans le message quand le shell configuré manque ; le menu « Nouvel onglet avec » ne liste que les shells installés et ceux que vous déclarez.
+6. **[Validé le 2026-11-01]** **Shells absents : commande d'installation affichée** dans `pupitre shells` et dans le message quand le shell configuré manque ; le menu « Nouvel onglet avec » ne liste que les shells installés et ceux que vous déclarez.
 7. **Protocole v3 en profite pour corriger un reste de l'étape 2** : un trousseau trop lent n'est plus présenté comme « Aucun trousseau disponible ».
