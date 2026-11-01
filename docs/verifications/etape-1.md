@@ -39,8 +39,8 @@ remplissent leur cache dans `~/.cache` : Mesa (`mesa_shader_cache`, `mesa_shader
 et fontconfig (`fontconfig`). Ce n'est pas le code de Pupitre ; le script les signale à
 part, sans échec.
 
-**Non fait** : l'essai sur machines virtuelles GNOME/Wayland et KDE/Wayland. Sway : fait le
-2026-11-01, voir « Essai sous Sway » plus bas. Le scénario « 3 onglets, `kill -9`, relance » est
+**Non fait** : l'essai sur machine virtuelle KDE/Wayland. Sway et GNOME : faits le
+2026-11-01, voir « Essais en VM » plus bas. Le scénario « 3 onglets, `kill -9`, relance » est
 couvert par le test automatique ci-dessus sur X11 et Weston.
 
 ### Défauts trouvés par le test Orca automatisé, et corrigés
@@ -71,12 +71,14 @@ Reste connu : sur la barre d'onglets, Orca lit parfois la description deux fois
 (« essai, onglet 2 sur 2, groupement, essai, onglet 2 sur 2 ») ; c'est sa façon de
 présenter un groupement.
 
-## Essai sous Sway (VM) — 2026-11-01
+## Essais en VM — 2026-11-01
 
-`scripts/vm-sway.sh tout` : VM Debian 13 (image officielle, empreinte vérifiée ; 2 cœurs,
+### Sway
+
+`scripts/vm.sh sway tout` : VM Debian 13 (image officielle, empreinte vérifiée ; 2 cœurs,
 2 Go ; KVM), Sway 1.10.1 sans écran (backend headless), clavier fr dvorak, Pupitre de
 `target/release`. Touches simulées par `wtype`, résultats lus dans des fichiers, fenêtres
-par `swaymsg`, accessibilité par AT-SPI. Déroulé : `tests/vm/essai-sway.sh`.
+par `swaymsg`, accessibilité par AT-SPI. Déroulé commun : `tests/vm/commun.sh`.
 
 **13 réussis sur 13** : fenêtre ouverte et focalisée (identifiant `fr.pupitre.Pupitre`) ;
 saisie et Entrée ; Ctrl+Maj+T (nouvel onglet, autre terminal) ; Ctrl+Maj+V (collage) ;
@@ -99,3 +101,17 @@ chaque appel et GTK, comme le terminal `foot`, perd alors la première touche (c
 une touche neutre). Sous `wtype`, « ( » est arrivé en « [ » dans Pupitre mais pas dans
 `foot` : à confirmer avec un vrai clavier sous Sway ; le traitement des caractères est
 celui de GTK et VTE, Pupitre n'y touche pas.
+
+### GNOME 48
+
+`scripts/vm.sh gnome tout` : même VM Debian 13 (3 Go), GNOME Shell 48.7 sans écran
+(`--headless --virtual-monitor 1280x800`), clavier fr dvorak. Touches envoyées par
+l'interface de bureau à distance de Mutter (`org.gnome.Mutter.RemoteDesktop`), état des
+fenêtres et captures par GNOME Shell mis en mode « unsafe » par une petite extension
+installée dans la VM seulement (`tests/vm/gnome.py`, `tests/vm/essai-gnome.sh`). La vue
+d'ensemble (Activités), affichée au démarrage de GNOME, est refermée avant de lancer
+Pupitre, comme le ferait un utilisateur.
+
+**13 réussis sur 13**, mêmes essais que sous Sway. Aucun défaut propre à GNOME. Même
+particularité d'outil que `wtype` : chaque nouveau clavier virtuel perd sa première touche
+(contourné par une touche neutre).

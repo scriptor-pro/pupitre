@@ -158,6 +158,6 @@ isolement propre ; Orca 16/16.
   un message gardé pourrait partir vers un askpass au lieu d'une fenêtre. Défaut mineur,
   déjà présent avant l'étape.
 
-**Non fait** : l'essai sur machines virtuelles GNOME/Wayland et KDE/Wayland (Sway : fait, voir
+**Non fait** : l'essai sur machine virtuelle KDE/Wayland (Sway et GNOME : faits, voir
 `etape-1.md` ; reporté
 depuis l'étape 1).

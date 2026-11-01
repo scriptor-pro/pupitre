@@ -1,13 +1,14 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Essai de Pupitre sous Sway (Wayland) dans une VM Debian 13, entièrement automatisé :
-# aucun écran à regarder, rien à écouter. La VM tourne sans fenêtre, Sway sans écran
-# (backend headless) ; les touches sont simulées par wtype, les résultats lus dans des
-# fichiers, l'état des fenêtres par swaymsg, l'accessibilité par AT-SPI (pyatspi).
+# Essai de Pupitre sous un bureau Wayland (Sway, GNOME) dans une VM Debian 13, entièrement
+# automatisé : aucun écran à regarder, rien à écouter. La VM tourne sans fenêtre, le bureau
+# sans écran ; les touches sont simulées (wtype sous Sway, bureau à distance de Mutter sous
+# GNOME), les résultats lus dans des fichiers, l'accessibilité par AT-SPI (pyatspi).
+# Déroulé dans la VM : tests/vm/essai-<bureau>.sh.
 #
-# Usage : scripts/vm-sway.sh creer | demarrer | deployer | essayer | arreter | tout
+# Usage : scripts/vm.sh sway|gnome  creer | demarrer | deployer | essayer | arreter | tout
 #   creer     télécharge l'image Debian 13 (empreinte vérifiée), crée disque, clé et cloud-init
-#   demarrer  lance la VM (2 cœurs, 2 Go, SSH sur 127.0.0.1:2222) et attend qu'elle soit prête
+#   demarrer  lance la VM (2 cœurs ; 2 Go pour Sway, 3 Go pour GNOME ; SSH en local) et attend
 #   deployer  copie target/release (pupitre, pupitre-fond, pupitre-askpass) et assets/
 #   essayer   lance Sway puis Pupitre et déroule les essais ; captures dans $VM/captures
 #   arreter   éteint la VM
@@ -16,13 +17,25 @@
 set -euo pipefail
 
 DEPOT="$(cd "$(dirname "$0")/.." && pwd)"
-VM="${PUPITRE_VM:-$HOME/VM/pupitre-sway}"
+BUREAU="${1:-}"
+shift || true
+COMMUNS="grim jq libgtk-4-1 libvte-2.91-gtk4-0 at-spi2-core python3-pyatspi dbus-user-session
+  gnome-keyring libsecret-tools fonts-dejavu-core locales-all"
+case "$BUREAU" in
+  sway) PORT=2222; MEMOIRE=2048; PAQUETS="sway foot wtype wl-clipboard $COMMUNS" ;;
+  gnome) PORT=2223; MEMOIRE=3072
+    PAQUETS="gnome-shell gnome-session-bin python3-gi gir1.2-glib-2.0 wl-clipboard
+      libgl1-mesa-dri xdg-desktop-portal-gnome $COMMUNS" ;;
+  *) sed -n 3,17p "$0"; exit 2 ;;
+esac
+PAQUETS="$(echo $PAQUETS | sed 's/ /, /g')"
+VM="${PUPITRE_VM:-$HOME/VM/pupitre-$BUREAU}"
 IMAGE=debian-13-genericcloud-amd64.qcow2
 SOURCE=https://cloud.debian.org/images/cloud/trixie/latest
 OPTS=(-q -i "$VM/cle-vm" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
       -o IdentitiesOnly=yes -o IdentityAgent=none -o ConnectTimeout=5)
-vm() { ssh "${OPTS[@]}" -p 2222 essai@127.0.0.1 "$@"; }
-copier() { scp "${OPTS[@]}" -P 2222 "$@"; }
+vm() { ssh "${OPTS[@]}" -p "$PORT" essai@127.0.0.1 "$@"; }
+copier() { scp "${OPTS[@]}" -P "$PORT" "$@"; }
 
 creer() {
   mkdir -p "$VM/seed" "$VM/captures"
@@ -33,8 +46,8 @@ creer() {
     grep " $IMAGE\$" SHA512SUMS | sha512sum -c -
   fi
   [ -f disque.qcow2 ] || qemu-img create -q -f qcow2 -F qcow2 -b "$IMAGE" disque.qcow2 12G
-  [ -f cle-vm ] || ssh-keygen -q -t ed25519 -N "" -C vm-pupitre-sway -f cle-vm
-  printf 'instance-id: pupitre-sway-1\nlocal-hostname: pupitre-sway\n' > seed/meta-data
+  [ -f cle-vm ] || ssh-keygen -q -t ed25519 -N "" -C "vm-pupitre-$BUREAU" -f cle-vm
+  printf 'instance-id: pupitre-%s-1\nlocal-hostname: pupitre-%s\n' "$BUREAU" "$BUREAU" > seed/meta-data
   cat > seed/user-data <<EOF
 #cloud-config
 users:
@@ -45,9 +58,7 @@ users:
     ssh_authorized_keys:
       - $(cat cle-vm.pub)
 package_update: true
-packages: [sway, foot, grim, wtype, wl-clipboard, jq, libgtk-4-1, libvte-2.91-gtk4-0,
-           at-spi2-core, python3-pyatspi, dbus-user-session, gnome-keyring, libsecret-tools,
-           fonts-dejavu-core, locales-all]
+packages: [$PAQUETS]
 runcmd:
   - [loginctl, enable-linger, essai]
   - [touch, /var/lib/pret-pour-pupitre]
@@ -61,9 +72,9 @@ demarrer() {
   if [ -f qemu.pid ] && kill -0 "$(cat qemu.pid)" 2>/dev/null; then
     echo "VM déjà en marche"
   else
-    qemu-system-x86_64 -name pupitre-sway -enable-kvm -cpu host -smp 2 -m 2048 \
+    qemu-system-x86_64 -name "pupitre-$BUREAU" -enable-kvm -cpu host -smp 2 -m "$MEMOIRE" \
       -drive file=disque.qcow2,if=virtio -drive file=seed.iso,media=cdrom,readonly=on \
-      -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=n0 \
+      -netdev user,id=n0,hostfwd=tcp:127.0.0.1:$PORT-:22 -device virtio-net-pci,netdev=n0 \
       -display none -serial file:console.log -pidfile qemu.pid -daemonize
   fi
   for _ in $(seq 120); do
@@ -77,8 +88,8 @@ demarrer() {
 deployer() {
   # Un binaire en cours d'exécution ne peut pas être remplacé : Pupitre et son fond
   # sont arrêtés d'abord.
-  vm 'systemctl --user stop pupitre 2>/dev/null; pkill -u "$(id -u)" -f pupitre-fond; sleep 1
-      mkdir -p ~/pupitre/bin ~/.config/sway' || true
+  vm 'systemctl --user stop pupitre 2>/dev/null; pkill -u "$(id -u)" -f '[p]upitre-fond'; sleep 1
+      mkdir -p ~/pupitre/bin' || true
   copier "$DEPOT"/target/release/{pupitre,pupitre-fond,pupitre-askpass} essai@127.0.0.1:pupitre/bin/
   copier -r "$DEPOT/assets" essai@127.0.0.1:pupitre/
   echo "Pupitre copié dans la VM"
@@ -86,11 +97,13 @@ deployer() {
 
 essayer() {
   mkdir -p "$VM/captures"
-  copier "$DEPOT/tests/vm/essai-sway.sh" essai@127.0.0.1:essai-sway.sh
+  copier "$DEPOT"/tests/vm/{essai-$BUREAU.sh,commun.sh,gnome.py} essai@127.0.0.1:
   # stdin fermé : wl-copy (lancé par l'essai) ne garde pas la connexion ouverte.
-  vm 'bash ~/essai-sway.sh' </dev/null
+  local code=0
+  vm "bash ~/essai-$BUREAU.sh" </dev/null || code=$?
   for c in $(vm 'ls /tmp/essai/*.png' 2>/dev/null); do copier "essai@127.0.0.1:$c" "$VM/captures/"; done
   echo "Captures : $VM/captures"
+  return "$code"
 }
 
 arreter() {
@@ -101,5 +114,5 @@ arreter() {
 case "${1:-}" in
   creer|demarrer|deployer|essayer|arreter) "$1" ;;
   tout) creer; demarrer; deployer; essayer ;;
-  *) sed -n 3,15p "$0"; exit 2 ;;
+  *) sed -n 3,17p "$0"; exit 2 ;;
 esac
