@@ -1372,7 +1372,11 @@ fn ouvrir_refuse_les_variables_protegees() {
         ServerMsg::Output { id: i, data } if *i == id => {
             tout.extend(data);
             let t = String::from_utf8_lossy(&tout).into_owned();
-            t.contains("V_STARSHIP_CONFIG=").then_some(t)
+            // Dernière variable affichée, ligne terminée.
+            t.split("V_STARSHIP_CONFIG=")
+                .nth(1)?
+                .contains('\n')
+                .then_some(t)
         }
         _ => None,
     });
@@ -1396,4 +1400,141 @@ fn ouvrir_refuse_les_variables_protegees() {
     assert_ne!(valeur("SSH_ASKPASS"), "trousseau-ou-dumb");
     assert_eq!(valeur("PUPITRE_INVITE"), "trousseau-ou-dumb");
     assert_eq!(valeur("STARSHIP_CONFIG"), "trousseau-ou-dumb");
+}
+
+/// Ouvre (protocole courant) une session qui imprime `script` puis attend.
+fn ouvrir_script(c: &mut Client, script: &str) -> SessionId {
+    c.envoyer(ClientMsg::Ouvrir {
+        argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
+        cwd: None,
+        cols: 80,
+        rows: 24,
+        env: vec![],
+    });
+    c.attendre(|m| match m {
+        ServerMsg::Opened { id } => Some(*id),
+        ServerMsg::OpenFailed { error } => panic!("{error}"),
+        _ => None,
+    })
+}
+
+/// Évènements d'une session, dans l'ordre reçu, jusqu'à ce que `fini` soit satisfait.
+#[derive(Debug, PartialEq)]
+enum Evenement {
+    Octets(Vec<u8>),
+    Marque(pupitre_proto::MarqueCommande, bool),
+}
+
+fn evenements(
+    c: &mut Client,
+    id: SessionId,
+    fini: impl Fn(&[Evenement]) -> bool,
+) -> Vec<Evenement> {
+    let mut v: Vec<Evenement> = Vec::new();
+    c.attendre(|m| {
+        match m {
+            ServerMsg::Output { id: i, data } if *i == id => {
+                v.push(Evenement::Octets(data.clone()))
+            }
+            ServerMsg::Replay { id: i, data } if *i == id => {
+                v.push(Evenement::Octets(data.clone()))
+            }
+            ServerMsg::Marque {
+                id: i,
+                marque,
+                rejouee,
+            } if *i == id => v.push(Evenement::Marque(*marque, *rejouee)),
+            _ => {}
+        }
+        fini(&v).then_some(())
+    });
+    v
+}
+
+/// Remet bout à bout les octets, en remplaçant chaque marque par `<M>`.
+fn aplati(v: &[Evenement]) -> String {
+    let mut s = String::new();
+    for e in v {
+        match e {
+            Evenement::Octets(o) => s.push_str(&String::from_utf8_lossy(o)),
+            Evenement::Marque(..) => s.push_str("<M>"),
+        }
+    }
+    s
+}
+
+#[test]
+fn marques_dans_l_ordre_du_flux() {
+    use pupitre_proto::MarqueCommande;
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    let id = ouvrir_script(&mut c, "printf 'a\\033]133;A\\007b'; sleep 2");
+    let v = evenements(&mut c, id, |v| aplati(v).ends_with("<M>b"));
+    let texte = aplati(&v);
+    assert!(
+        texte.ends_with("a\x1b]133;A\x07<M>b"),
+        "la marque suit ses octets et précède la suite : {texte:?}"
+    );
+    assert!(v.contains(&Evenement::Marque(MarqueCommande::Invite, false)));
+}
+
+#[test]
+fn relecture_rejoue_les_marques() {
+    use pupitre_proto::MarqueCommande;
+    let s = demarrer(Duration::from_secs(30));
+    let mut c1 = Client::connecter(&s.socket);
+    let id = ouvrir_script(
+        &mut c1,
+        "printf 'a\\033]133;A\\007b\\033]133;B\\033\\\\c\\n'; sleep 3",
+    );
+    evenements(&mut c1, id, |v| {
+        v.iter()
+            .filter(|e| matches!(e, Evenement::Marque(..)))
+            .count()
+            == 2
+            && aplati(v).ends_with('\n')
+    });
+    let mut c2 = Client::connecter(&s.socket);
+    c2.envoyer(ClientMsg::Attach { id });
+    let v = evenements(&mut c2, id, |v| {
+        v.iter()
+            .filter(|e| matches!(e, Evenement::Marque(..)))
+            .count()
+            == 2
+    });
+    // Le tampon d'abord, puis les marques, toutes marquées comme rejouées.
+    assert!(matches!(&v[0], Evenement::Octets(o) if o.ends_with(b"c\r\n")));
+    assert_eq!(
+        &v[1..],
+        &[
+            Evenement::Marque(MarqueCommande::Invite, true),
+            Evenement::Marque(MarqueCommande::Saisie, true),
+        ]
+    );
+}
+
+#[test]
+fn client_v2_flux_sans_marque() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::brut(&s.socket);
+    c.envoyer(ClientMsg::Hello { version: 2 });
+    assert_eq!(c.recevoir(), ServerMsg::Welcome { version: 2 });
+    let id = c.ouvrir(&["/bin/sh", "-c", "printf 'a\\033]133;A\\007b\\n'; sleep 2"]);
+    let mut tout = Vec::new();
+    c.attendre(|m| {
+        assert!(!m.est_v3(), "marque reçue par un client v2 : {m:?}");
+        if let ServerMsg::Output { id: i, data } = m {
+            if *i == id {
+                tout.extend(data);
+            }
+        }
+        (tout.ends_with(b"b\r\n")).then_some(())
+    });
+    // Le rejeu d'un client v2 est sans marque non plus.
+    c.envoyer(ClientMsg::Attach { id });
+    c.attendre(|m| {
+        assert!(!m.est_v3());
+        matches!(m, ServerMsg::Replay { .. }).then_some(())
+    });
+    assert!(c.silence(Duration::from_millis(300)));
 }

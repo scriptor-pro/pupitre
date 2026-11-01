@@ -10,6 +10,7 @@
 //! chaque client a une file d'envoi bornée ; s'il ne suit plus, il est déconnecté.
 
 use crate::chargement::{self, Rapport, Travail};
+use crate::marques::{LecteurMarques, Morceau};
 use crate::relecture::{ReplayBuffer, REPLAY_CAPACITY};
 use crate::session::{variable_protegee, Session, SessionEvent};
 use crate::ssh::{EntreesSsh, EtatSsh};
@@ -273,6 +274,8 @@ struct SessionEtat {
     session: Arc<Session>,
     saisie: Sender<Vec<u8>>,
     relecture: ReplayBuffer,
+    /// Repère les marques de commandes (OSC 133) dans la sortie.
+    marques: LecteurMarques,
     cols: u16,
     rows: u16,
     occupe: bool,
@@ -352,9 +355,30 @@ impl Etat {
             Evt::Message(id, m) => self.message(id, m),
             Evt::Session(sid, SessionEvent::Output(data)) => {
                 // Sortie d'une session déjà fermée : ignorée.
-                if let Some(s) = self.sessions.get_mut(&sid) {
-                    s.relecture.push(&data);
-                    self.diffuser(&ServerMsg::Output { id: sid, data });
+                let Some(s) = self.sessions.get_mut(&sid) else {
+                    return;
+                };
+                // Octets et marques repartent dans l'ordre exact du flux ; les octets
+                // eux-mêmes ne sont jamais modifiés.
+                let mut messages = Vec::new();
+                for morceau in s.marques.lire(&data, Instant::now()) {
+                    match morceau {
+                        Morceau::Octets(data) => {
+                            s.relecture.push(&data);
+                            messages.push(ServerMsg::Output { id: sid, data });
+                        }
+                        Morceau::Marque(marque) => {
+                            s.relecture.push_marque(marque);
+                            messages.push(ServerMsg::Marque {
+                                id: sid,
+                                marque,
+                                rejouee: false,
+                            });
+                        }
+                    }
+                }
+                for m in &messages {
+                    self.diffuser(m);
                 }
             }
             Evt::Chargement(rapport, toutes) => self.fin_chargement(rapport, toutes),
@@ -472,8 +496,20 @@ impl Etat {
             }
             ClientMsg::Attach { id } => match self.sessions.get(&id) {
                 Some(s) => {
-                    let data = s.relecture.snapshot();
+                    let (data, marques) = s.relecture.snapshot_avec_marques();
                     self.envoyer(cid, ServerMsg::Replay { id, data });
+                    // Les marques des octets rejoués, dans l'ordre (sans effet pour un
+                    // client qui ne connaît pas la version 3).
+                    for marque in marques {
+                        self.envoyer(
+                            cid,
+                            ServerMsg::Marque {
+                                id,
+                                marque,
+                                rejouee: true,
+                            },
+                        );
+                    }
                 }
                 None => self.inconnue(cid, id),
             },
@@ -768,6 +804,7 @@ impl Etat {
                 session,
                 saisie: saisie_tx,
                 relecture: ReplayBuffer::new(REPLAY_CAPACITY),
+                marques: LecteurMarques::new(),
                 cols,
                 rows,
                 occupe: false,

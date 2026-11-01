@@ -19,5 +19,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "marques"
+path = "fuzz_targets/marques.rs"
+test = false
+doc = false
+bench = false
+
 # Projet séparé de l'espace de travail (compilé en nightly avec les sanitizers).
 [workspace]
