@@ -46,3 +46,7 @@ harness = false
 [[test]]
 name = "gui_ssh"
 harness = false
+
+[[test]]
+name = "gui_demarrage"
+harness = false

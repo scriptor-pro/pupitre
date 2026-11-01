@@ -26,7 +26,7 @@ use pupitre_config::{
 };
 use pupitre_proto::{ClientMsg, DemandeId, Genre, ServerMsg, SessionId};
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
@@ -247,6 +247,13 @@ pub struct Pupitre {
     fenetres: RefCell<Vec<FenetrePupitre>>,
     /// Fenêtres des demandes SSH en attente de réponse.
     demandes: RefCell<HashMap<DemandeId, gtk::Window>>,
+    /// Demandes « Information » affichées dans un bandeau (retirées à la perte du fond).
+    informations: RefCell<HashSet<DemandeId>>,
+    /// Demandes arrivées avant la première fenêtre (celle de `Sessions`) : ouvertes dès
+    /// qu'elle existe, au lieu de créer une fenêtre vide.
+    demandes_sans_fenetre: RefCell<Vec<(DemandeId, Option<SessionId>, DemandeAffichee)>>,
+    /// Messages du fond arrivés sans aucune fenêtre : montrés par la première créée.
+    messages_sans_fenetre: RefCell<Vec<String>>,
     /// Garde l'application en vie tant que la première fenêtre n'existe pas (GTK quitte
     /// une application sans fenêtre).
     garde: RefCell<Option<gio::ApplicationHoldGuard>>,
@@ -273,6 +280,9 @@ impl Pupitre {
             onglets: RefCell::new(Vec::new()),
             fenetres: RefCell::new(Vec::new()),
             demandes: RefCell::new(HashMap::new()),
+            informations: RefCell::new(HashSet::new()),
+            demandes_sans_fenetre: RefCell::new(Vec::new()),
+            messages_sans_fenetre: RefCell::new(Vec::new()),
             garde: RefCell::new(Some(app.hold())),
         });
         p.appliquer_config(Ok(config));
@@ -567,6 +577,11 @@ impl Pupitre {
                     }
                 }
                 f.fenetre().present();
+                // Demandes reçues avant cette première fenêtre : elles y sont ouvertes.
+                let en_attente = std::mem::take(&mut *self.demandes_sans_fenetre.borrow_mut());
+                for (demande, session, d) in en_attente {
+                    self.ouvrir_demande(demande, session, d);
+                }
             }
             ServerMsg::Opened { id } => {
                 let attente = self.attentes.borrow_mut().pop_front();
@@ -660,7 +675,14 @@ impl Pupitre {
             ),
             ServerMsg::DemandeClose { demande } => self.fermer_demande(demande),
             ServerMsg::Message(t) => {
-                for f in self.fenetres() {
+                let fenetres = self.fenetres();
+                if fenetres.is_empty() {
+                    // Pas encore de fenêtre (le message précède `Sessions`) : gardé pour la
+                    // première, qui le montrera.
+                    self.messages_sans_fenetre.borrow_mut().push(t);
+                    return;
+                }
+                for f in fenetres {
                     f.afficher_message(&t);
                 }
             }
@@ -693,20 +715,34 @@ impl Pupitre {
             })
     }
 
+    /// Montre la demande `demande`. Le fond renvoie les demandes ouvertes à chaque
+    /// interface qui arrive, au `Hello` puis au `List` : une demande déjà affichée (ou déjà
+    /// en attente de fenêtre) est ignorée, ce qui garde la fenêtre et le texte saisi.
     fn ouvrir_demande(
         self: &Rc<Self>,
         demande: DemandeId,
         session: Option<SessionId>,
         d: DemandeAffichee,
     ) {
+        if self.demandes.borrow().contains_key(&demande)
+            || self.informations.borrow().contains(&demande)
+        {
+            return;
+        }
+        if self.fenetres.borrow().is_empty() && self.attend_liste.get() {
+            // La première fenêtre naîtra de `Sessions` : on l'attend.
+            let mut file = self.demandes_sans_fenetre.borrow_mut();
+            if !file.iter().any(|(id, _, _)| *id == demande) {
+                file.push((demande, session, d));
+            }
+            return;
+        }
         let f = self.fenetre_de_demande(session);
         if d.genre == Genre::Information {
+            self.informations.borrow_mut().insert(demande);
             f.0.bandeau
                 .poser(&Self::cle_information(demande), Some(&d.invite));
             return;
-        }
-        if let Some(ancienne) = self.demandes.borrow_mut().remove(&demande) {
-            ancienne.destroy();
         }
         let faible = Rc::downgrade(self);
         let fenetre = ouvrir_demande(f.fenetre().upcast_ref(), &d, move |reponse, memoriser| {
@@ -729,6 +765,12 @@ impl Pupitre {
 
     /// La demande est réglée ailleurs : fenêtre fermée (ou message retiré), sans réponse.
     fn fermer_demande(&self, demande: DemandeId) {
+        self.demandes_sans_fenetre
+            .borrow_mut()
+            .retain(|(id, _, _)| *id != demande);
+        self.informations.borrow_mut().remove(&demande);
+        // Sortie du `RefCell` avant `destroy()` : sa destruction rappelle `ouvrir_demande`
+        // (fermeture sans réponse), qui emprunte à nouveau `demandes`.
         let fenetre = self.demandes.borrow_mut().remove(&demande);
         if let Some(w) = fenetre {
             w.destroy();
@@ -749,6 +791,14 @@ impl Pupitre {
             self.demandes.borrow_mut().drain().map(|(_, w)| w).collect();
         for w in demandes {
             w.destroy();
+        }
+        self.demandes_sans_fenetre.borrow_mut().clear();
+        let informations: Vec<DemandeId> = self.informations.borrow_mut().drain().collect();
+        for demande in informations {
+            let cle = Self::cle_information(demande);
+            for f in self.fenetres() {
+                f.0.bandeau.poser(&cle, None);
+            }
         }
         for o in self.onglets.borrow().iter() {
             o.termine.set(true);
@@ -873,6 +923,10 @@ impl FenetrePupitre {
         }));
         for (cle, texte) in pupitre.messages.borrow().iter() {
             f.0.bandeau.poser(cle, Some(texte));
+        }
+        let gardes = std::mem::take(&mut *pupitre.messages_sans_fenetre.borrow_mut());
+        for texte in gardes {
+            f.afficher_message(&texte);
         }
         f.installer_actions();
         crate::raccourcis::installer_raccourcis(&f);
