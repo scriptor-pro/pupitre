@@ -2,7 +2,9 @@
 //! Un bus qui accepte la connexion mais ne répond jamais ne bloque pas Pupitre :
 //! le délai du trousseau est borné. Fichier à part (il modifie l'environnement).
 
-use pupitre_ssh::trousseau::{Coffre, CoffreSecretService, ErreurTrousseau, EtatTrousseau};
+use pupitre_ssh::trousseau::{
+    Coffre, CoffreSecretService, ErreurTrousseau, EtatTrousseau, DELAI_TROUSSEAU,
+};
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -28,7 +30,7 @@ fn bus_muet_donne_absent_en_temps_borne() {
     let debut = Instant::now();
     assert_eq!(coffre.etat(), EtatTrousseau::Absent);
     assert!(
-        debut.elapsed() < Duration::from_secs(3),
+        debut.elapsed() < DELAI_TROUSSEAU + Duration::from_secs(1),
         "{:?}",
         debut.elapsed()
     );

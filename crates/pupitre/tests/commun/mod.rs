@@ -32,6 +32,9 @@ pub fn bus_prive() {
         .arg(exe)
         .args(std::env::args_os().skip(1))
         .env(MARQUE, "1")
+        // Le trousseau jetable des scripts vit sur l'ancien bus, pas sur ce bus privé :
+        // sans ce retrait, le fond activerait un autre trousseau sur le bus privé.
+        .env_remove("PUPITRE_TROUSSEAU_JETABLE")
         .status()
         .expect("dbus-run-session (paquet dbus)");
     std::process::exit(statut.code().unwrap_or(1));

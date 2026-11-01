@@ -104,8 +104,11 @@ impl Coffre for CoffreMemoire {
     }
 }
 
-/// Délai maximal accordé à une opération du Secret Service.
-pub const DELAI_TROUSSEAU: Duration = Duration::from_secs(2);
+/// Délai maximal accordé à une opération du Secret Service. Chaque opération ouvre une
+/// connexion D-Bus et fait un échange de clés : sur une machine chargée, cela dépasse
+/// 2 s, et une phrase mémorisée passerait pour absente. Aucun appel n'a lieu sur le
+/// thread de l'interface (fond et askpass seulement).
+pub const DELAI_TROUSSEAU: Duration = Duration::from_secs(10);
 
 /// Coffre adossé au Secret Service (collection par défaut).
 pub struct CoffreSecretService {
