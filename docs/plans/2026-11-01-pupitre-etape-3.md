@@ -15,6 +15,7 @@
 ## Global Constraints
 
 - Tout ce qui figure dans les Global Constraints des étapes 1 et 2 reste valable (X11 et Wayland, GTK ≥ 4.18, VTE ≥ 0.80, SPDX `GPL-3.0-or-later`, pas de `unwrap`/`expect`/`panic!` hors tests, `ecrire_atomique`, textes en français, jamais de secret en clair, `suivi-tokens.md` à jour).
+- **Aide à jour** : chaque tâche qui change un comportement visible met à jour `assets/aide/aide.md` (et retire la mention « (à venir) » des fonctions livrées). La Task 9 vérifie qu'il n'en reste plus pour l'étape 3.
 - **Fichiers de l'utilisateur jamais modifiés ni remplacés** : `~/.bashrc`, `~/.zshrc`, `~/.config/fish/`, `~/.config/nushell/`, `~/.config/starship.toml`… Ce dernier n'est **jamais lu** (invite configurée par `STARSHIP_CONFIG`).
 - **Les fichiers d'intégration chargent d'abord la configuration habituelle de l'utilisateur**, puis ajoutent l'intégration Pupitre.
 - **Rien n'est téléchargé à l'exécution** : Starship n'est jamais installé par Pupitre (dépendance recommandée du paquet) ; Pupitre affiche une commande d'installation pour un shell absent, sans jamais l'exécuter.
@@ -212,8 +213,8 @@ Ligne 1 : heure (`bright-black`), charge 1 min lue dans `/proc/loadavg` (module 
 
 ## Choix du concepteur (à valider par le porteur)
 
-1. **Invite par défaut = votre invite actuelle sur deux lignes** (heure, charge, branche git et état ; puis marqueurs, `utilisateur@machine`, dossier, symbole `λ`), et non le `$` écrit dans la conception. Les couleurs viennent du thème de Pupitre.
-2. **Annonce de fin de commande seulement pour les commandes de 5 s ou plus** (`annonce_fin_commande = "longues"`), réussies ou non ; réglable en `"toutes"` ou `"aucune"`. Pour une commande courte, Orca lit déjà la sortie.
+1. **[Validé le 2026-11-01]** **Invite par défaut = votre invite actuelle sur deux lignes** (heure, charge, branche git et état ; puis marqueurs, `utilisateur@machine`, dossier, symbole `λ`), et non le `$` écrit dans la conception. Les couleurs viennent du thème de Pupitre.
+2. **[Validé le 2026-11-01 ; à expliquer dans l'aide]** **Annonce de fin de commande seulement pour les commandes de 5 s ou plus** (`annonce_fin_commande = "longues"`), réussies ou non ; réglable en `"toutes"` ou `"aucune"`. Pour une commande courte, Orca lit déjà la sortie.
 3. **Raccourcis de navigation : Ctrl+Maj+↑ et Ctrl+Maj+↓** (commande précédente / suivante).
 4. **Starship du système** (1.22.1 sous Debian 13), dépendance recommandée du futur paquet, rien de compilé ni d'embarqué ; **sans Starship, chaque shell garde l'invite habituelle de l'utilisateur** (décision du porteur, 2026-11-01), avec un avertissement unique donnant la commande d'installation.
 5. **Fichier d'invite modifiable** : `~/.config/pupitre/starship.toml`, créé au premier lancement à partir de l'invite par défaut ; jamais écrasé ensuite.
