@@ -53,8 +53,12 @@ fn mode_trousseau(genre: &Genre, coffre: &dyn Coffre, sortie: &mut dyn Write) ->
             cle,
             nouvel_essai: false,
         } => match coffre.lire(cle) {
-            Some(phrase) if ecrire_reponse(sortie, &phrase) => 0,
-            _ => 1,
+            Ok(Some(phrase)) if ecrire_reponse(sortie, &phrase) => 0,
+            Ok(_) => 1,
+            Err(e) => {
+                dire(&format!("phrase mémorisée non lue : {e}"));
+                1
+            }
         },
         // La phrase mémorisée vient d'être refusée : on l'oublie, elle sera redemandée.
         Genre::PhraseCle {
@@ -293,7 +297,10 @@ mod tests {
         assert_eq!(code, 0);
         assert_eq!(sortie, b"s3cret\n");
         assert_eq!(
-            c.lire(Path::new(CLE)).as_deref().map(String::as_str),
+            c.lire(Path::new(CLE))
+                .unwrap()
+                .as_deref()
+                .map(String::as_str),
             Some("s3cret")
         );
         let recus = h.join().unwrap();
@@ -320,7 +327,7 @@ mod tests {
         let (socket, h) = faux_fond(t.path(), Some(Some("abc")), false);
         let (code, sortie) = lancer(&invite_cle(), None, &socket, &c);
         assert_eq!((code, sortie.as_slice()), (0, &b"abc\n"[..]));
-        assert!(c.lire(Path::new(CLE)).is_none());
+        assert!(c.lire(Path::new(CLE)).unwrap().is_none());
         assert_eq!(h.join().unwrap().len(), 2, "ni écriture ni ChargerCle");
     }
 
@@ -388,6 +395,6 @@ mod tests {
         let invite = format!("Bad passphrase, try again for {CLE}: ");
         assert_eq!(executer(&args(&invite), &env, &c, &mut sortie), 1);
         assert!(sortie.is_empty());
-        assert!(c.lire(Path::new(CLE)).is_none(), "entrée oubliée");
+        assert!(c.lire(Path::new(CLE)).unwrap().is_none(), "entrée oubliée");
     }
 }

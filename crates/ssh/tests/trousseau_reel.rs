@@ -30,18 +30,18 @@ fn cycle_complet() {
     let cle = Path::new("/tmp/pupitre-test/cle-cycle");
     coffre.ecrire(cle, "phrase é secrète").unwrap();
     assert_eq!(
-        coffre.lire(cle).as_deref().map(String::as_str),
+        coffre.lire(cle).unwrap().as_deref().map(String::as_str),
         Some("phrase é secrète")
     );
     assert!(coffre.cles().contains(&cle.to_path_buf()));
     // Réécrire remplace.
     coffre.ecrire(cle, "autre").unwrap();
     assert_eq!(
-        coffre.lire(cle).as_deref().map(String::as_str),
+        coffre.lire(cle).unwrap().as_deref().map(String::as_str),
         Some("autre")
     );
     coffre.oublier(cle).unwrap();
-    assert!(coffre.lire(cle).is_none());
+    assert!(coffre.lire(cle).unwrap().is_none());
     assert!(!coffre.cles().contains(&cle.to_path_buf()));
     // Oublier une clé inconnue n'est pas une erreur.
     coffre.oublier(cle).unwrap();
@@ -66,15 +66,15 @@ fn element_d_une_autre_application_intact() {
         .create_item("Étranger", attrs.clone(), b"pas-a-moi", true, "text/plain")
         .unwrap();
 
-    assert!(coffre.lire(cle).is_none());
+    assert!(coffre.lire(cle).unwrap().is_none());
     assert!(!coffre.cles().contains(&cle.to_path_buf()));
     coffre.ecrire(cle, "a-moi").unwrap();
     assert_eq!(
-        coffre.lire(cle).as_deref().map(String::as_str),
+        coffre.lire(cle).unwrap().as_deref().map(String::as_str),
         Some("a-moi")
     );
     coffre.oublier(cle).unwrap();
-    assert!(coffre.lire(cle).is_none());
+    assert!(coffre.lire(cle).unwrap().is_none());
     // L'élément étranger existe toujours, avec son secret.
     let restants = col.search_items(attrs).unwrap();
     assert_eq!(restants.len(), 1);

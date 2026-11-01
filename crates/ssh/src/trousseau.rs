@@ -6,9 +6,17 @@
 //! panique). Le service est cherché à chaque appel : il peut apparaître ou
 //! disparaître pendant la vie de Pupitre.
 //!
-//! Temps borné : la bibliothèque n'offre pas de délai ; on s'appuie sur les
-//! échecs rapides mesurés (~5 ms sans bus, ~150 ms si le service n'existe pas),
-//! voir `essai-jetable/ssh/RESULTATS.md`.
+//! Temps borné : la bibliothèque n'offre pas de délai. Chaque opération tourne
+//! donc sur un fil à part, attendu au plus [`DELAI_TROUSSEAU`] ; au-delà, elle
+//! rend [`ErreurTrousseau::Delai`] (« le trousseau ne répond pas »), qui n'est
+//! jamais confondu avec une entrée absente ni avec un trousseau absent. Le fil
+//! en retard est abandonné et finit de lui-même (fuite bornée par le nombre
+//! d'opérations). Seul [`Coffre::etat`] rend « absent » dans ce cas : son type
+//! voyage dans le protocole et n'a que trois valeurs.
+//!
+//! Course connue : entre `is_locked` et `CreateItem`, le trousseau peut se
+//! verrouiller ; le démon afficherait alors sa propre demande de déverrouillage.
+//! La fenêtre est minuscule et la conséquence bénigne.
 
 use secret_service::blocking::{Collection, SecretService};
 use secret_service::EncryptionType;
@@ -24,11 +32,16 @@ pub use pupitre_proto::ssh::EtatTrousseau;
 const APPLICATION: &str = "pupitre";
 const TYPE: &str = "phrase-cle-ssh";
 
-/// Échec d'une écriture ou d'une suppression dans le trousseau.
+/// Échec d'une opération sur le trousseau.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErreurTrousseau {
+    /// Trousseau présent mais verrouillé (jamais déverrouillé par Pupitre).
     Verrouille,
+    /// Pas de Secret Service, ou pas de collection par défaut.
     Absent,
+    /// Le Secret Service n'a pas répondu dans le délai : on ne sait rien de l'entrée.
+    Delai,
+    /// Toute autre erreur (D-Bus, chemin non UTF-8, phrase illisible…).
     Autre(String),
 }
 
@@ -37,6 +50,7 @@ impl fmt::Display for ErreurTrousseau {
         match self {
             Self::Verrouille => write!(f, "le trousseau est verrouillé"),
             Self::Absent => write!(f, "aucun trousseau disponible"),
+            Self::Delai => write!(f, "le trousseau ne répond pas"),
             Self::Autre(m) => write!(f, "erreur du trousseau : {m}"),
         }
     }
@@ -48,8 +62,9 @@ impl std::error::Error for ErreurTrousseau {}
 pub trait Coffre {
     /// État du trousseau, sans jamais le déverrouiller.
     fn etat(&self) -> EtatTrousseau;
-    /// Phrase enregistrée pour `cle` ; `None` si absente ou trousseau verrouillé.
-    fn lire(&self, cle: &Path) -> Option<Zeroizing<String>>;
+    /// Phrase enregistrée pour `cle`. `Ok(None)` seulement si le trousseau est lisible et
+    /// que l'entrée n'existe pas ; un trousseau verrouillé, absent ou muet est une erreur.
+    fn lire(&self, cle: &Path) -> Result<Option<Zeroizing<String>>, ErreurTrousseau>;
     fn ecrire(&self, cle: &Path, phrase: &str) -> Result<(), ErreurTrousseau>;
     /// Efface la phrase de `cle` ; une phrase inexistante n'est pas une erreur.
     fn oublier(&self, cle: &Path) -> Result<(), ErreurTrousseau>;
@@ -81,9 +96,9 @@ impl Coffre for CoffreMemoire {
     fn etat(&self) -> EtatTrousseau {
         EtatTrousseau::Disponible
     }
-    fn lire(&self, cle: &Path) -> Option<Zeroizing<String>> {
-        let m = self.phrases.lock().ok()?;
-        m.get(cle).map(|p| Zeroizing::new(p.to_string()))
+    fn lire(&self, cle: &Path) -> Result<Option<Zeroizing<String>>, ErreurTrousseau> {
+        let m = self.phrases.lock().map_err(|_| ErreurTrousseau::Absent)?;
+        Ok(m.get(cle).map(|p| Zeroizing::new(p.to_string())))
     }
     fn ecrire(&self, cle: &Path, phrase: &str) -> Result<(), ErreurTrousseau> {
         let mut m = self.phrases.lock().map_err(|_| ErreurTrousseau::Absent)?;
@@ -128,24 +143,26 @@ impl CoffreSecretService {
         Self { _prive: () }
     }
 
-    /// Exécute `f` sur un fil à part et attend au plus `DELAI_TROUSSEAU` ;
-    /// passé ce délai (ou si le fil plante), rend `defaut`. Le fil en retard
-    /// est abandonné : il finira de lui-même.
+    /// Exécute `f` sur un fil à part et attend au plus `DELAI_TROUSSEAU`. Passé ce délai,
+    /// rend [`ErreurTrousseau::Delai`] ; si le fil ne peut être lancé ou plante,
+    /// [`ErreurTrousseau::Autre`]. Le fil en retard est abandonné : il finira de lui-même.
     fn avec_collection<T: Send + 'static>(
         &self,
-        defaut: T,
         f: impl FnOnce(&Acces<'_>) -> T + Send + 'static,
-    ) -> T {
+    ) -> Result<T, ErreurTrousseau> {
         let (tx, rx) = mpsc::channel();
-        let lance = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name("pupitre-trousseau".into())
             .spawn(move || {
                 let _ = tx.send(Self::acceder(f));
-            });
-        if lance.is_err() {
-            return defaut;
-        }
-        rx.recv_timeout(DELAI_TROUSSEAU).unwrap_or(defaut)
+            })
+            .map_err(|e| ErreurTrousseau::Autre(e.to_string()))?;
+        rx.recv_timeout(DELAI_TROUSSEAU).map_err(|e| match e {
+            mpsc::RecvTimeoutError::Timeout => ErreurTrousseau::Delai,
+            mpsc::RecvTimeoutError::Disconnected => {
+                ErreurTrousseau::Autre("fil du trousseau interrompu".into())
+            }
+        })
     }
 
     fn acceder<T>(f: impl FnOnce(&Acces<'_>) -> T) -> T {
@@ -169,29 +186,48 @@ fn attributs(cle: &str) -> HashMap<&str, &str> {
 }
 
 impl Coffre for CoffreSecretService {
+    /// Délai dépassé : « absent » (voir la documentation du module).
     fn etat(&self) -> EtatTrousseau {
-        self.avec_collection(EtatTrousseau::Absent, |a| match a {
+        self.avec_collection(|a| match a {
             Acces::Pret(_) => EtatTrousseau::Disponible,
             Acces::Verrouille => EtatTrousseau::Verrouille,
             Acces::Absent => EtatTrousseau::Absent,
         })
+        .unwrap_or(EtatTrousseau::Absent)
     }
 
-    fn lire(&self, cle: &Path) -> Option<Zeroizing<String>> {
-        let cle = cle.to_str()?.to_string();
-        self.avec_collection(None, move |a| {
-            let Acces::Pret(col) = a else { return None };
-            let items = col.search_items(attributs(&cle)).ok()?;
-            let secret = Zeroizing::new(items.first()?.get_secret().ok()?);
-            // UTF-8 invalide : traité comme absent (octets effacés).
+    fn lire(&self, cle: &Path) -> Result<Option<Zeroizing<String>>, ErreurTrousseau> {
+        let cle = cle
+            .to_str()
+            .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?
+            .to_string();
+        self.avec_collection(move |a| {
+            let col = match a {
+                Acces::Pret(col) => col,
+                Acces::Verrouille => return Err(ErreurTrousseau::Verrouille),
+                Acces::Absent => return Err(ErreurTrousseau::Absent),
+            };
+            let items = col
+                .search_items(attributs(&cle))
+                .map_err(|e| ErreurTrousseau::Autre(e.to_string()))?;
+            let Some(item) = items.first() else {
+                return Ok(None);
+            };
+            let secret = Zeroizing::new(
+                item.get_secret()
+                    .map_err(|e| ErreurTrousseau::Autre(e.to_string()))?,
+            );
+            // UTF-8 invalide : erreur (octets effacés), jamais « absente ».
             match String::from_utf8(secret.to_vec()) {
-                Ok(s) => Some(Zeroizing::new(s)),
+                Ok(s) => Ok(Some(Zeroizing::new(s))),
                 Err(e) => {
                     drop(Zeroizing::new(e.into_bytes()));
-                    None
+                    Err(ErreurTrousseau::Autre(
+                        "phrase illisible (UTF-8 invalide)".into(),
+                    ))
                 }
             }
-        })
+        })?
     }
 
     fn ecrire(&self, cle: &Path, phrase: &str) -> Result<(), ErreurTrousseau> {
@@ -201,7 +237,7 @@ impl Coffre for CoffreSecretService {
             .to_string();
         let libelle = format!("Pupitre — phrase de passe de {}", chemin_lisible(cle));
         let phrase = Zeroizing::new(phrase.to_string());
-        self.avec_collection(Err(ErreurTrousseau::Absent), move |a| match a {
+        self.avec_collection(move |a| match a {
             Acces::Absent => Err(ErreurTrousseau::Absent),
             Acces::Verrouille => Err(ErreurTrousseau::Verrouille),
             Acces::Pret(col) => col
@@ -214,7 +250,7 @@ impl Coffre for CoffreSecretService {
                 )
                 .map(|_| ())
                 .map_err(|e| ErreurTrousseau::Autre(e.to_string())),
-        })
+        })?
     }
 
     fn oublier(&self, cle: &Path) -> Result<(), ErreurTrousseau> {
@@ -222,7 +258,7 @@ impl Coffre for CoffreSecretService {
             .to_str()
             .ok_or_else(|| ErreurTrousseau::Autre("chemin non UTF-8".into()))?
             .to_string();
-        self.avec_collection(Err(ErreurTrousseau::Absent), move |a| match a {
+        self.avec_collection(move |a| match a {
             Acces::Absent => Err(ErreurTrousseau::Absent),
             Acces::Verrouille => Err(ErreurTrousseau::Verrouille),
             Acces::Pret(col) => {
@@ -235,11 +271,11 @@ impl Coffre for CoffreSecretService {
                 }
                 Ok(())
             }
-        })
+        })?
     }
 
     fn cles(&self) -> Vec<PathBuf> {
-        self.avec_collection(Vec::new(), |a| {
+        self.avec_collection(|a| {
             let Acces::Pret(col) = a else {
                 return Vec::new();
             };
@@ -256,6 +292,7 @@ impl Coffre for CoffreSecretService {
             chemins.dedup();
             chemins
         })
+        .unwrap_or_default()
     }
 }
 
@@ -268,9 +305,12 @@ mod tests {
     fn ecrire_puis_lire() {
         let c = CoffreMemoire::default();
         let k = Path::new("/a/cle");
-        assert!(c.lire(k).is_none());
+        assert!(c.lire(k).unwrap().is_none());
         c.ecrire(k, "mot").unwrap();
-        assert_eq!(c.lire(k).as_deref().map(String::as_str), Some("mot"));
+        assert_eq!(
+            c.lire(k).unwrap().as_deref().map(String::as_str),
+            Some("mot")
+        );
         assert_eq!(c.etat(), EtatTrousseau::Disponible);
     }
 
@@ -280,7 +320,7 @@ mod tests {
         let k = Path::new("/a/cle");
         c.ecrire(k, "mot").unwrap();
         c.oublier(k).unwrap();
-        assert!(c.lire(k).is_none());
+        assert!(c.lire(k).unwrap().is_none());
         c.oublier(k).unwrap();
     }
 
@@ -312,6 +352,10 @@ mod tests {
         assert_eq!(
             ErreurTrousseau::Absent.to_string(),
             "aucun trousseau disponible"
+        );
+        assert_eq!(
+            ErreurTrousseau::Delai.to_string(),
+            "le trousseau ne répond pas"
         );
     }
 }

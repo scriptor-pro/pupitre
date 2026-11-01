@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Un bus qui accepte la connexion mais ne répond jamais ne bloque pas Pupitre :
-//! le délai du trousseau est borné. Fichier à part (il modifie l'environnement).
+//! le délai du trousseau est borné, et il est signalé comme tel (« le trousseau ne
+//! répond pas »), jamais comme une entrée ou un trousseau absents (sauf `etat()`, dont
+//! le type n'a que trois valeurs). Fichier à part (il modifie l'environnement).
 
 use pupitre_ssh::trousseau::{
     Coffre, CoffreSecretService, ErreurTrousseau, EtatTrousseau, DELAI_TROUSSEAU,
@@ -10,7 +12,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 #[test]
-fn bus_muet_donne_absent_en_temps_borne() {
+fn bus_muet_signale_le_delai_en_temps_borne() {
     let dossier = tempfile::tempdir().unwrap();
     let socket = dossier.path().join("bus");
     let ecoute = UnixListener::bind(&socket).unwrap();
@@ -34,8 +36,11 @@ fn bus_muet_donne_absent_en_temps_borne() {
         "{:?}",
         debut.elapsed()
     );
-    assert!(coffre.lire(cle).is_none());
+    assert_eq!(
+        coffre.lire(cle).map(|p| p.is_some()),
+        Err(ErreurTrousseau::Delai)
+    );
     assert!(coffre.cles().is_empty());
-    assert_eq!(coffre.ecrire(cle, "x"), Err(ErreurTrousseau::Absent));
-    assert_eq!(coffre.oublier(cle), Err(ErreurTrousseau::Absent));
+    assert_eq!(coffre.ecrire(cle, "x"), Err(ErreurTrousseau::Delai));
+    assert_eq!(coffre.oublier(cle), Err(ErreurTrousseau::Delai));
 }

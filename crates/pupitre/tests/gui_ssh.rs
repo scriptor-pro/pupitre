@@ -424,7 +424,13 @@ fn phrase_validee(p: &Rc<Pupitre>, cle: &Path, avec_trousseau: bool) -> Resultat
     if avec_trousseau {
         let coffre = CoffreSecretService::ouvrir();
         let ok = attendre(Duration::from_secs(5), || {
-            coffre.lire(cle).as_deref().map(String::as_str) == Some(PHRASE)
+            coffre
+                .lire(cle)
+                .ok()
+                .flatten()
+                .as_deref()
+                .map(String::as_str)
+                == Some(PHRASE)
         });
         let _ = coffre.oublier(cle);
         verifier(ok, || "phrase absente du trousseau".into())?;
@@ -451,7 +457,7 @@ fn phrase_non_memorisee(p: &Rc<Pupitre>, cle: &Path, avec_trousseau: bool) -> Re
     })?;
     patienter(Duration::from_millis(500));
     let coffre = CoffreSecretService::ouvrir();
-    let present = coffre.lire(cle).is_some();
+    let present = matches!(coffre.lire(cle), Ok(Some(_)));
     let _ = coffre.oublier(cle);
     verifier(!present, || {
         "phrase mémorisée malgré la case décochée".into()

@@ -901,7 +901,7 @@ fn phrase_memorisee_fausse_est_oubliee() {
     // encore rapporté à sa connexion, il lui serait envoyé directement : le test vaut dans
     // les deux ordres.)
     let limite = Instant::now() + Duration::from_secs(20);
-    while coffre.lire(&cle).is_some() {
+    while !matches!(coffre.lire(&cle), Ok(None)) {
         assert!(Instant::now() < limite, "entrée jamais oubliée");
         thread::sleep(Duration::from_millis(100));
     }
@@ -917,7 +917,7 @@ fn phrase_memorisee_fausse_est_oubliee() {
         pupitre_ssh::trousseau::chemin_lisible(&cle)
     );
     assert_eq!(texte, attendu);
-    assert!(coffre.lire(&cle).is_none(), "entrée oubliée");
+    assert!(matches!(coffre.lire(&cle), Ok(None)), "entrée oubliée");
     assert!(debut.elapsed() < Duration::from_secs(20));
     assert!(!lister(&s.dossier.path().join("pupitre/agent.sock")).contains("ED25519"));
     drop((ui, tenue));
@@ -965,7 +965,7 @@ fn cle_deja_dans_l_agent_pas_rechargee() {
     ui.envoyer(ClientMsg::List);
     ui.attendre(|m| matches!(m, ServerMsg::Sessions(_)).then_some(()));
     thread::sleep(Duration::from_secs(3));
-    let encore = coffre.lire(&cle).is_some();
+    let encore = matches!(coffre.lire(&cle), Ok(Some(_)));
     let _ = coffre.oublier(&cle);
     assert!(encore, "la clé déjà chargée a été rechargée");
     drop(ui);
@@ -979,8 +979,11 @@ impl Coffre for CoffreVerrouille {
     fn etat(&self) -> EtatTrousseau {
         EtatTrousseau::Verrouille
     }
-    fn lire(&self, _: &Path) -> Option<zeroize::Zeroizing<String>> {
-        None
+    fn lire(
+        &self,
+        _: &Path,
+    ) -> Result<Option<zeroize::Zeroizing<String>>, pupitre_ssh::trousseau::ErreurTrousseau> {
+        Err(pupitre_ssh::trousseau::ErreurTrousseau::Verrouille)
     }
     fn ecrire(&self, _: &Path, _: &str) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
         Err(pupitre_ssh::trousseau::ErreurTrousseau::Verrouille)
@@ -1075,7 +1078,7 @@ fn phrase_saisie_fausse_pas_memorisee() {
             pupitre_ssh::trousseau::chemin_lisible(&cle)
         )
     );
-    assert!(coffre.lire(&cle).is_none());
+    assert!(matches!(coffre.lire(&cle), Ok(None)));
     drop((ui, ask));
     arreter(s);
 }

@@ -17,7 +17,10 @@ fn sans_service_absent() {
     let debut = Instant::now();
     let coffre = CoffreSecretService::ouvrir();
     assert_eq!(coffre.etat(), EtatTrousseau::Absent);
-    assert!(coffre.lire(Path::new("/tmp/cle")).is_none());
+    assert_eq!(
+        coffre.lire(Path::new("/tmp/cle")).map(|p| p.is_some()),
+        Err(ErreurTrousseau::Absent)
+    );
     assert!(coffre.cles().is_empty());
     assert!(matches!(
         coffre.ecrire(Path::new("/tmp/cle"), "x"),

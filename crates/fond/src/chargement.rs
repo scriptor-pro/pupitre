@@ -209,12 +209,15 @@ pub fn executer(coffre: &dyn Coffre, agent: &Path, askpass: &Path, travail: &Tra
     }
     let chargees = cles_de_l_agent(agent);
     for cle in cles {
-        if deja_chargee(&cle, &chargees) || coffre.lire(&cle).is_none() {
+        // Seule une phrase effectivement lue est chargée ; trousseau muet ou erreur : on
+        // n'essaie pas (et on ne dit rien).
+        if deja_chargee(&cle, &chargees) || !matches!(coffre.lire(&cle), Ok(Some(_))) {
             continue;
         }
-        if charger_cle(agent, askpass, &cle).is_err() && coffre.lire(&cle).is_none() {
-            // L'askpass a vu « Bad passphrase » et oublié l'entrée. Pour tout autre échec
-            // (délai, agent disparu) l'entrée reste et on ne dit rien.
+        // Après un échec, seule une entrée réellement absente (`Ok(None)`) prouve que
+        // l'askpass a vu « Bad passphrase » et l'a oubliée. Pour tout autre cas (délai du
+        // trousseau, agent disparu, `ssh-add` tué) l'entrée reste et on ne dit rien.
+        if charger_cle(agent, askpass, &cle).is_err() && matches!(coffre.lire(&cle), Ok(None)) {
             rapport.messages.push(if travail.cles.contains(&cle) {
                 message_non_memorisee(&cle)
             } else {
@@ -364,7 +367,68 @@ mod tests {
         };
         let r = executer(&coffre, agent.socket(), &ask, &travail);
         assert!(r.messages.is_empty(), "{r:?}");
-        assert!(coffre.lire(&cle).is_some());
+        assert!(coffre.lire(&cle).unwrap().is_some());
+    }
+
+    /// Coffre lent : la première lecture répond, les suivantes dépassent le délai (machine
+    /// chargée, démon du trousseau occupé).
+    struct CoffreLent {
+        cle: PathBuf,
+        lectures: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Coffre for CoffreLent {
+        fn etat(&self) -> EtatTrousseau {
+            EtatTrousseau::Disponible
+        }
+        fn lire(
+            &self,
+            _: &Path,
+        ) -> Result<Option<zeroize::Zeroizing<String>>, pupitre_ssh::trousseau::ErreurTrousseau>
+        {
+            use std::sync::atomic::Ordering;
+            if self.lectures.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(Some(zeroize::Zeroizing::new("x".into())))
+            } else {
+                Err(pupitre_ssh::trousseau::ErreurTrousseau::Delai)
+            }
+        }
+        fn ecrire(&self, _: &Path, _: &str) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
+            Err(pupitre_ssh::trousseau::ErreurTrousseau::Delai)
+        }
+        fn oublier(&self, _: &Path) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
+            Err(pupitre_ssh::trousseau::ErreurTrousseau::Delai)
+        }
+        fn cles(&self) -> Vec<PathBuf> {
+            vec![self.cle.clone()]
+        }
+    }
+
+    #[test]
+    fn delai_du_trousseau_ne_dit_pas_oubliee() {
+        // `ssh-add` échoue (l'askpass n'a rien pu lire), puis le trousseau ne répond pas :
+        // on ne sait rien de l'entrée, aucun message « oubliée » ou « non mémorisée ».
+        let t = tempfile::tempdir().unwrap();
+        let cle = cle_jetable(t.path(), "bonne");
+        let agent = agent_jetable(t.path());
+        let ask = askpass_fixe(t.path(), "fausse");
+        for saisie in [false, true] {
+            let coffre = CoffreLent {
+                cle: cle.clone(),
+                lectures: Default::default(),
+            };
+            let travail = Travail {
+                toutes: !saisie,
+                cles: if saisie { vec![cle.clone()] } else { vec![] },
+            };
+            let r = executer(&coffre, agent.socket(), &ask, &travail);
+            assert!(r.messages.is_empty(), "{r:?}");
+            assert_eq!(
+                coffre.lectures.load(std::sync::atomic::Ordering::SeqCst),
+                2,
+                "relu après l'échec"
+            );
+        }
     }
 
     /// Coffre à une clé dont l'entrée existe tant que le fichier `marque` existe : le faux
@@ -378,8 +442,15 @@ mod tests {
         fn etat(&self) -> EtatTrousseau {
             EtatTrousseau::Disponible
         }
-        fn lire(&self, c: &Path) -> Option<zeroize::Zeroizing<String>> {
-            (c == self.cle && self.marque.exists()).then(|| zeroize::Zeroizing::new("x".into()))
+        fn lire(
+            &self,
+            c: &Path,
+        ) -> Result<Option<zeroize::Zeroizing<String>>, pupitre_ssh::trousseau::ErreurTrousseau>
+        {
+            Ok(
+                (c == self.cle && self.marque.exists())
+                    .then(|| zeroize::Zeroizing::new("x".into())),
+            )
         }
         fn ecrire(&self, _: &Path, _: &str) -> Result<(), pupitre_ssh::trousseau::ErreurTrousseau> {
             Ok(())
