@@ -25,13 +25,16 @@ const ATTENTE_FIN_LECTURE: Duration = Duration::from_millis(500);
 const FILE_EVENEMENTS: usize = 64;
 /// Délai entre SIGHUP et SIGKILL quand une session est fermée.
 const DELAI_AVANT_SIGKILL: Duration = Duration::from_secs(2);
-/// Variables héritées qui décriraient mal le terminal de Pupitre.
-const VARIABLES_RETIREES: [&str; 5] = [
+/// Variables héritées qui décriraient mal le terminal de Pupitre, ou (mode de
+/// `pupitre-askpass` réservé au chargement des clés) changeraient le comportement de
+/// l'askpass des shells : réponse depuis le trousseau, sans fenêtre.
+const VARIABLES_RETIREES: [&str; 6] = [
     "COLUMNS",
     "LINES",
     "VTE_VERSION",
     "TERM_PROGRAM_VERSION",
     "TERMINAL_EMULATOR",
+    "PUPITRE_ASKPASS_MODE",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
