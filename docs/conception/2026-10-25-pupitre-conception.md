@@ -330,7 +330,8 @@ Bulles via les notifications de GIO (locales). Respect du mode « Ne pas dérang
 - **Rechargement à chaud** : toute sauvegarde est appliquée aux fenêtres ouvertes.
 - **Erreur dans le fichier** : Pupitre garde la configuration précédente et affiche la ligne fautive
   et la raison ; jamais de plantage.
-- **Fenêtre de réglages** : version ultérieure, lisant et écrivant le même fichier.
+- **Fenêtre de réglages** : étape 4, lisant et écrivant le même fichier ; dès l'étape 3, un menu
+  « Préférences » ouvre les fichiers de configuration dans l'éditeur de texte.
 
 ### 12.1 Réglages du quotidien [Choix du concepteur]
 
@@ -385,10 +386,12 @@ de l'affichage. Assistant local : piste future. Assistant en ligne : exclu.
      complète dès cette étape), palette sombre validée, B612 Mono, configuration TOML avec
      rechargement et vérificateur de contraste, taille d'ouverture au nombre d'or.
   2. SSH : agent garanti, askpass Pupitre, trousseau, connexions mémorisées.
-  3. Shells et invite : détection, niveaux de prise en charge, Starship embarqué, intégration
-     OSC 133 (fin de commande, navigation, annonces).
+  3. Shells et invite : détection, niveaux de prise en charge, Starship du système, intégration
+     OSC 133 (fin de commande, navigation, annonces), aide intégrée, menu « Préférences » ouvrant
+     les fichiers de configuration [Décidé par le porteur, 2026-11-01].
   4. Bandeau de disposition clavier, notifications complètes, OSC 52, thèmes clair et contraste
-     élevé, autres polices, paquet `.deb`.
+     élevé, autres polices, **fenêtre de réglages** (lit et écrit `pupitre.toml` en gardant ses
+     commentaires) [Décidé par le porteur, 2026-11-01], paquet `.deb`.
 - **Disposition clavier du porteur** : français Dvorak (`fr`, variante `dvorak`), testée en priorité.
   Raccourcis [Choix du concepteur] : reconnus par le caractère produit, avec repli sur la position
   physique de la touche quand le caractère n'existe pas sans Maj (ex. Alt+1…9 = rangée des chiffres).

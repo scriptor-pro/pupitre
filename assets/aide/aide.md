@@ -299,6 +299,11 @@ déjà terminées quand Pupitre est rouvert après un incident.
 Le fichier `~/.config/pupitre/pupitre.toml` est créé au premier lancement, avec un commentaire
 pour chaque réglage. Il se modifie avec n'importe quel éditeur de texte.
 
+**Menu ▸ Préférences (à venir)** ouvre directement les fichiers dans votre éditeur de texte :
+« Modifier la configuration… » (`pupitre.toml`), « Modifier l'invite… » (`starship.toml`),
+« Modifier les connexions… » (`connexions.toml`). Si aucun éditeur ne s'ouvre, Pupitre affiche
+le chemin du fichier.
+
 - **Pas besoin de redémarrer** : chaque enregistrement est appliqué aussitôt à toutes les
   fenêtres.
 - **En cas d'erreur**, Pupitre garde la configuration précédente et affiche un message avec la
@@ -433,5 +438,6 @@ l'enregistrement ne laisse jamais un fichier à moitié écrit.
   caractères »).
 - Notifications envoyées par les programmes.
 - Raccourcis modifiables.
-- Fenêtre de réglages.
+- Fenêtre de réglages (police, taille, thème, shell, invite, annonces), accessible au
+  clavier et avec Orca.
 - Paquet `.deb`.

@@ -210,6 +210,26 @@ Demandée par le porteur le 2026-11-01.
 
 ---
 
+### Task 7ter : Menu « Préférences »
+
+Demandé par le porteur le 2026-11-01 (la fenêtre de réglages complète est à l'étape 4).
+
+**Files :** Create: `crates/pupitre/src/preferences.rs` ; Modify: `crates/pupitre/src/fenetre.rs` (sous-menu, actions), `assets/aide/aide.md`.
+
+**Interfaces :**
+- Consumes : `chemin_config()`, `creer_defaut_si_absent` (config) ; `creer_config_starship_si_absente` (Task 3) ; `MessagesFenetre` (bandeau).
+- Produces : `enum FichierPrefs { Configuration, Invite, Connexions }` ; `fn chemin(f: FichierPrefs) -> PathBuf` ; `fn ouvrir(f: FichierPrefs, parent: &gtk::Window, signaler: impl Fn(String) + 'static)`.
+
+**Menu** (section avant « Aide ») : sous-menu « Préférences » avec « Modifier la configuration… » (`pupitre.toml`), « Modifier l'invite… » (`starship.toml`), « Modifier les connexions… » (`connexions.toml`). Le fichier est créé s'il manque (fichier par défaut commenté ; `connexions.toml` vide commenté), puis ouvert dans l'éditeur de texte par défaut via `gtk::FileLauncher` (portail sous Wayland, sans dépendance supplémentaire). Message après ouverture : « Les modifications s'appliquent dès l'enregistrement. » Échec (aucun éditeur, portail absent) : message persistant donnant le chemin complet du fichier, à ouvrir soi-même ; jamais de plantage.
+
+- [ ] **Step 1 : Tests** : `chemins_preferences` (`XDG_CONFIG_HOME` temporaire → trois chemins sous `pupitre/`) ; `fichier_cree_si_absent` (aucun fichier → créé avec le contenu par défaut ; existant → inchangé, octet pour octet) ; graphiques : `menu_preferences` (sous-menu présent avec ses trois entrées, accessibles au clavier) ; `ouverture_impossible_message` (lanceur en échec simulé → message contenant le chemin du fichier, annoncé).
+- [ ] **Step 2 :** échec.
+- [ ] **Step 3 : Implémenter.** L'aide (section 11) décrit le menu.
+- [ ] **Step 4 :** tests verts.
+- [ ] **Step 5 : Commit** `feat(pupitre): menu Préférences ouvrant les fichiers de configuration`.
+
+---
+
 ### Task 8 : Orca, isolement, VM
 
 **Files :** Modify: `tests/a11y/orca/scenario.py`, `tests/a11y/orca/attendu/*.json`, `docs/orca-liste-de-controle.md`, `tests/isolement/verifier.py`, `tests/vm/commun.sh`.
@@ -227,7 +247,7 @@ Demandée par le porteur le 2026-11-01.
 - [ ] **Step 2 :** `scripts/test-x11.sh` et `scripts/test-wayland.sh` → tout passe (machine peu chargée ; relancer une fois un échec du trousseau et le signaler).
 - [ ] **Step 3 :** fuzzing `trame` et `marques`, 5 min chacun → aucun plantage.
 - [ ] **Step 4 :** `scripts/verifier-isolement.sh` → conforme ; `scripts/test-orca.sh` → 18/18 ; VM Sway, GNOME, KDE → 15/15.
-- [ ] **Step 5 : Essai sur le poste du porteur** (2 minutes, rien à écouter) : ouvrir Pupitre, vérifier que l'invite ressemble à l'actuelle ; `sleep 6` → (Orca, s'il est lancé, annonce la fin) ; menu ▸ « Nouvel onglet avec » ▸ fish ; `pupitre shells` dans un terminal ; Ctrl+Maj+H ouvre l'aide.
+- [ ] **Step 5 : Essai sur le poste du porteur** (2 minutes, rien à écouter) : ouvrir Pupitre, vérifier que l'invite ressemble à l'actuelle ; `sleep 6` → (Orca, s'il est lancé, annonce la fin) ; menu ▸ « Nouvel onglet avec » ▸ fish ; `pupitre shells` dans un terminal ; Ctrl+Maj+H ouvre l'aide ; menu ▸ Préférences ▸ « Modifier la configuration… » ouvre `pupitre.toml` dans l'éditeur.
 - [ ] **Step 6 :** consigner dans `docs/verifications/etape-3.md`, cocher le plan, mettre à jour `suivi-tokens.md`, commit `docs: vérifications de l'étape 3`.
 
 ---
@@ -238,6 +258,6 @@ Demandée par le porteur le 2026-11-01.
 2. **[Validé le 2026-11-01 ; à expliquer dans l'aide]** **Annonce de fin de commande seulement pour les commandes de 5 s ou plus** (`annonce_fin_commande = "longues"`), réussies ou non ; réglable en `"toutes"` ou `"aucune"`. Pour une commande courte, Orca lit déjà la sortie.
 3. **[Validé le 2026-11-01 ; flèches seules écartées : elles restent au shell et aux programmes]** **Raccourcis de navigation : Ctrl+Maj+↑ et Ctrl+Maj+↓** (commande précédente / suivante).
 4. **Starship du système** (1.22.1 sous Debian 13), dépendance recommandée du futur paquet, rien de compilé ni d'embarqué ; **sans Starship, chaque shell garde l'invite habituelle de l'utilisateur** (décision du porteur, 2026-11-01), avec un avertissement unique donnant la commande d'installation.
-5. **Fichier d'invite modifiable** : `~/.config/pupitre/starship.toml`, créé au premier lancement à partir de l'invite par défaut ; jamais écrasé ensuite.
+5. **[Validé le 2026-11-01]** **Fichier d'invite modifiable** : `~/.config/pupitre/starship.toml`, créé au premier lancement à partir de l'invite par défaut ; jamais écrasé ensuite.
 6. **Shells absents : commande d'installation affichée** dans `pupitre shells` et dans le message quand le shell configuré manque ; le menu « Nouvel onglet avec » ne liste que les shells installés et ceux que vous déclarez.
 7. **Protocole v3 en profite pour corriger un reste de l'étape 2** : un trousseau trop lent n'est plus présenté comme « Aucun trousseau disponible ».
