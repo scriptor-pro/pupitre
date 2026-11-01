@@ -1,8 +1,8 @@
 # Vérifications de l'étape 2 (SSH)
 
 Machine : Debian 13 (trixie), GTK 4.18.6, VTE 0.80, Orca 48.1, OpenSSH 10, écrans virtuels
-Xvfb (X11, avec xfwm4) et Weston sans écran (Wayland). Ce document est complété en fin
-d'étape (Task 12) ; il rassemble pour l'instant ce qui a été vérifié tâche par tâche.
+Xvfb (X11, avec xfwm4) et Weston sans écran (Wayland). Il rassemble ce qui a été vérifié
+tâche par tâche, puis en fin d'étape (Task 12).
 
 ## Tâches 0 à 10 — 2026-10-31
 
@@ -95,4 +95,37 @@ sans rien avoir vérifié.
 l'exec, donc non jugé. Les lignes sont désormais recollées avant l'analyse (valable aussi pour
 `connect`, `openat`, etc.).
 
-À compléter à la Task 12 : tests complets, clippy, Wayland, fuzz, non-régression.
+## Fin d'étape — Task 12, 2026-11-01
+
+| Vérification | Commande | Résultat |
+|---|---|---|
+| Lint | `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check` | 0 avertissement, format conforme |
+| Tests X11 | `scripts/test-x11.sh` | tout passe |
+| Tests Wayland | `scripts/test-wayland.sh` | tout passe |
+| Fuzzing des trames (protocole v2) | `cd crates/fond/fuzz && cargo +nightly fuzz run trame -- -max_total_time=300` | 13 471 essais en 301 s, aucun plantage (machine très chargée : débit réduit) |
+| Isolement | `scripts/verifier-isolement.sh` | conforme ; étapes SSH exécutées : oui ; arrêt de Pupitre : propre |
+| Lecteur d'écran | `scripts/test-orca.sh` | 16/16 |
+
+**Défaut trouvé : délai du trousseau trop court (corrigé, 3b16cdd).** Un premier passage, sur
+une machine saturée (charge de 10 à 20 pour 4 cœurs, vidéo dans Firefox), a fait échouer
+X11, Wayland et l'isolement, toujours au même endroit : la clé mémorisée n'était pas chargée
+dans l'agent. Chaque opération du trousseau ouvre une connexion D-Bus et fait un échange de
+clés ; au-delà de 2 s, la phrase mémorisée passait pour absente. Mesures (charge 10) : environ
+250 ms par opération en version de test, 24 ms en version optimisée. Le délai passe à 10 s ;
+aucun appel n'a lieu sur le thread de l'interface. Les tests isolés et la série du fond
+passaient déjà sous charge ; tout passe une fois la charge retombée. Reste signalé pour la
+relecture finale : si le trousseau dépasse même ce délai après un échec de `ssh-add`, le
+message « elle a été oubliée » peut s'afficher à tort.
+
+**Essai sur le poste du porteur** (`target/release/pupitre`, dépôt `cqja` relié à GitHub en
+SSH ; `git fetch` au lieu de `git pull` pour ne rien modifier dans le dépôt, même passage par
+SSH) :
+
+1. Premier `git fetch` : la fenêtre de phrase de passe s'ouvre ; « Mémoriser » laissé coché.
+2. Second `git fetch` : aucune question.
+3. Tous les onglets fermés, 10 s d'attente, Pupitre relancé, `git fetch` : aucune question.
+
+Résultat conforme.
+
+**Non fait** : l'essai sur machines virtuelles GNOME/Wayland, KDE/Wayland et Sway (reporté
+depuis l'étape 1).

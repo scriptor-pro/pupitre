@@ -69,15 +69,15 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
 
 **Files :** Create: `essai-jetable/ssh/essai.sh`, `essai-jetable/ssh/RESULTATS.md` (hors espace de travail).
 
-- [ ] **Step 1 : Askpass espion.** Un script `espion.sh` qui ajoute `argv[1]`, `SSH_ASKPASS_PROMPT` et son PID parent à un fichier, puis répond une valeur lue dans un fichier. Clé de test : `ssh-keygen -t ed25519 -N secret1 -f $T/cle`.
-- [ ] **Step 2 : Relever, avec `SSH_ASKPASS=espion.sh SSH_ASKPASS_REQUIRE=force`, sans `DISPLAY` ni `WAYLAND_DISPLAY`, sans terminal (`setsid … </dev/null`) :**
+- [x] **Step 1 : Askpass espion.** Un script `espion.sh` qui ajoute `argv[1]`, `SSH_ASKPASS_PROMPT` et son PID parent à un fichier, puis répond une valeur lue dans un fichier. Clé de test : `ssh-keygen -t ed25519 -N secret1 -f $T/cle`.
+- [x] **Step 2 : Relever, avec `SSH_ASKPASS=espion.sh SSH_ASKPASS_REQUIRE=force`, sans `DISPLAY` ni `WAYLAND_DISPLAY`, sans terminal (`setsid … </dev/null`) :**
   - `ssh-add $T/cle` : texte exact de la 1re invite ; avec une mauvaise réponse, texte de la 2e (« Bad passphrase… ») ; réponse vide → `ssh-add` s'arrête (code ≠ 0).
   - `ssh-add -c $T/cle` puis usage de la clé : `SSH_ASKPASS_PROMPT=confirm`.
   - `ssh -i $T/cle -o UserKnownHostsFile=$T/kh nimporte@127.0.0.1 -p 1` (port fermé) puis `ssh -i $T/cle -p 22 localhost` si un sshd répond : invite de phrase de clé (`Enter passphrase for key '…': `) ; invite d'hôte inconnu si atteignable.
   - `git ls-remote https://exemple.invalide/x` avec `GIT_TERMINAL_PROMPT=0` retiré : git appelle-t-il `SSH_ASKPASS` (invite « Username for … ») ?
   - un descripteur ouvert non `CLOEXEC` dans l'appelant arrive-t-il jusqu'à l'askpass lancé par `ssh-add` ? (information seulement)
-- [ ] **Step 3 : Trousseau.** Mini-programme Rust : `secret-service` 4 en `blocking`, sous `dbus-run-session` avec `gnome-keyring-daemon --unlock --components=secrets` (mot de passe sur stdin, `HOME` temporaire). Vérifier : écriture, recherche par attributs, suppression, `is_locked()` sur la collection par défaut **sans** déclencher d'invite ; sans service sur le bus : erreur rendue en moins de 2 s (pas d'attente infinie).
-- [ ] **Step 4 : Consigner** les textes exacts et les résultats dans `RESULTATS.md`. **Critères** : `force` utilise l'askpass sans écran ; les invites de phrase contiennent le chemin de la clé ; `is_locked()` ne déclenche aucune invite. Recopier les textes exacts dans les tests de la Task 3.
+- [x] **Step 3 : Trousseau.** Mini-programme Rust : `secret-service` 4 en `blocking`, sous `dbus-run-session` avec `gnome-keyring-daemon --unlock --components=secrets` (mot de passe sur stdin, `HOME` temporaire). Vérifier : écriture, recherche par attributs, suppression, `is_locked()` sur la collection par défaut **sans** déclencher d'invite ; sans service sur le bus : erreur rendue en moins de 2 s (pas d'attente infinie).
+- [x] **Step 4 : Consigner** les textes exacts et les résultats dans `RESULTATS.md`. **Critères** : `force` utilise l'askpass sans écran ; les invites de phrase contiennent le chemin de la clé ; `is_locked()` ne déclenche aucune invite. Recopier les textes exacts dans les tests de la Task 3.
 
 ---
 
@@ -95,7 +95,7 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - `pub struct AgentPupitre` ; `pub fn lancer(socket: &Path) -> io::Result<AgentPupitre>` (supprime un socket périmé, lance `ssh-agent -D -a <socket>`, attend au plus 2 s qu'il soit joignable) ; `pub fn socket(&self) -> &Path` ; `pub fn vivant(&mut self) -> bool` ; `Drop` tue et récupère l'enfant.
   - Constante `pub const DELAI_SONDE: Duration = Duration::from_millis(300);`
 
-- [ ] **Step 1 : Tests** dans `agent.rs` (`#[cfg(test)]`), dossier temporaire :
+- [x] **Step 1 : Tests** dans `agent.rs` (`#[cfg(test)]`), dossier temporaire :
   - `faux_agent_reconnu` : un `UnixListener` qui répond `00 00 00 05 0C 00 00 00 00` → `agent_joignable` vrai.
   - `socket_muet_refuse` : listener qui accepte et ne répond pas → faux en moins de `2 * DELAI_SONDE`.
   - `socket_mort_refuse` : fichier socket dont le listener est fermé → faux.
@@ -103,10 +103,10 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - `ordre_des_candidats` : deux faux agents (`gcr/ssh`, `tmp/ssh-x/agent.1`) → `gcr/ssh` d'abord.
   - `env_prioritaire` / `env_mort_puis_candidat` : `chercher_agent` choisit l'agent de l'environnement s'il répond, sinon un candidat.
   - `vrai_ssh_agent` (sauté avec un message si `ssh-agent` absent du `PATH`) : `AgentPupitre::lancer` → `agent_joignable` vrai ; après `drop`, le socket ne répond plus.
-- [ ] **Step 2 :** `cargo test -p pupitre-ssh agent` → échec de compilation (fonctions absentes).
-- [ ] **Step 3 : Implémenter** dans `agent.rs` (`nix` pour `getuid`, `glob` pour `ssh-*/agent.*`).
-- [ ] **Step 4 :** `cargo test -p pupitre-ssh agent` → tout passe ; `cargo clippy -p pupitre-ssh` → 0 avertissement.
-- [ ] **Step 5 : Commit** `feat(ssh): recherche et lancement de l'agent SSH`.
+- [x] **Step 2 :** `cargo test -p pupitre-ssh agent` → échec de compilation (fonctions absentes).
+- [x] **Step 3 : Implémenter** dans `agent.rs` (`nix` pour `getuid`, `glob` pour `ssh-*/agent.*`).
+- [x] **Step 4 :** `cargo test -p pupitre-ssh agent` → tout passe ; `cargo clippy -p pupitre-ssh` → 0 avertissement.
+- [x] **Step 5 : Commit** `feat(ssh): recherche et lancement de l'agent SSH`.
 
 ---
 
@@ -125,11 +125,11 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - `pub fn chemin_lisible(p: &Path) -> String` (remplace le dossier personnel par `~`), utilisé aussi par l'interface.
 - Règle : `etat()`, `lire()` et `cles()` ne déverrouillent jamais (pas d'appel `unlock`) ; collection verrouillée → `Verrouille` / `None` / vide. Toute erreur D-Bus → `Absent`, jamais de panique. Délai D-Bus borné (Task 0).
 
-- [ ] **Step 1 : Tests unitaires** de `CoffreMemoire` et `chemin_lisible` (`ecrire_puis_lire`, `oublier_retire`, `cles_liste_les_chemins`, `tilde_pour_le_dossier_personnel`).
-- [ ] **Step 2 : Test réel** `crates/ssh/tests/trousseau_reel.rs` (`#[ignore]`, lancé par les scripts) : `etat() == Disponible` ; `ecrire` → `lire` rend la phrase ; `cles()` la contient ; `oublier` → `lire` `None` ; un élément d'une autre application avec le même attribut `cle` n'est ni lu ni effacé. Test `sans_service_absent` : `DBUS_SESSION_BUS_ADDRESS` vers un socket inexistant → `Absent` en moins de 2 s.
-- [ ] **Step 3 : `scripts/trousseau-test.sh`** : utilisé comme préfixe dans un bus déjà privé ; crée un `HOME` temporaire, lance `echo -n test | gnome-keyring-daemon --unlock --components=secrets --daemonize`, exporte les variables qu'il imprime, exécute `"$@"`, tue le démon à la sortie. Brancher dans `scripts/test-x11.sh` et `scripts/test-wayland.sh` : `dbus-run-session -- scripts/trousseau-test.sh cargo test …`.
-- [ ] **Step 4 :** échec des tests, implémentation, puis `scripts/test-x11.sh -p pupitre-ssh` → tout passe.
-- [ ] **Step 5 : Commit** `feat(ssh): phrases de passe dans le trousseau du système`.
+- [x] **Step 1 : Tests unitaires** de `CoffreMemoire` et `chemin_lisible` (`ecrire_puis_lire`, `oublier_retire`, `cles_liste_les_chemins`, `tilde_pour_le_dossier_personnel`).
+- [x] **Step 2 : Test réel** `crates/ssh/tests/trousseau_reel.rs` (`#[ignore]`, lancé par les scripts) : `etat() == Disponible` ; `ecrire` → `lire` rend la phrase ; `cles()` la contient ; `oublier` → `lire` `None` ; un élément d'une autre application avec le même attribut `cle` n'est ni lu ni effacé. Test `sans_service_absent` : `DBUS_SESSION_BUS_ADDRESS` vers un socket inexistant → `Absent` en moins de 2 s.
+- [x] **Step 3 : `scripts/trousseau-test.sh`** : utilisé comme préfixe dans un bus déjà privé ; crée un `HOME` temporaire, lance `echo -n test | gnome-keyring-daemon --unlock --components=secrets --daemonize`, exporte les variables qu'il imprime, exécute `"$@"`, tue le démon à la sortie. Brancher dans `scripts/test-x11.sh` et `scripts/test-wayland.sh` : `dbus-run-session -- scripts/trousseau-test.sh cargo test …`.
+- [x] **Step 4 :** échec des tests, implémentation, puis `scripts/test-x11.sh -p pupitre-ssh` → tout passe.
+- [x] **Step 5 : Commit** `feat(ssh): phrases de passe dans le trousseau du système`.
 
 ---
 
@@ -147,9 +147,9 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
     - contient « (yes/no » → `HoteInconnu` ;
     - sinon `Texte { masque }`, `masque` vrai sauf si l'invite (minuscules) contient « username ».
   - Chemin relatif ou commençant par `~` → rendu absolu (dossier personnel).
-- [ ] **Step 1 : Tests** avec les textes exacts relevés à la Task 0 : `phrase_ssh`, `phrase_ssh_add`, `phrase_avec_confirmation`, `phrase_incorrecte`, `hote_inconnu_multiligne`, `mot_de_passe_masque`, `nom_utilisateur_git_visible`, `confirm_et_none`, `chemin_avec_espace_et_apostrophe` (`/home/u/mes clés/l'id` : la dernière `'` avant `': ` ferme le chemin), `invite_vide_texte_masque`.
-- [ ] **Step 2–4 :** échec, implémentation, succès (`cargo test -p pupitre-ssh invite`).
-- [ ] **Step 5 : Commit** `feat(ssh): reconnaissance des invites d'OpenSSH`.
+- [x] **Step 1 : Tests** avec les textes exacts relevés à la Task 0 : `phrase_ssh`, `phrase_ssh_add`, `phrase_avec_confirmation`, `phrase_incorrecte`, `hote_inconnu_multiligne`, `mot_de_passe_masque`, `nom_utilisateur_git_visible`, `confirm_et_none`, `chemin_avec_espace_et_apostrophe` (`/home/u/mes clés/l'id` : la dernière `'` avant `': ` ferme le chemin), `invite_vide_texte_masque`.
+- [x] **Step 2–4 :** échec, implémentation, succès (`cargo test -p pupitre-ssh invite`).
+- [x] **Step 5 : Commit** `feat(ssh): reconnaissance des invites d'OpenSSH`.
 
 ---
 
@@ -171,9 +171,9 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - `ServerMsg::Message(String)` (texte à montrer dans le bandeau de toutes les fenêtres)
 - Accueil : le processus de fond accepte `VERSION_MIN..=VERSION` et répond `Welcome { version: min(client, VERSION) }` ; il n'envoie jamais de variante v2 à un client v1.
 - Client : `Hello { version: 2 }` ; si la réponse est l'erreur « version du protocole incompatible », reconnexion avec `Hello { version: 1 }` ; `Pupitre` retient la version obtenue et affiche le message persistant « Le processus de fond est d'une version plus ancienne : les fonctions SSH de Pupitre seront actives quand tous les onglets auront été fermés. »
-- [ ] **Step 1 : Tests** : `proto` `encodage_v1_inchange` (octets attendus de `ClientMsg::Open`, `ServerMsg::Output` figés en dur depuis le code actuel **avant** la modification) ; `nouvelles_variantes_aller_retour` ; `fond/tests/serveur.rs` `client_v1_accueilli_sans_message_v2` ; `pupitre/tests/client.rs` `repli_v1_face_a_un_fond_ancien` (faux serveur qui refuse 2 et accepte 1).
-- [ ] **Step 2–4 :** échec, implémentation, succès (`cargo test -p pupitre-proto -p pupitre-fond -p pupitre --test client`). Lancer 60 s la cible de fuzzing des trames : aucun plantage.
-- [ ] **Step 5 : Commit** `feat(proto): version 2, demandes de l'askpass, compatible v1`.
+- [x] **Step 1 : Tests** : `proto` `encodage_v1_inchange` (octets attendus de `ClientMsg::Open`, `ServerMsg::Output` figés en dur depuis le code actuel **avant** la modification) ; `nouvelles_variantes_aller_retour` ; `fond/tests/serveur.rs` `client_v1_accueilli_sans_message_v2` ; `pupitre/tests/client.rs` `repli_v1_face_a_un_fond_ancien` (faux serveur qui refuse 2 et accepte 1).
+- [x] **Step 2–4 :** échec, implémentation, succès (`cargo test -p pupitre-proto -p pupitre-fond -p pupitre --test client`). Lancer 60 s la cible de fuzzing des trames : aucun plantage.
+- [x] **Step 5 : Commit** `feat(proto): version 2, demandes de l'askpass, compatible v1`.
 
 ---
 
@@ -191,9 +191,9 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - Recherche au démarrage ; ensuite, au plus une nouvelle sonde toutes les 10 s, faite dans `variables` (durée bornée par `DELAI_SONDE`). Notre agent : socket `<dossier du socket du fond>/agent.sock`, relancé s'il est mort.
   - `pub fn chemin_askpass() -> Option<PathBuf>` : variable `PUPITRE_ASKPASS`, sinon `pupitre-askpass` à côté de l'exécutable courant (même logique que `binaire_fond`), seulement s'il existe.
   - `pub fn agent_change(&mut self) -> bool` : vrai une fois après chaque nouvel agent (déclenche le chargement des clés, Task 7).
-- [ ] **Step 1 : Tests** (`fond/tests/serveur.rs`, avec `XDG_RUNTIME_DIR` et `TMPDIR` temporaires, `SSH_AUTH_SOCK` retiré) : `shell_recoit_ssh_auth_sock` (`echo $SSH_AUTH_SOCK` dans la session → chemin joignable) ; `agent_de_l_environnement_reutilise` (faux agent dans `SSH_AUTH_SOCK`) ; `agent_existant_retrouve` (faux agent dans `runtime/openssh_agent`, `SSH_AUTH_SOCK` absent) ; `agent_relance_apres_mort` (tuer notre `ssh-agent`, attendre 10 s, ouvrir une session → nouvel agent joignable) ; `variables_askpass_presentes` (`PUPITRE_ASKPASS=/bin/true`) ; `sans_askpass_pas_de_variable` ; `sans_ssh_agent_message` (`PATH` sans `ssh-agent`, aucun agent → `ServerMsg::Message`, la session s'ouvre quand même).
-- [ ] **Step 2–4 :** échec, implémentation, succès (`cargo test -p pupitre-fond`).
-- [ ] **Step 5 : Commit** `feat(fond): agent SSH garanti dans les shells de Pupitre`.
+- [x] **Step 1 : Tests** (`fond/tests/serveur.rs`, avec `XDG_RUNTIME_DIR` et `TMPDIR` temporaires, `SSH_AUTH_SOCK` retiré) : `shell_recoit_ssh_auth_sock` (`echo $SSH_AUTH_SOCK` dans la session → chemin joignable) ; `agent_de_l_environnement_reutilise` (faux agent dans `SSH_AUTH_SOCK`) ; `agent_existant_retrouve` (faux agent dans `runtime/openssh_agent`, `SSH_AUTH_SOCK` absent) ; `agent_relance_apres_mort` (tuer notre `ssh-agent`, attendre 10 s, ouvrir une session → nouvel agent joignable) ; `variables_askpass_presentes` (`PUPITRE_ASKPASS=/bin/true`) ; `sans_askpass_pas_de_variable` ; `sans_ssh_agent_message` (`PATH` sans `ssh-agent`, aucun agent → `ServerMsg::Message`, la session s'ouvre quand même).
+- [x] **Step 2–4 :** échec, implémentation, succès (`cargo test -p pupitre-fond`).
+- [x] **Step 5 : Commit** `feat(fond): agent SSH garanti dans les shells de Pupitre`.
 
 ---
 
@@ -211,9 +211,9 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - Interface accueillie (ou qui envoie `List`) → reçoit toutes les demandes ouvertes.
   - Un demandeur ne compte pas comme client pour l'arrêt automatique du fond ; une demande ouverte non plus.
   - Le contenu de `Repondre` n'est jamais écrit dans un journal ni dans un `Error`.
-- [ ] **Step 1 : Tests** (`fond/tests/serveur.rs`, clients bruts sur le socket) : `demande_relayee_puis_reponse` ; `premiere_reponse_gagne` (deux interfaces) ; `demande_annulee_si_askpass_part` ; `sans_interface_refus_immediat` ; `demande_renvoyee_a_une_interface_qui_arrive` ; `client_v1_ne_recoit_pas_de_demande`.
-- [ ] **Step 2–4 :** échec, implémentation, succès.
-- [ ] **Step 5 : Commit** `feat(fond): relais des demandes de phrase de passe`.
+- [x] **Step 1 : Tests** (`fond/tests/serveur.rs`, clients bruts sur le socket) : `demande_relayee_puis_reponse` ; `premiere_reponse_gagne` (deux interfaces) ; `demande_annulee_si_askpass_part` ; `sans_interface_refus_immediat` ; `demande_renvoyee_a_une_interface_qui_arrive` ; `client_v1_ne_recoit_pas_de_demande`.
+- [x] **Step 2–4 :** échec, implémentation, succès.
+- [x] **Step 5 : Commit** `feat(fond): relais des demandes de phrase de passe`.
 
 ---
 
@@ -235,9 +235,9 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
 - Chargement (processus de fond, **dans un thread à part**, jamais dans le thread central) : `pub fn charger_cle(agent: &Path, askpass: &Path, cle: &Path) -> Result<(), String>` lance `ssh-add -- <cle>` (stdin fermé, `SSH_AUTH_SOCK`, `SSH_ASKPASS`, `SSH_ASKPASS_REQUIRE=force`, `PUPITRE_ASKPASS_MODE=trousseau`), tué après 20 s. Échec → `ServerMsg::Message` : « La phrase de passe mémorisée pour <chemin lisible> ne fonctionne plus ; elle a été oubliée. Elle sera redemandée. »
   - Sur `ChargerCle` ; et quand `agent_change()` (démarrage, agent relancé) : pour chaque `coffre.cles()` dont le fichier existe et dont la clé publique (`<cle>.pub`, deux premiers champs) n'est pas dans `ssh-add -L`.
   - Trousseau `Verrouille` à ce moment → message unique « Trousseau verrouillé : les clés mémorisées n'ont pas été chargées. » et nouvel essai à chaque ouverture d'onglet tant que des clés n'ont pas été chargées.
-- [ ] **Step 1 : Tests** (`crates/ssh` pour le binaire, avec `CoffreMemoire` injecté via une fonction `executer(args, env, coffre, sortie) -> i32` testable ; `fond/tests/serveur.rs` pour le chargement, sous `scripts/trousseau-test.sh`) : `sans_socket_code_1` ; `refus_rien_sur_stdout` ; `phrase_ecrite_et_memorisee` ; `confirmation_codes` ; `mode_trousseau_rend_la_phrase` ; `mode_trousseau_nouvel_essai_oublie` ; `cle_memorisee_chargee_au_demarrage` (clé de test chiffrée par `ssh-keygen -N`, phrase dans le trousseau, démarrage du fond → `ssh-add -l` la liste) ; `phrase_memorisee_fausse_est_oubliee` (mauvaise phrase dans le trousseau → message, entrée oubliée, `ssh-add` terminé en moins de 20 s) ; `cle_deja_dans_l_agent_pas_rechargee`.
-- [ ] **Step 2–4 :** échec, implémentation, succès (`scripts/test-x11.sh -p pupitre-ssh -p pupitre-fond`).
-- [ ] **Step 5 : Commit** `feat(ssh): askpass de Pupitre et chargement des clés mémorisées`.
+- [x] **Step 1 : Tests** (`crates/ssh` pour le binaire, avec `CoffreMemoire` injecté via une fonction `executer(args, env, coffre, sortie) -> i32` testable ; `fond/tests/serveur.rs` pour le chargement, sous `scripts/trousseau-test.sh`) : `sans_socket_code_1` ; `refus_rien_sur_stdout` ; `phrase_ecrite_et_memorisee` ; `confirmation_codes` ; `mode_trousseau_rend_la_phrase` ; `mode_trousseau_nouvel_essai_oublie` ; `cle_memorisee_chargee_au_demarrage` (clé de test chiffrée par `ssh-keygen -N`, phrase dans le trousseau, démarrage du fond → `ssh-add -l` la liste) ; `phrase_memorisee_fausse_est_oubliee` (mauvaise phrase dans le trousseau → message, entrée oubliée, `ssh-add` terminé en moins de 20 s) ; `cle_deja_dans_l_agent_pas_rechargee`.
+- [x] **Step 2–4 :** échec, implémentation, succès (`scripts/test-x11.sh -p pupitre-ssh -p pupitre-fond`).
+- [x] **Step 5 : Commit** `feat(ssh): askpass de Pupitre et chargement des clés mémorisées`.
 
 ---
 
@@ -254,9 +254,9 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - Validation : `nom` non vide ; `hote` et `utilisateur` non vides, sans blanc ni caractère de contrôle, ne commençant pas par `-` ; `port` 1–65535 ; noms uniques.
   - `pub fn argv_ssh(c: &Connexion) -> Vec<String>` → `["ssh", "-p", port, "-l", utilisateur, "-i", cle, "--", hote]` (options présentes seulement si renseignées).
   - `pub fn hotes_ssh_config(fichier: &Path) -> Vec<String>` (dans `pupitre-ssh`) : alias des lignes `Host` (mot-clé insensible à la casse, `Host=x` accepté), sans motifs (`*`, `?`, `!`), sans alias commençant par `-`, sans doublon, dans l'ordre ; suit `Include` (chemins relatifs à `~/.ssh`, motifs `glob`, profondeur ≤ 8, boucles ignorées) ; fichier absent ou illisible → vide. Pour un alias : argv `["ssh", "--", alias]`.
-- [ ] **Step 1 : Tests** : `connexions_aller_retour` ; `fichier_absent_vide` ; `hote_option_refuse` (`hote = "-oProxyCommand=x"` → erreur ligne 3) ; `port_hors_bornes_refuse` ; `noms_en_double_refuses` ; `argv_complet`, `argv_minimal` ; `hotes_simples` (`Host a b` → a, b) ; `motifs_ignores` ; `alias_avec_tiret_ignore` ; `include_relatif_et_glob` ; `include_en_boucle_termine` ; `host_egal`.
-- [ ] **Step 2–4 :** échec, implémentation, succès.
-- [ ] **Step 5 : Commit** `feat(config): connexions SSH mémorisées et lecture de ~/.ssh/config`.
+- [x] **Step 1 : Tests** : `connexions_aller_retour` ; `fichier_absent_vide` ; `hote_option_refuse` (`hote = "-oProxyCommand=x"` → erreur ligne 3) ; `port_hors_bornes_refuse` ; `noms_en_double_refuses` ; `argv_complet`, `argv_minimal` ; `hotes_simples` (`Host a b` → a, b) ; `motifs_ignores` ; `alias_avec_tiret_ignore` ; `include_relatif_et_glob` ; `include_en_boucle_termine` ; `host_egal`.
+- [x] **Step 2–4 :** échec, implémentation, succès.
+- [x] **Step 5 : Commit** `feat(config): connexions SSH mémorisées et lecture de ~/.ssh/config`.
 
 ---
 
@@ -278,7 +278,7 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - `Information` : pas de fenêtre ; message dans le bandeau de la fenêtre parente (texte d'OpenSSH), retiré à `DemandeClose`.
 - Échap, « Annuler », fermeture de la fenêtre → `Repondre { reponse: None }`. `DemandeClose` → fenêtre fermée sans réponse. Le texte saisi est effacé de la saisie dès l'envoi.
 - `ServerMsg::Message(t)` → `afficher_message(t)` dans chaque fenêtre.
-- [ ] **Step 1 : Tests graphiques** (`gui_ssh.rs`, sous `scripts/trousseau-test.sh`, clé de test chiffrée, `SSH_AUTH_SOCK` retiré, binaires `pupitre-fond` et `pupitre-askpass` du dossier `target`) :
+- [x] **Step 1 : Tests graphiques** (`gui_ssh.rs`, sous `scripts/trousseau-test.sh`, clé de test chiffrée, `SSH_AUTH_SOCK` retiré, binaires `pupitre-fond` et `pupitre-askpass` du dossier `target`) :
   - `ssh_add_ouvre_la_fenetre` : `ssh-add <cle>` tapé dans l'onglet → fenêtre « Phrase de passe SSH » dont le texte contient le chemin, focus dans la saisie.
   - `phrase_validee_cle_dans_l_agent` : saisie + Entrée → `ssh-add -l` dans l'onglet affiche l'empreinte ; trousseau : la phrase y est.
   - `phrase_non_memorisee` : case décochée → clé dans l'agent, rien dans le trousseau.
@@ -286,9 +286,9 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - `fenetre_fermee_quand_demande_annulee` : Ctrl+C dans l'onglet pendant que la fenêtre est ouverte → fenêtre fermée en moins de 2 s.
   - `trousseau_absent_case_inactive` (sans `scripts/trousseau-test.sh`, variable de test qui coupe le bus) → case inactive et texte « Aucun trousseau disponible… ».
   - `fenetre_dans_la_bonne_fenetre` : deux fenêtres, demande depuis l'onglet de la seconde → parent = seconde.
-- [ ] **Step 2 : Sonde AT-SPI** : ajouter à `tests/a11y/` une règle pour la fenêtre de demande : rôle dialogue nommé « Phrase de passe SSH », saisie mot de passe nommée par le texte de la question, case à cocher nommée. Lancer la sonde depuis `ssh_add_ouvre_la_fenetre`.
-- [ ] **Step 3–4 :** échec, implémentation, succès (`scripts/test-x11.sh -p pupitre --test gui_ssh`, puis `scripts/test-wayland.sh` pareil).
-- [ ] **Step 5 : Commit** `feat(pupitre): fenêtre de phrase de passe SSH`.
+- [x] **Step 2 : Sonde AT-SPI** : ajouter à `tests/a11y/` une règle pour la fenêtre de demande : rôle dialogue nommé « Phrase de passe SSH », saisie mot de passe nommée par le texte de la question, case à cocher nommée. Lancer la sonde depuis `ssh_add_ouvre_la_fenetre`.
+- [x] **Step 3–4 :** échec, implémentation, succès (`scripts/test-x11.sh -p pupitre --test gui_ssh`, puis `scripts/test-wayland.sh` pareil).
+- [x] **Step 5 : Commit** `feat(pupitre): fenêtre de phrase de passe SSH`.
 
 ---
 
@@ -307,9 +307,9 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
   - « Ajouter… », « Modifier… », « Supprimer » (les deux derniers inactifs sur une ligne de `~/.ssh/config`). « Supprimer » demande confirmation (« Supprimer la connexion « nom » ? »).
   - Formulaire : « Nom », « Hôte », « Utilisateur (facultatif) », « Port (facultatif) », « Clé » (`gtk::DropDown` : « Par défaut » + clés privées de `~/.ssh` ayant un `.pub`). Erreur de validation → texte sous le champ fautif, annoncé (`messages::annoncer`), focus sur ce champ.
   - Enregistrement par `enregistrer_connexions` ; échec d'écriture → message, rien de perdu dans le formulaire. `connexions.toml` invalide → message persistant avec la ligne, la liste montre seulement `~/.ssh/config`, et le fichier n'est **jamais** réécrit tant qu'il est invalide (boutons Ajouter/Modifier/Supprimer inactifs).
-- [ ] **Step 1 : Tests graphiques** : `raccourci_ouvre_les_connexions` ; `hotes_ssh_config_listes` (HOME temporaire avec `.ssh/config`) ; `ajouter_puis_relire` (formulaire rempli → `connexions.toml` contient la connexion) ; `hote_invalide_signale` (« -x » → message sous « Hôte », rien d'écrit) ; `se_connecter_ouvre_un_onglet` (connexion vers `127.0.0.1` port 1 → nouvel onglet titré du nom, la sortie de `ssh` y apparaît : « Connection refused ») ; `fichier_invalide_pas_reecrit` ; `menu_contient_connexions`.
-- [ ] **Step 2–4 :** échec, implémentation, succès (X11 puis Wayland).
-- [ ] **Step 5 : Commit** `feat(pupitre): liste des connexions SSH`.
+- [x] **Step 1 : Tests graphiques** : `raccourci_ouvre_les_connexions` ; `hotes_ssh_config_listes` (HOME temporaire avec `.ssh/config`) ; `ajouter_puis_relire` (formulaire rempli → `connexions.toml` contient la connexion) ; `hote_invalide_signale` (« -x » → message sous « Hôte », rien d'écrit) ; `se_connecter_ouvre_un_onglet` (connexion vers `127.0.0.1` port 1 → nouvel onglet titré du nom, la sortie de `ssh` y apparaît : « Connection refused ») ; `fichier_invalide_pas_reecrit` ; `menu_contient_connexions`.
+- [x] **Step 2–4 :** échec, implémentation, succès (X11 puis Wayland).
+- [x] **Step 5 : Commit** `feat(pupitre): liste des connexions SSH`.
 
 ---
 
@@ -317,22 +317,22 @@ But : figer les textes d'invite et les comportements dont dépend tout le plan. 
 
 **Files :** Modify: `tests/a11y/orca/scenario.py`, `docs/orca-liste-de-controle.md`, `tests/isolement/verifier.py`, `scripts/test-orca.sh`, `scripts/verifier-isolement.sh` ; Create: `docs/verifications/etape-2.md`
 
-- [ ] **Step 1 : Orca, vérification 15** (« Phrase de passe ») : dans l'onglet, `ssh-add <clé de test>` → Orca annonce « Phrase de passe SSH, boîte de dialogue », la question avec le chemin, « saisie de mot de passe » ; Tab → « Mémoriser dans le trousseau, case à cocher, cochée » ; Échap → retour au terminal (invite lue). Le scénario lance son propre `gnome-keyring-daemon` (`scripts/trousseau-test.sh`).
-- [ ] **Step 2 : Orca, vérification 16** (« Connexions ») : Ctrl+Maj+O → « Connexions SSH, boîte de dialogue » puis la première ligne ; flèche bas → ligne suivante lue ; Échap → terminal.
-- [ ] **Step 3 :** `scripts/test-orca.sh` → 16/16, trois passages de suite. Mettre à jour le tableau de `docs/orca-liste-de-controle.md`.
-- [ ] **Step 4 : Isolement** : ajouter `pupitre-askpass` aux programmes jugés ; ajouter à la session type un `ssh-add` de la clé de test avec mémorisation, puis `ssh -p 1 127.0.0.1` (connexion refusée, lancée par l'utilisateur dans le shell : `ssh` n'est pas jugé). Attendu : aucune connexion réseau de Pupitre, rien d'écrit hors des dossiers de Pupitre, **la phrase de test n'apparaît dans aucun fichier** sous `HOME` ni `XDG_RUNTIME_DIR` (recherche de la chaîne après la session) ni dans les arguments d'aucun `execve` de la trace.
-- [ ] **Step 5 : Commit** `test(a11y): vérifications Orca et isolement pour SSH`.
+- [x] **Step 1 : Orca, vérification 15** (« Phrase de passe ») : dans l'onglet, `ssh-add <clé de test>` → Orca annonce « Phrase de passe SSH, boîte de dialogue », la question avec le chemin, « saisie de mot de passe » ; Tab → « Mémoriser dans le trousseau, case à cocher, cochée » ; Échap → retour au terminal (invite lue). Le scénario lance son propre `gnome-keyring-daemon` (`scripts/trousseau-test.sh`).
+- [x] **Step 2 : Orca, vérification 16** (« Connexions ») : Ctrl+Maj+O → « Connexions SSH, boîte de dialogue » puis la première ligne ; flèche bas → ligne suivante lue ; Échap → terminal.
+- [x] **Step 3 :** `scripts/test-orca.sh` → 16/16, trois passages de suite. Mettre à jour le tableau de `docs/orca-liste-de-controle.md`.
+- [x] **Step 4 : Isolement** : ajouter `pupitre-askpass` aux programmes jugés ; ajouter à la session type un `ssh-add` de la clé de test avec mémorisation, puis `ssh -p 1 127.0.0.1` (connexion refusée, lancée par l'utilisateur dans le shell : `ssh` n'est pas jugé). Attendu : aucune connexion réseau de Pupitre, rien d'écrit hors des dossiers de Pupitre, **la phrase de test n'apparaît dans aucun fichier** sous `HOME` ni `XDG_RUNTIME_DIR` (recherche de la chaîne après la session) ni dans les arguments d'aucun `execve` de la trace.
+- [x] **Step 5 : Commit** `test(a11y): vérifications Orca et isolement pour SSH`.
 
 ---
 
 ### Task 12 : Vérification de fin d'étape
 
-- [ ] **Step 1 :** `cargo clippy --workspace --all-targets` → 0 avertissement ; `cargo fmt --check`.
-- [ ] **Step 2 :** `scripts/test-x11.sh` et `scripts/test-wayland.sh` → tout passe.
-- [ ] **Step 3 :** fuzzing des trames 5 min (cible étendue à la Task 4) → aucun plantage.
-- [ ] **Step 4 :** `scripts/verifier-isolement.sh` → conforme ; `scripts/test-orca.sh` → 16/16.
-- [ ] **Step 5 : Essai sur le poste du porteur** (préparé par Claude, fait par le porteur en 2 minutes) : dans Pupitre, `git pull` dans un dépôt GitHub → fenêtre de phrase de passe, Mémoriser ; second `git pull` → aucune question ; fermer tous les onglets, attendre 10 s, rouvrir Pupitre, `git pull` → aucune question.
-- [ ] **Step 6 :** consigner dans `docs/verifications/etape-2.md`, cocher le plan, mettre à jour `suivi-tokens.md`, commit `docs: vérifications de l'étape 2`.
+- [x] **Step 1 :** `cargo clippy --workspace --all-targets` → 0 avertissement ; `cargo fmt --check`.
+- [x] **Step 2 :** `scripts/test-x11.sh` et `scripts/test-wayland.sh` → tout passe.
+- [x] **Step 3 :** fuzzing des trames 5 min (cible étendue à la Task 4) → aucun plantage.
+- [x] **Step 4 :** `scripts/verifier-isolement.sh` → conforme ; `scripts/test-orca.sh` → 16/16.
+- [x] **Step 5 : Essai sur le poste du porteur** (préparé par Claude, fait par le porteur en 2 minutes) : dans Pupitre, `git pull` dans un dépôt GitHub → fenêtre de phrase de passe, Mémoriser ; second `git pull` → aucune question ; fermer tous les onglets, attendre 10 s, rouvrir Pupitre, `git pull` → aucune question.
+- [x] **Step 6 :** consigner dans `docs/verifications/etape-2.md`, cocher le plan, mettre à jour `suivi-tokens.md`, commit `docs: vérifications de l'étape 2`.
 
 ---
 
