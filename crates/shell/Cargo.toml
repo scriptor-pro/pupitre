@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 pupitre-i18n = { path = "../i18n" }
+pupitre-config = { path = "../config" }
 
 [dev-dependencies]
 tempfile = "3"

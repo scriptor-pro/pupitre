@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use pupitre_shell::{lancement, ModeInvite, Ressources};
+use pupitre_shell::{lancement, Lancement, ModeInvite, Ressources};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -229,25 +229,38 @@ impl Session {
         mode: ModeInvite,
         ajuster: impl FnOnce(&mut Vec<(String, String)>),
     ) -> Option<Session> {
-        let Some(chemin) = dans_path(binaire(shell)) else {
-            sauter(&format!("{shell} n'est pas installé"));
-            return None;
-        };
         let starship = dans_path("starship");
         if mode == ModeInvite::Starship && starship.is_none() {
             sauter("Starship n'est pas installé");
             return None;
         }
+        let (session, l) = Self::lancer_ressources(banc, shell, mode, starship, ajuster)?;
+        assert_eq!(
+            l.avertissement, None,
+            "{shell} : fichiers d'intégration absents ou Starship manquant"
+        );
+        Some(session)
+    }
+
+    /// Lance `shell` avec `starship` comme Starship connu de Pupitre (`None` : introuvable).
+    /// Renvoie aussi ce que `lancement` a produit.
+    fn lancer_ressources(
+        banc: &Banc,
+        shell: &str,
+        mode: ModeInvite,
+        starship: Option<PathBuf>,
+        ajuster: impl FnOnce(&mut Vec<(String, String)>),
+    ) -> Option<(Session, Lancement)> {
+        let Some(chemin) = dans_path(binaire(shell)) else {
+            sauter(&format!("{shell} n'est pas installé"));
+            return None;
+        };
         let r = Ressources {
             integration: Some(banc.integration.clone()),
             starship,
             config_starship: banc.config_starship.clone(),
         };
         let l = lancement(&chemin, mode, &r);
-        assert_eq!(
-            l.avertissement, None,
-            "{shell} : fichiers d'intégration absents ou Starship manquant"
-        );
         assert!(
             l.argv.len() > 1 || l.env.iter().any(|(k, _)| k == "ZDOTDIR"),
             "{shell} : lancement tel quel (fichiers d'intégration absents) : {:?}",
@@ -323,12 +336,15 @@ impl Session {
                 }
             });
         }
-        Some(Session {
-            enfant,
-            ecrivain,
-            tampon,
-            _maitre: pty.master,
-        })
+        Some((
+            Session {
+                enfant,
+                ecrivain,
+                tampon,
+                _maitre: pty.master,
+            },
+            l,
+        ))
     }
 
     fn envoyer(&self, texte: &str) {
@@ -907,6 +923,58 @@ fn starship_non_executable_garde_l_invite_de_l_utilisateur() {
         assert!(
             !minuscules.contains("permission denied") && !minuscules.contains("error"),
             "{shell} : erreur affichée : {texte:?}"
+        );
+        s.fermer();
+    }
+}
+
+#[test]
+fn starship_absent_invite_utilisateur() {
+    for shell in ["bash", "zsh"] {
+        let Some(chemin) = dans_path(shell) else {
+            sauter(&format!("{shell} n'est pas installé"));
+            continue;
+        };
+        let banc = Banc::nouveau();
+        banc.config_utilisateur(shell);
+        // PATH sans Starship : seul le shell testé y figure (lien dans un dossier à part).
+        let bin = banc._exec.path().join("bin-sans-starship");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(&chemin, bin.join(shell)).unwrap();
+        let bin_txt = bin.to_string_lossy().into_owned();
+        let (s, l) = Session::lancer_ressources(&banc, shell, ModeInvite::Starship, None, |env| {
+            env.retain(|(k, _)| k != "PATH");
+            env.push(("PATH".into(), bin_txt));
+        })
+        .unwrap();
+        // Un seul avertissement, produit par `lancement` ; l'invite habituelle est gardée.
+        let avertissement = l.avertissement.as_deref().unwrap_or("");
+        assert!(
+            avertissement.contains("Starship"),
+            "{shell} : {avertissement:?}"
+        );
+        assert!(l.env.contains(&("PUPITRE_INVITE".into(), "shell".into())));
+        assert!(!l
+            .env
+            .iter()
+            .any(|(k, _)| k == "PUPITRE_STARSHIP" || k == "STARSHIP_CONFIG"));
+        s.attendre_marques(2);
+        s.envoyer(&format!("{}\n", syntaxe(shell).ok));
+        s.attendre_marques(6);
+        s.stabiliser();
+        let flux = s.flux();
+        let texte = s.texte();
+        assert!(texte.contains("MONINVITE> "), "{shell} : {texte:?}");
+        assert!(!texte.contains("STAR> "), "{shell} : {texte:?}");
+        let m = normalisees(&flux);
+        assert_eq!(compte(&m, "A"), 2, "{shell} : {m:?}");
+        assert_eq!(compte(&m, "B"), 2, "{shell} : {m:?}");
+        assert_eq!(compte(&m, "C"), 1, "{shell} : {m:?}");
+        // Les fichiers de shell n'affichent rien eux-mêmes : pas d'avertissement dans le flux.
+        let minuscules = texte.to_lowercase();
+        assert!(
+            !minuscules.contains("starship") && !minuscules.contains("not found"),
+            "{shell} : texte inattendu : {texte:?}"
         );
         s.fermer();
     }

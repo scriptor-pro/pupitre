@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Invite par défaut de Pupitre (Starship), sur deux lignes :
+#
+#   14:02:37 charge 0.42 git:main Δ●○
+#   ⌁⌁⌁utilisateur@machine ~/Projets/pupitre λ
+#
+# Ligne 1 : heure, charge sur 1 minute, branche git, état git (Δ modifié, ● indexé, ○ non suivi).
+# Ligne 2 : ⚙⚙⚙ si ENVIRONMENT=prod, ⌁⌁⌁ en SSH, utilisateur@machine, dossier, puis le symbole :
+#   ≠ si ENVIRONMENT=prod, sinon # pour root, » en SSH, λ sinon.
+# Uniquement des noms de couleurs ANSI (le thème du terminal décide des teintes) ; aucune icône
+# Nerd Font. Ce fichier est copié dans ~/.config/pupitre/starship.toml s'il manque : vous pouvez
+# le modifier, Pupitre ne le réécrit jamais.
+
+"$schema" = 'https://starship.rs/config-schema.json'
+
+add_newline = false
+command_timeout = 500
+
+format = """
+$time${custom.charge}$git_branch$git_status
+${custom.marque_prod}${custom.marque_ssh}$username$hostname$directory\
+${custom.symbole_prod}${custom.symbole_root}${custom.symbole_ssh}${custom.symbole}"""
+
+[time]
+disabled = false
+time_format = "%H:%M:%S"
+style = "bright-black"
+format = "[$time]($style) "
+
+# Charge moyenne sur 1 minute, lue directement dans /proc/loadavg.
+[custom.charge]
+command = "cut -d ' ' -f 1 /proc/loadavg"
+when = "test -r /proc/loadavg"
+style = "bright-black"
+format = "[charge $output]($style) "
+
+[git_branch]
+style = "purple"
+format = "[git:$branch]($style)"
+
+[git_status]
+style = "yellow"
+format = '( [$modified$staged$untracked]($style))'
+modified = "Δ"
+staged = "●"
+untracked = "○"
+
+[custom.marque_prod]
+when = '[ "$ENVIRONMENT" = prod ]'
+style = "red"
+format = "[⚙⚙⚙]($style)"
+
+[custom.marque_ssh]
+when = '[ -n "$SSH_CONNECTION" ]'
+style = "cyan"
+format = "[⌁⌁⌁]($style)"
+
+[username]
+show_always = true
+style_user = "green"
+style_root = "green"
+format = "[$user]($style)"
+
+[hostname]
+ssh_only = false
+style = "green"
+format = "[@$hostname]($style) "
+
+[directory]
+style = "blue"
+truncate_to_repo = false
+format = "[$path]($style) "
+
+# Symbole de l'invite, par ordre de priorité : prod, root, SSH, sinon λ.
+[custom.symbole_prod]
+when = '[ "$ENVIRONMENT" = prod ]'
+format = "≠"
+
+[custom.symbole_root]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" = 0 ]'
+format = "#"
+
+[custom.symbole_ssh]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" != 0 ] && [ -n "$SSH_CONNECTION" ]'
+format = "»"
+
+[custom.symbole]
+when = '[ "$ENVIRONMENT" != prod ] && [ "$(id -u)" != 0 ] && [ -z "$SSH_CONNECTION" ]'
+format = "λ"
