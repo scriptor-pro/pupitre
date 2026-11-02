@@ -87,6 +87,10 @@ fn main() {
     ex.lancer("navigation_hors_frontiere_attend", hors_frontiere);
     ex.lancer("navigation_chaine_jamais_terminee", chaine_jamais_terminee);
     ex.lancer("navigation_apres_file_debordee", navigation_file_debordee);
+    ex.lancer(
+        "calibrage_en_cours_file_debordee",
+        calibrage_en_cours_deborde,
+    );
     ex.lancer("raccourcis_sans_conflit", raccourcis_sans_conflit);
     ex.conclure();
 }
@@ -1126,6 +1130,34 @@ fn navigation_file_debordee() -> Resultat {
         let a = b.o.annonces().pop().unwrap_or_default();
         verifier(a == "Commande : echo trois", || {
             format!("annonce « {a} » au lieu de « Commande : echo trois »")
+        })
+    })();
+    b.fermer();
+    res
+}
+
+/// La demande de position d'une navigation est déjà partie (attente en cours, VTE n'a pas
+/// encore signalé le repère) quand la file déborde : la navigation est refaite et annoncée,
+/// jamais perdue en silence. Les octets sont donnés dans le même tour de boucle que la
+/// touche : VTE n'a pas pu répondre entre-temps.
+fn calibrage_en_cours_deborde() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        trois_commandes(&b)?;
+        b.o.terminal().definir_file_max(2_000);
+        let avant = b.o.annonces().len();
+        b.o.naviguer_commande(pupitre::commandes::Sens::Precedente);
+        let bruit: String = (0..300).map(|i| format!("bruit {i}\r\n")).collect();
+        b.o.terminal().on_output(bruit.as_bytes());
+        b.attendre_annonces(avant + 1)?;
+        let a = b.o.annonces().pop().unwrap_or_default();
+        verifier(a == "Commande : echo trois", || {
+            format!("annonce « {a} » au lieu de « Commande : echo trois »")
+        })?;
+        patienter(Duration::from_millis(500));
+        let recu = b.fond.entrees.lock().unwrap().clone();
+        verifier(recu.is_empty(), || {
+            format!("octets envoyés au shell : {recu:?}")
         })
     })();
     b.fermer();

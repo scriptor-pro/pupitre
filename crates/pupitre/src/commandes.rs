@@ -1249,15 +1249,22 @@ impl Flux {
             return;
         }
         // Les navigations demandées ne sont pas perdues : elles sont refaites une fois tous
-        // les octets donnés (leur position est relevée à ce moment-là).
+        // les octets donnés (leur position est relevée à ce moment-là). Y compris celle dont
+        // la demande de position est déjà partie : sa réponse tardive reste gardée pour soi
+        // (`reponses_attendues`) et son repère, devenu ancien, est ignoré.
         let (travaux, mut navigations): (Vec<Travail>, Vec<RappelCalibrage>) = {
             let mut e = self.etat.borrow_mut();
-            e.attente = None;
+            let mut navigations = Vec::new();
+            if let Some(Attente {
+                genre: Genre::Calibrage(f),
+                ..
+            }) = e.attente.take()
+            {
+                navigations.push(f);
+            }
+            navigations.append(&mut e.navigations_en_attente);
             e.octets_en_file = 0;
-            (
-                e.file.drain(..).collect(),
-                std::mem::take(&mut e.navigations_en_attente),
-            )
+            (e.file.drain(..).collect(), navigations)
         };
         for t in travaux {
             match t {
