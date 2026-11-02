@@ -39,6 +39,14 @@ const OUBLI_DEMANDE: Duration = Duration::from_secs(5);
 /// Octets en attente au-delà desquels les marques sont abandonnées pour ne pas retenir la
 /// sortie (mémoire bornée).
 const FILE_MAX_OCTETS: usize = 8 * 1024 * 1024;
+/// Longueur (octets) au-delà de laquelle une séquence CSI ou une chaîne OSC/DCS/APC… jamais
+/// terminée est tenue pour finie par le suivi des frontières.
+const CHAINE_MAX: usize = 1024 * 1024;
+/// Une navigation demandée hors frontière propre attend celle-ci au plus ce délai, puis
+/// échoue (annoncée).
+const DELAI_FRONTIERE: Duration = Duration::from_millis(1000);
+/// Navigations en attente d'une frontière au plus (les suivantes échouent, annoncées).
+const NAVIGATIONS_EN_ATTENTE_MAX: usize = 8;
 /// Lignes de terminal lues au plus pour le texte d'une commande.
 const LIGNES_LUES_MAX: i64 = 200;
 /// Propriété de terminal servant de repère (valeur : le numéro du repère).
@@ -365,6 +373,9 @@ pub enum Navigation {
     Bout(Sens),
     /// Un programme plein écran est affiché : les lignes lues seraient les siennes.
     Indisponible,
+    /// La position n'a pas pu être relevée (flux arrêté au milieu d'une séquence, VTE muet,
+    /// file débordée…) : annoncé, jamais passé sous silence.
+    Impossible,
 }
 
 impl Navigation {
@@ -374,6 +385,7 @@ impl Navigation {
             Navigation::Bout(Sens::Precedente) => tr("commande-aucune-avant"),
             Navigation::Bout(Sens::Suivante) => tr("commande-aucune-apres"),
             Navigation::Indisponible => tr("commande-navigation-indisponible"),
+            Navigation::Impossible => tr("commande-navigation-impossible"),
             Navigation::Commande { texte, echec } => {
                 let code = echec.map(|c| ArgI18n::from(i64::from(c)));
                 match (texte.is_empty(), code) {
@@ -519,11 +531,16 @@ enum EtatFlux {
     ChaineEchap,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Frontiere {
     etat: EtatFlux,
     /// Octets de continuation UTF-8 encore attendus.
     utf8: u8,
+    /// L'octet précédent était 0xC2 : le suivant peut former un contrôle C1 (U+0080 à
+    /// U+009F), que VTE interprète comme son équivalent ESC (CSI, OSC, DCS, ST…).
+    c2: bool,
+    /// Octets lus dans la séquence CSI ou la chaîne en cours (borné par `CHAINE_MAX`).
+    longueur: usize,
 }
 
 impl Frontiere {
@@ -533,46 +550,97 @@ impl Frontiere {
         }
     }
 
+    /// Nombre d'octets de `data` à donner pour arriver à la première frontière propre
+    /// (0 si on y est déjà), `None` s'il n'y en a pas dans `data`. Ne change rien.
+    fn prochaine_propre(&self, data: &[u8]) -> Option<usize> {
+        if self.propre() {
+            return Some(0);
+        }
+        let mut f = self.clone();
+        for (i, &c) in data.iter().enumerate() {
+            f.octet(c);
+            if f.propre() {
+                return Some(i + 1);
+            }
+        }
+        None
+    }
+
     fn octet(&mut self, c: u8) {
         use EtatFlux::{Chaine, ChaineEchap, Csi, Echap, Texte};
         // CAN et SUB annulent toute séquence.
         if matches!(c, 0x18 | 0x1a) {
             self.etat = Texte;
             self.utf8 = 0;
+            self.c2 = false;
+            self.longueur = 0;
             return;
         }
-        self.etat = match (self.etat, c) {
-            (Texte | Csi | Echap | Chaine | ChaineEchap, 0x1b) => {
-                self.utf8 = 0;
-                if self.etat == Chaine {
-                    ChaineEchap
-                } else {
-                    Echap
-                }
+        let avant = self.etat;
+        let apres_c2 = std::mem::replace(&mut self.c2, c == 0xc2);
+        // Contrôle C1 codé en UTF-8 (C2 80 à C2 9F).
+        let c1 = if apres_c2 && (0x80..=0x9f).contains(&c) {
+            match (avant, c) {
+                (Texte, 0x9b) => Some(Csi),
+                (Texte, 0x90 | 0x98 | 0x9d | 0x9e | 0x9f) => Some(Chaine),
+                (Texte, _) => Some(Texte),
+                // ST (U+009C) termine la chaîne.
+                (Chaine, 0x9c) => Some(Texte),
+                _ => None,
             }
-            (Texte, _) => {
-                match c {
-                    0xc0..=0xdf => self.utf8 = 1,
-                    0xe0..=0xef => self.utf8 = 2,
-                    0xf0..=0xf7 => self.utf8 = 3,
-                    0x80..=0xbf => self.utf8 = self.utf8.saturating_sub(1),
-                    _ => self.utf8 = 0,
-                }
-                Texte
-            }
-            (Echap, b'[') => Csi,
-            (Echap, b']' | b'P' | b'X' | b'^' | b'_') => Chaine,
-            (Echap, 0x20..=0x2f) => Echap,
-            (Echap, _) => Texte,
-            (Csi, 0x40..=0x7e) => Texte,
-            (Csi, _) => Csi,
-            (Chaine, 0x07) => Texte,
-            (Chaine, _) => Chaine,
-            (ChaineEchap, b'\\') => Texte,
-            (ChaineEchap, b'[') => Csi,
-            (ChaineEchap, b']' | b'P' | b'X' | b'^' | b'_') => Chaine,
-            (ChaineEchap, _) => Texte,
+        } else {
+            None
         };
+        let mut apres = if let Some(e) = c1 {
+            self.utf8 = 0;
+            e
+        } else {
+            match (avant, c) {
+                (Texte | Csi | Echap | Chaine | ChaineEchap, 0x1b) => {
+                    self.utf8 = 0;
+                    if avant == Chaine {
+                        ChaineEchap
+                    } else {
+                        Echap
+                    }
+                }
+                (Texte, _) => {
+                    match c {
+                        0xc0..=0xdf => self.utf8 = 1,
+                        0xe0..=0xef => self.utf8 = 2,
+                        0xf0..=0xf7 => self.utf8 = 3,
+                        0x80..=0xbf => self.utf8 = self.utf8.saturating_sub(1),
+                        _ => self.utf8 = 0,
+                    }
+                    Texte
+                }
+                (Echap, b'[') => Csi,
+                (Echap, b']' | b'P' | b'X' | b'^' | b'_') => Chaine,
+                (Echap, 0x20..=0x2f) => Echap,
+                (Echap, _) => Texte,
+                (Csi, 0x40..=0x7e) => Texte,
+                (Csi, _) => Csi,
+                (Chaine, 0x07) => Texte,
+                (Chaine, _) => Chaine,
+                (ChaineEchap, b'\\') => Texte,
+                (ChaineEchap, b'[') => Csi,
+                (ChaineEchap, b']' | b'P' | b'X' | b'^' | b'_') => Chaine,
+                (ChaineEchap, _) => Texte,
+            }
+        };
+        // Sortie bornée : une séquence ou une chaîne jamais terminée ne bloque pas
+        // l'automate indéfiniment (au pire un repère arrive au milieu d'une chaîne trop
+        // longue, que VTE abandonne alors).
+        self.longueur = match (avant, apres) {
+            (Csi, Csi) | (Chaine, Chaine | ChaineEchap) => self.longueur + 1,
+            _ => 0,
+        };
+        if self.longueur >= CHAINE_MAX {
+            apres = Texte;
+            self.longueur = 0;
+            self.utf8 = 0;
+        }
+        self.etat = apres;
     }
 
     /// Vrai si le prochain octet peut commencer une séquence ou un caractère.
@@ -698,6 +766,11 @@ struct Etat {
     conversions: u32,
     /// Réagencements pour lesquels les positions n'ont pas pu être suivies.
     reagencements_imprecis: u32,
+    /// Navigations demandées alors que le flux donné à VTE s'arrêtait hors frontière
+    /// propre : elles attendent la prochaine (au plus `DELAI_FRONTIERE`).
+    navigations_en_attente: Vec<RappelCalibrage>,
+    /// Numéro de la dernière mise en attente (le délai d'une attente finie est ignoré).
+    generation_attente: u32,
 }
 
 /// File ordonnée des octets et des marques d'un onglet, avec les lignes des commandes.
@@ -1016,6 +1089,8 @@ impl Flux {
         } && !self.en_geste();
         if direct {
             self.donner_octets(data);
+            // Une navigation qui attendait une frontière propre a pu être remise en file.
+            self.avancer();
             return;
         }
         {
@@ -1035,7 +1110,80 @@ impl Flux {
         self.avancer();
     }
 
+    /// Donne des octets à VTE. Si des navigations attendent une frontière propre, seuls les
+    /// octets jusqu'à la première frontière sont donnés ; les navigations, puis le reste,
+    /// sont remis en tête de la file (l'appelant doit ensuite faire `avancer`).
     fn donner_octets(&self, data: &[u8]) {
+        let coupure = if self.etat.borrow().navigations_en_attente.is_empty() {
+            None
+        } else {
+            self.frontiere.borrow().prochaine_propre(data)
+        };
+        let Some(k) = coupure else {
+            self.donner_brut(data);
+            return;
+        };
+        let (avant, reste) = data.split_at(k);
+        if !avant.is_empty() {
+            self.donner_brut(avant);
+        }
+        let mut e = self.etat.borrow_mut();
+        if !reste.is_empty() {
+            e.octets_en_file += reste.len();
+            e.file.push_front(Travail::Octets(reste.to_vec()));
+        }
+        let navigations = std::mem::take(&mut e.navigations_en_attente);
+        for f in navigations.into_iter().rev() {
+            e.file.push_front(Travail::Calibrage(f));
+        }
+    }
+
+    /// Met une navigation en attente de la prochaine frontière propre du flux ; au-delà de
+    /// `DELAI_FRONTIERE`, elle échoue (annoncée).
+    fn attendre_frontiere(&self, f: RappelCalibrage) {
+        let (refusee, generation) = {
+            let mut e = self.etat.borrow_mut();
+            if e.navigations_en_attente.len() >= NAVIGATIONS_EN_ATTENTE_MAX {
+                (Some(f), None)
+            } else {
+                let premiere = e.navigations_en_attente.is_empty();
+                e.navigations_en_attente.push(f);
+                if premiere {
+                    e.generation_attente = e.generation_attente.wrapping_add(1);
+                    (None, Some(e.generation_attente))
+                } else {
+                    (None, None)
+                }
+            }
+        };
+        if let Some(f) = refusee {
+            f(self, None);
+        }
+        if let Some(g) = generation {
+            let faible = self.soi.borrow().clone();
+            gtk::glib::timeout_add_local_once(DELAI_FRONTIERE, move || {
+                if let Some(flux) = faible.upgrade() {
+                    flux.frontiere_expiree(g);
+                }
+            });
+        }
+    }
+
+    /// Aucune frontière propre n'est arrivée à temps : les navigations en attente échouent.
+    fn frontiere_expiree(&self, generation: u32) {
+        let navigations = {
+            let mut e = self.etat.borrow_mut();
+            if e.generation_attente != generation {
+                return;
+            }
+            std::mem::take(&mut e.navigations_en_attente)
+        };
+        for f in navigations {
+            f(self, None);
+        }
+    }
+
+    fn donner_brut(&self, data: &[u8]) {
         self.suivi_ecran.borrow_mut().suivre(data);
         self.frontiere.borrow_mut().suivre(data);
         let programmer = {
@@ -1100,19 +1248,31 @@ impl Flux {
         if self.etat.borrow().octets_en_file <= self.file_max.get() {
             return;
         }
-        let travaux: Vec<Travail> = {
+        // Les navigations demandées ne sont pas perdues : elles sont refaites une fois tous
+        // les octets donnés (leur position est relevée à ce moment-là).
+        let (travaux, mut navigations): (Vec<Travail>, Vec<RappelCalibrage>) = {
             let mut e = self.etat.borrow_mut();
             e.attente = None;
             e.octets_en_file = 0;
-            e.file.drain(..).collect()
+            (
+                e.file.drain(..).collect(),
+                std::mem::take(&mut e.navigations_en_attente),
+            )
         };
         for t in travaux {
             match t {
-                Travail::Octets(d) => self.donner_octets(&d),
-                Travail::Calibrage(f) => f(self, None),
+                Travail::Octets(d) => self.donner_brut(&d),
+                Travail::Calibrage(f) => navigations.push(f),
                 Travail::Marque(..) => {}
             }
         }
+        {
+            let mut e = self.etat.borrow_mut();
+            for f in navigations {
+                e.file.push_back(Travail::Calibrage(f));
+            }
+        }
+        self.avancer();
     }
 
     /// Traite la file jusqu'à la prochaine attente.
@@ -1153,7 +1313,12 @@ impl Flux {
                     }
                 }
                 Some(Travail::Calibrage(f)) => {
-                    if self.attendre(Genre::Calibrage(f), b"\x1b[6n") {
+                    // Flux arrêté au milieu d'une séquence ou d'un caractère : la demande de
+                    // position attend la prochaine frontière propre ; la suite de la file
+                    // continue (c'est elle qui l'amènera).
+                    if !self.frontiere.borrow().propre() {
+                        self.attendre_frontiere(f);
+                    } else if self.attendre(Genre::Calibrage(f), b"\x1b[6n") {
                         return;
                     }
                 }
@@ -1173,16 +1338,10 @@ impl Flux {
             });
             e.repere
         };
-        // Pas de repère ni de demande au milieu d'une séquence ou d'un caractère : rien n'est
-        // donné, et l'attente est levée au délai de secours (positions lues sur le curseur).
+        // Pas de repère au milieu d'une séquence ou d'un caractère : rien n'est donné, et
+        // l'attente est levée au délai court (position lue sur le curseur). Les demandes de
+        // position (navigation) n'arrivent jamais ici hors frontière : voir `avancer`.
         if !self.frontiere.borrow().propre() {
-            if matches!(
-                self.etat.borrow().attente.as_ref().map(|a| &a.genre),
-                Some(Genre::Calibrage(_))
-            ) {
-                self.resoudre();
-                return false;
-            }
             self.armer_delai_court(repere);
             return true;
         }
@@ -1350,17 +1509,27 @@ impl Flux {
     }
 
     /// Va à la commande précédente ou suivante : défile pour mettre sa ligne en haut puis
-    /// appelle `fini` avec ce qu'il faut annoncer (`None` : navigation impossible).
-    pub fn naviguer(&self, sens: Sens, fini: impl FnOnce(Option<Navigation>) + 'static) {
+    /// appelle `fini` avec ce qu'il faut annoncer (toujours quelque chose, jamais de
+    /// silence : `Navigation::Impossible` si la position n'a pas pu être relevée).
+    pub fn naviguer(&self, sens: Sens, fini: impl FnOnce(Navigation) + 'static) {
         // Écran alternatif : les lignes lues seraient celles du programme, pas les nôtres.
         if self.ecran_alterne() {
-            fini(Some(Navigation::Indisponible));
+            fini(Navigation::Indisponible);
             return;
         }
         // Un geste de redimensionnement en cours est terminé d'abord.
         self.restaurer();
         let rappel: RappelCalibrage = Box::new(move |flux, calibrage| {
-            fini(calibrage.map(|c| flux.aller(sens, c)));
+            // L'écran alternatif a pu s'afficher pendant l'attente.
+            let n = if flux.ecran_alterne() {
+                Navigation::Indisponible
+            } else {
+                match calibrage {
+                    Some(c) => flux.aller(sens, c),
+                    None => Navigation::Impossible,
+                }
+            };
+            fini(n);
         });
         self.etat
             .borrow_mut()
@@ -1733,6 +1902,51 @@ mod tests {
     }
 
     #[test]
+    fn frontiere_c1_et_chaine_bornee() {
+        let propre = |t: &[u8]| {
+            let mut f = Frontiere::default();
+            f.suivre(t);
+            f.propre()
+        };
+        // ST en C1 codé en UTF-8 (U+009C) : fin de chaîne, comme VTE.
+        assert!(propre(b"\x1b]0;titre\xc2\x9c"));
+        assert!(propre(b"\x1b]0;titre\xc2\x9cabc"));
+        assert!(!propre(b"\x1b]0;titre\xc2"));
+        // Un autre caractère en C2 ne termine pas la chaîne.
+        assert!(!propre(b"\x1b]0;titre\xc2\xa9"));
+        // Introducteurs C1 en UTF-8 (CSI U+009B, OSC U+009D, DCS U+0090).
+        assert!(!propre(b"\xc2\x9b1;3"));
+        assert!(propre(b"\xc2\x9b1;31m"));
+        assert!(!propre(b"\xc2\x9d0;titre"));
+        assert!(propre(b"\xc2\x9d0;titre\x07"));
+        assert!(!propre(b"\xc2\x90q#0"));
+        assert!(propre("é©".as_bytes()));
+        // Chaîne jamais terminée : l'automate en sort au-delà de la longueur maximale.
+        let mut f = Frontiere::default();
+        f.suivre(b"\x1b]");
+        f.suivre(&vec![b'x'; CHAINE_MAX - 1]);
+        assert!(!f.propre());
+        f.suivre(b"x");
+        assert!(f.propre());
+        // Première frontière propre dans un morceau à venir.
+        let mut f = Frontiere::default();
+        assert_eq!(f.prochaine_propre(b"x"), Some(0));
+        f.suivre(b"\x1b[1;3");
+        assert_eq!(f.prochaine_propre(b"1mvert \xc3"), Some(2));
+        f.suivre(b"1mvert \xc3");
+        assert_eq!(f.prochaine_propre(b"\xa9t"), Some(1));
+        let mut f = Frontiere::default();
+        f.suivre(b"\x1b]0;t");
+        assert_eq!(f.prochaine_propre(b"abc"), None);
+        assert!(!f.propre());
+        // De même pour une séquence CSI interminable.
+        let mut f = Frontiere::default();
+        f.suivre(b"\x1b[");
+        f.suivre(&vec![b'1'; CHAINE_MAX]);
+        assert!(f.propre());
+    }
+
+    #[test]
     fn ris_revient_a_l_ecran_normal() {
         let mut s = SuiviEcran::default();
         s.suivre(b"\x1b[?1049h");
@@ -1806,6 +2020,10 @@ mod tests {
         assert_eq!(
             Navigation::Bout(Sens::Suivante).texte(),
             "Aucune commande après."
+        );
+        assert_eq!(
+            Navigation::Impossible.texte(),
+            "Navigation impossible pour l'instant."
         );
     }
 

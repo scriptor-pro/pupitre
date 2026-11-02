@@ -177,8 +177,9 @@ impl Onglet {
     /// Défile jusqu'à la commande précédente ou suivante et l'annonce.
     pub fn naviguer_commande(self: &Rc<Self>, sens: Sens) {
         let faible = Rc::downgrade(self);
+        // Toujours une annonce, échec compris : jamais de silence après la touche.
         self.terminal.naviguer(sens, move |n| {
-            if let (Some(o), Some(n)) = (faible.upgrade(), n) {
+            if let Some(o) = faible.upgrade() {
                 o.annoncer_commande(&n.texte());
             }
         });

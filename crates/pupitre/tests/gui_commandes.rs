@@ -84,6 +84,9 @@ fn main() {
     ex.lancer("flux_continu_sans_repere_parasite", flux_continu);
     ex.lancer("navigation_indisponible_ecran_alterne", indisponible);
     ex.lancer("pixel_de_plus_sans_conversion", pixel_de_plus);
+    ex.lancer("navigation_hors_frontiere_attend", hors_frontiere);
+    ex.lancer("navigation_chaine_jamais_terminee", chaine_jamais_terminee);
+    ex.lancer("navigation_apres_file_debordee", navigation_file_debordee);
     ex.lancer("raccourcis_sans_conflit", raccourcis_sans_conflit);
     ex.conclure();
 }
@@ -1032,6 +1035,98 @@ fn pixel_de_plus() -> Resultat {
             })?;
         }
         attendu(b.naviguer(true), "Commande : echo trois")
+    })();
+    b.fermer();
+    res
+}
+
+/// Ctrl+Maj+↑ alors que le flux s'arrête au milieu d'une séquence d'échappement : la
+/// navigation attend la prochaine frontière propre (ici au milieu du morceau suivant, qui
+/// finit lui-même au milieu d'un caractère UTF-8) puis se fait, sans abîmer l'affichage.
+fn hors_frontiere() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        trois_commandes(&b)?;
+        let envoyer = |d: &[u8]| {
+            b.fond.envoyer(ServerMsg::Output {
+                id: 1,
+                data: d.to_vec(),
+            })
+        };
+        envoyer(b"sortie \x1b[1;3");
+        patienter(Duration::from_millis(300));
+        let avant = b.o.annonces().len();
+        verifier(
+            b.f.traiter_touche(gdk::Key::Up, CODE_HAUT, CTRL_MAJ),
+            || "touche non consommée".into(),
+        )?;
+        patienter(Duration::from_millis(300));
+        envoyer(b"2mvert \xc3");
+        patienter(Duration::from_millis(100));
+        envoyer(b"\xa9t\xc3\xa9\x1b[0m");
+        b.attendre_annonces(avant + 1)?;
+        let a = b.o.annonces().pop().unwrap_or_default();
+        verifier(a == "Commande : echo trois", || {
+            format!("annonce « {a} » au lieu de « Commande : echo trois »")
+        })?;
+        verifier(b.haut_visible() == "$ echo trois", || {
+            format!("haut de la vue : « {} »", b.haut_visible())
+        })?;
+        patienter(Duration::from_millis(300));
+        let t = b.o.terminal().terminal().clone();
+        let (_, dernier) = t.cursor_position();
+        let (texte, _) = t.text_range_format(vte4::Format::Text, dernier, 0, dernier + 1, 0);
+        let texte = texte.map(|s| s.to_string()).unwrap_or_default();
+        verifier(texte.trim_end() == "$ sortie vert été", || {
+            format!("dernière ligne : « {texte} »")
+        })?;
+        let recu = b.fond.entrees.lock().unwrap().clone();
+        verifier(recu.is_empty(), || {
+            format!("octets envoyés au shell : {recu:?}")
+        })
+    })();
+    b.fermer();
+    res
+}
+
+/// Chaîne OSC jamais terminée : la navigation ne peut pas se faire, et Orca le dit (jamais
+/// de silence) ; une fois la chaîne terminée, elle refonctionne.
+fn chaine_jamais_terminee() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        trois_commandes(&b)?;
+        b.fond.octets(1, "\x1b]0;titre sans fin");
+        patienter(Duration::from_millis(300));
+        attendu(b.naviguer(true), "Navigation impossible pour l'instant.")?;
+        b.fond.octets(1, "\x07");
+        patienter(Duration::from_millis(300));
+        attendu(b.naviguer(true), "Commande : echo trois")
+    })();
+    b.fermer();
+    res
+}
+
+/// Une navigation attend dans la file derrière une marque (relevée hors frontière propre,
+/// donc après un court délai) quand la file déborde : elle n'est pas perdue en silence,
+/// elle se fait une fois les octets donnés à VTE.
+fn navigation_file_debordee() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        trois_commandes(&b)?;
+        b.o.terminal().definir_file_max(2_000);
+        // Flux arrêté au milieu d'une séquence : la marque attend son délai court.
+        b.fond.octets(1, "ls\r\n\x1b[1;3");
+        b.fond.marque(1, Execution, false);
+        patienter(Duration::from_millis(20));
+        let avant = b.o.annonces().len();
+        b.o.naviguer_commande(pupitre::commandes::Sens::Precedente);
+        let bruit: String = (0..300).map(|i| format!("bruit {i}\r\n")).collect();
+        b.fond.octets(1, &format!("m{bruit}"));
+        b.attendre_annonces(avant + 1)?;
+        let a = b.o.annonces().pop().unwrap_or_default();
+        verifier(a == "Commande : echo trois", || {
+            format!("annonce « {a} » au lieu de « Commande : echo trois »")
+        })
     })();
     b.fermer();
     res

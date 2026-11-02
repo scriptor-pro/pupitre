@@ -612,7 +612,7 @@ impl TerminalOnglet {
     }
 
     /// Défile jusqu'à la commande précédente ou suivante ; `fini` reçoit le résultat.
-    pub fn naviguer(&self, sens: Sens, fini: impl FnOnce(Option<Navigation>) + 'static) {
+    pub fn naviguer(&self, sens: Sens, fini: impl FnOnce(Navigation) + 'static) {
         self.flux.naviguer(sens, fini);
     }
 

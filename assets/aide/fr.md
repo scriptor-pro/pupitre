@@ -303,15 +303,20 @@ lire.
   ligne entière est lue, invite comprise. Une commande vide est annoncée « Commande vide. »
 - Au bout de la liste : « Aucune commande avant. » ou « Aucune commande après. »
 - La navigation vise les commandes déjà lancées, pas l'invite du bas, où vous êtes déjà ; une
-  commande sortie de l'historique du terminal (voir `historique_lignes`) est oubliée. Après un
-  changement de largeur de la fenêtre, les commandes d'avant ne sont plus retrouvées : la
-  navigation repart des suivantes.
+  commande sortie de l'historique du terminal (voir `historique_lignes`) est oubliée. Les
+  commandes restent retrouvées après un changement de largeur de la fenêtre ou de taille du
+  texte.
 - Quand un programme plein écran est affiché (`vim`, `less`, `htop`, `mc`…), Ctrl+Maj+↑ et
   Ctrl+Maj+↓ n'envoient rien au programme et Orca annonce « Navigation indisponible pendant
   un programme plein écran. » Quittez le programme pour naviguer de nouveau.
+- Si un programme est en train d'écrire au moment de la touche, la navigation attend un
+  instant (au plus une seconde) un endroit sûr de sa sortie. Si elle ne peut pas se faire
+  (par exemple un programme laisse une séquence de contrôle inachevée), Orca annonce
+  « Navigation impossible pour l'instant. » : réessayez un peu plus tard.
 - Un redimensionnement de la fenêtre ou un changement de taille du texte retient l'affichage
-  de la sortie des programmes environ 200 millisecondes, le temps de retrouver les lignes
-  des commandes ; rien n'est perdu.
+  de la sortie des programmes environ 200 millisecondes après la fin du zoom ou du
+  redimensionnement (jusqu'à 2 secondes pendant un redimensionnement continu), le temps de
+  retrouver les lignes des commandes ; rien n'est perdu.
 - Après une reprise (Pupitre rouvert), les commandes déjà faites servent à la navigation,
   mais seulement celles que le processus de fond a retenues ; si une commande manque, la
   navigation passe simplement à la voisine.
