@@ -118,6 +118,18 @@ class Session:
             raise Echec("Orca n'a pas démarré (voir orca.out)")
         self.pupitre_proc = self.lancer("pupitre", [self.pupitre])
 
+    def relancer_pupitre(self, signal_=signal.SIGKILL):
+        """Tue l'interface (le fond garde les sessions) et la relance."""
+        self.pupitre_proc.send_signal(signal_)
+        try:
+            self.pupitre_proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.pupitre_proc.kill()
+            self.pupitre_proc.wait()
+        time.sleep(1)
+        self.marquer()
+        self.pupitre_proc = self.lancer("pupitre-reprise", [self.pupitre])
+
     def arreter(self):
         for p in reversed(self.procs):
             try:
@@ -271,8 +283,19 @@ def v02_sortie(s):
 
 
 def v03_nouvel_onglet(s):
+    # Le repère est posé juste avant Ctrl+Maj+T, après avoir laissé Orca finir de lire l'onglet 1
+    # (sinon l'invite du premier onglet, lue en retard, validerait la vérification). Le nouvel
+    # onglet est lu « vide » (invite pas encore dessinée) ; on lui donne le focus (Ctrl+Tab
+    # jusqu'au terminal, comme v05/v12) puis Entrée redessine son invite, qu'Orca doit lire.
+    s.calme(1.5, 15)
+    s.marquer()
     s.touches("ctrl+shift+t")
     exiger(s.attendre(r"Page 2|onglet", 6), "le nouvel onglet n'est pas annoncé")
+    s.calme(1.5, 15)
+    exiger(s.ctrl_tab_jusqu_a(r"^Terminal Page 2"), "Ctrl+Tab ne mène pas au terminal du nouvel onglet")
+    s.calme()
+    s.marquer()
+    s.touches("Return")
     exiger(s.attendre(re.escape(INVITE.strip()), 6), "l'invite du nouvel onglet n'est pas lue")
 
 
@@ -580,6 +603,28 @@ def v20_invite_starship(s):
     finally:
         with open(chemin, "w", encoding="utf-8") as f:
             f.write(origine)
+        # Attendre la relecture à chaud avant la vérification suivante : une configuration
+        # invalide ou différente ne doit pas la gêner (la relecture ne dit rien si elle réussit).
+        time.sleep(2)
+
+
+def v21_reprise(s):
+    # Reprise : l'interface est tuée (plantage), le fond garde les sessions ; l'interface relancée
+    # rattache les onglets. Orca doit ensuite lire la sortie nouvelle et les annonces de fin.
+    s.revenir_au_terminal()
+    s.calme()
+    s.relancer_pupitre()
+    exiger(s.attendre(r"Page \d|— Pupitre", 25), "reprise : la fenêtre n'est pas annoncée")
+    s.calme(2.0, 20)
+    exiger(s.vivant(), "reprise : Pupitre ne tourne plus")
+    s.marquer()
+    s.commande("echo reprise-$((6*7))")
+    exiger(s.attendre(r"reprise-42", 10), "reprise : la sortie d'une commande n'est pas lue")
+    s.calme()
+    s.marquer()
+    s.commande("sleep 6")
+    exiger(s.attendre(r"^Commande terminée en 6 s\.?$", 14),
+           "reprise : « Commande terminée en 6 s. » n'est pas annoncé dans l'onglet restauré")
 
 
 def v19_aide(s):
@@ -635,6 +680,7 @@ VERIFICATIONS = [
     (18, "Ctrl+Maj+↑ : « Commande : echo deux » puis « echo un »", v18_navigation),
     (19, "Aide : Ctrl+Maj+H, sections lues, Ctrl+Tab, Échap", v19_aide),
     (20, "Invite Starship par défaut : ligne contenant λ, fin de commande annoncée", v20_invite_starship),
+    (21, "Reprise après plantage de l'interface : sortie lue, fin de commande annoncée", v21_reprise),
 ]
 
 
