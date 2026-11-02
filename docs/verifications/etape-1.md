@@ -146,4 +146,4 @@ Particularité des essais : Pupitre n'annonce la fin d'une commande que si sa fe
 et sous Sway et GNOME (sans écran) la fenêtre ne l'est que tant qu'un clavier est branché. Les
 claviers simulés (wtype, bureau à distance de Mutter) disparaissent à la fin de chaque appel :
 l'essai garde donc un clavier virtuel ouvert pendant tout son déroulé (`essai-sway.sh`,
-`essai-gnome.sh`). Sous KDE (clavier uinput permanent) rien de tel n'est nécessaire.
+`essai-gnome.sh`). Sous KDE, cela n'a pas été nécessaire.
