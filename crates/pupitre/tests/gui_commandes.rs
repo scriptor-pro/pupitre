@@ -80,6 +80,10 @@ fn main() {
     ex.lancer("entree_vide_et_ctrl_c", entree_vide_et_ctrl_c);
     ex.lancer("ecran_alternatif_pendant_un_zoom", ecran_alternatif);
     ex.lancer("cout_borne_du_redimensionnement", cout_borne);
+    ex.lancer("borne_de_la_file_pendant_un_geste", borne_pendant_un_geste);
+    ex.lancer("flux_continu_sans_repere_parasite", flux_continu);
+    ex.lancer("navigation_indisponible_ecran_alterne", indisponible);
+    ex.lancer("pixel_de_plus_sans_conversion", pixel_de_plus);
     ex.lancer("raccourcis_sans_conflit", raccourcis_sans_conflit);
     ex.conclure();
 }
@@ -900,6 +904,134 @@ fn cout_borne() -> Resultat {
         verifier(b.haut_visible() == format!("$ echo {}", total - 2), || {
             format!("haut de la vue : « {} »", b.haut_visible())
         })
+    })();
+    b.fermer();
+    res
+}
+
+/// La file dépasse sa borne pendant un geste de redimensionnement : les positions sont
+/// reconverties avant que les octets n'atteignent VTE, la navigation reste juste.
+fn borne_pendant_un_geste() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        trois_commandes(&b)?;
+        b.o.terminal().definir_file_max(20_000);
+        b.o.terminal().zoomer(Some(-3), 200);
+        patienter(Duration::from_millis(100));
+        let lignes: String = (0..6000).map(|i| format!("bruit {i}\r\n")).collect();
+        b.fond.octets(1, &lignes);
+        patienter(Duration::from_millis(1500));
+        b.fond.marque(1, Invite, false);
+        b.fond.octets(1, "$ ");
+        b.fond.marque(1, Saisie, false);
+        patienter(Duration::from_millis(500));
+        attendu(b.naviguer(true), "Commande : echo trois")?;
+        verifier(b.haut_visible() == "$ echo trois", || {
+            format!("haut de la vue : « {} »", b.haut_visible())
+        })?;
+        attendu(b.naviguer(true), "Commande : echo deux")
+    })();
+    b.fermer();
+    res
+}
+
+/// Sortie continue (couleurs, caractères multi-octets, morceaux coupés n'importe où) pendant
+/// plus d'une seconde : aucun repère n'est glissé au milieu d'une séquence ou d'un caractère.
+fn flux_continu() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        let ligne = "\x1b[1;31mrouge é€😀\x1b[0m\r\n";
+        let flux: Vec<u8> = ligne.repeat(150).into_bytes();
+        let debut = std::time::Instant::now();
+        let mut i = 0;
+        let mut taille = 1;
+        while i < flux.len() {
+            let fin = (i + taille).min(flux.len());
+            b.fond.envoyer(ServerMsg::Output {
+                id: 1,
+                data: flux[i..fin].to_vec(),
+            });
+            i = fin;
+            taille = taille % 13 + 1;
+            patienter(Duration::from_millis(3));
+        }
+        let duree = debut.elapsed();
+        verifier(duree > Duration::from_secs(1), || {
+            format!("flux de {duree:?} seulement")
+        })?;
+        patienter(Duration::from_millis(700));
+        // Tout le texte, historique compris : une séquence abîmée plus tôt a défilé.
+        let t = b.o.terminal().terminal().clone();
+        let (_, dernier) = t.cursor_position();
+        let (texte, _) = t.text_range_format(vte4::Format::Text, 0, 0, dernier + 1, 0);
+        let texte = texte.map(|s| s.to_string()).unwrap_or_default();
+        verifier(texte.lines().count() >= 150, || {
+            format!("{} lignes seulement", texte.lines().count())
+        })?;
+        verifier(!texte.contains('\u{fffd}'), || {
+            format!("caractère de remplacement :\n{texte}")
+        })?;
+        let mauvaise = texte
+            .lines()
+            .map(str::trim_end)
+            .find(|l| !l.is_empty() && *l != "rouge é€😀");
+        verifier(mauvaise.is_none(), || {
+            format!("ligne abîmée : {mauvaise:?}")
+        })
+    })();
+    b.fermer();
+    res
+}
+
+/// Programme plein écran affiché : Ctrl+Maj+↑ annonce que la navigation est indisponible.
+fn indisponible() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        trois_commandes(&b)?;
+        b.fond.octets(1, "\x1b[?1049h");
+        patienter(Duration::from_millis(300));
+        attendu(
+            b.naviguer(true),
+            "Navigation indisponible pendant un programme plein écran.",
+        )?;
+        b.fond.octets(1, "\x1b[?1049l");
+        patienter(Duration::from_millis(300));
+        attendu(b.naviguer(true), "Commande : echo trois")
+    })();
+    b.fermer();
+    res
+}
+
+/// Quelques pixels de plus ou de moins sans changer le nombre de colonnes : rien n'est
+/// converti.
+fn pixel_de_plus() -> Resultat {
+    let b = Banc::nouveau(Config::default(), None);
+    let res = (|| {
+        trois_commandes(&b)?;
+        patienter(Duration::from_millis(400));
+        let (_, n0, _) = b.o.terminal().conversions();
+        let cols0 = b.o.terminal().grille().map(|g| g.0);
+        let fenetre = b.f.fenetre();
+        let (l, h) = (fenetre.width(), fenetre.height());
+        for d in 1..=3 {
+            fenetre.set_default_size(l + d, h);
+            patienter(Duration::from_millis(150));
+        }
+        patienter(Duration::from_millis(500));
+        let (_, n1, imprecis) = b.o.terminal().conversions();
+        let cols1 = b.o.terminal().grille().map(|g| g.0);
+        verifier(imprecis == 0, || {
+            format!("{imprecis} réagencements non suivis")
+        })?;
+        if cols0 == cols1 {
+            verifier(n1 == n0, || {
+                format!(
+                    "{} conversions pour des pixels sans nouvelle colonne",
+                    n1 - n0
+                )
+            })?;
+        }
+        attendu(b.naviguer(true), "Commande : echo trois")
     })();
     b.fermer();
     res

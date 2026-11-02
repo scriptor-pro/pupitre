@@ -363,6 +363,8 @@ pub enum Navigation {
     Commande { texte: String, echec: Option<i32> },
     /// Plus de commande dans ce sens.
     Bout(Sens),
+    /// Un programme plein écran est affiché : les lignes lues seraient les siennes.
+    Indisponible,
 }
 
 impl Navigation {
@@ -371,6 +373,7 @@ impl Navigation {
         match self {
             Navigation::Bout(Sens::Precedente) => tr("commande-aucune-avant"),
             Navigation::Bout(Sens::Suivante) => tr("commande-aucune-apres"),
+            Navigation::Indisponible => tr("commande-navigation-indisponible"),
             Navigation::Commande { texte, echec } => {
                 let code = echec.map(|c| ArgI18n::from(i64::from(c)));
                 match (texte.is_empty(), code) {
@@ -409,6 +412,10 @@ struct PosLogique {
 /// Positions notées avant un réagencement de VTE (changement de largeur), gardées sous
 /// forme logique le temps d'un geste de redimensionnement.
 struct Instantane {
+    /// Pris pour l'allocation en cours.
+    neuf: bool,
+    /// Colonnes de la grille au début du geste.
+    colonnes: i64,
     positions: Vec<Option<PosLogique>>,
     g_max: usize,
     k_max: usize,
@@ -498,6 +505,82 @@ fn depuis_logique(l: PosLogique, carte: &Carte, colonnes: i64) -> Option<Pos> {
     })
 }
 
+/// État d'analyse de ce qui a été donné à VTE : sert à ne glisser un repère qu'à une
+/// frontière propre (ni au milieu d'une séquence d'échappement, ni au milieu d'un caractère
+/// UTF-8).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum EtatFlux {
+    #[default]
+    Texte,
+    Echap,
+    Csi,
+    /// OSC, DCS, SOS, PM ou APC : jusqu'à BEL ou ST.
+    Chaine,
+    ChaineEchap,
+}
+
+#[derive(Debug, Default)]
+struct Frontiere {
+    etat: EtatFlux,
+    /// Octets de continuation UTF-8 encore attendus.
+    utf8: u8,
+}
+
+impl Frontiere {
+    fn suivre(&mut self, data: &[u8]) {
+        for &c in data {
+            self.octet(c);
+        }
+    }
+
+    fn octet(&mut self, c: u8) {
+        use EtatFlux::{Chaine, ChaineEchap, Csi, Echap, Texte};
+        // CAN et SUB annulent toute séquence.
+        if matches!(c, 0x18 | 0x1a) {
+            self.etat = Texte;
+            self.utf8 = 0;
+            return;
+        }
+        self.etat = match (self.etat, c) {
+            (Texte | Csi | Echap | Chaine | ChaineEchap, 0x1b) => {
+                self.utf8 = 0;
+                if self.etat == Chaine {
+                    ChaineEchap
+                } else {
+                    Echap
+                }
+            }
+            (Texte, _) => {
+                match c {
+                    0xc0..=0xdf => self.utf8 = 1,
+                    0xe0..=0xef => self.utf8 = 2,
+                    0xf0..=0xf7 => self.utf8 = 3,
+                    0x80..=0xbf => self.utf8 = self.utf8.saturating_sub(1),
+                    _ => self.utf8 = 0,
+                }
+                Texte
+            }
+            (Echap, b'[') => Csi,
+            (Echap, b']' | b'P' | b'X' | b'^' | b'_') => Chaine,
+            (Echap, 0x20..=0x2f) => Echap,
+            (Echap, _) => Texte,
+            (Csi, 0x40..=0x7e) => Texte,
+            (Csi, _) => Csi,
+            (Chaine, 0x07) => Texte,
+            (Chaine, _) => Chaine,
+            (ChaineEchap, b'\\') => Texte,
+            (ChaineEchap, b'[') => Csi,
+            (ChaineEchap, b']' | b'P' | b'X' | b'^' | b'_') => Chaine,
+            (ChaineEchap, _) => Texte,
+        };
+    }
+
+    /// Vrai si le prochain octet peut commencer une séquence ou un caractère.
+    fn propre(&self) -> bool {
+        self.etat == EtatFlux::Texte && self.utf8 == 0
+    }
+}
+
 /// Suit les séquences `CSI ? 47/1047/1049 h/l` du flux : vrai quand l'écran alternatif (vim,
 /// less, htop…) est affiché. Les séquences coupées entre deux morceaux sont recollées.
 #[derive(Debug, Default)]
@@ -514,6 +597,12 @@ impl SuiviEcran {
         while i < tout.len() {
             if tout[i] != 0x1b {
                 i += 1;
+                continue;
+            }
+            // ESC c (RIS, envoyé par `reset`) : retour à l'écran normal.
+            if tout.get(i + 1) == Some(&b'c') {
+                self.alterne = false;
+                i += 2;
                 continue;
             }
             // ESC [ ? params final
@@ -600,6 +689,8 @@ struct Etat {
     reponses_gardees: u32,
     /// Une confirmation de repos est programmée.
     confirmation_programmee: bool,
+    /// Instant des derniers octets donnés à VTE.
+    dernier_octet: Option<Instant>,
     /// Un minuteur attend la fin du geste de redimensionnement.
     calme_programme: bool,
     /// Temps passé à convertir les positions (réagencements), et nombre de conversions.
@@ -619,6 +710,8 @@ pub struct Flux {
     delai: Cell<Duration>,
     instantane: RefCell<Option<Instantane>>,
     suivi_ecran: RefCell<SuiviEcran>,
+    frontiere: RefCell<Frontiere>,
+    file_max: Cell<usize>,
     soi: RefCell<Weak<Flux>>,
 }
 
@@ -634,6 +727,8 @@ impl Flux {
             delai: Cell::new(DELAI_ATTENTE),
             instantane: RefCell::new(None),
             suivi_ecran: RefCell::new(SuiviEcran::default()),
+            frontiere: RefCell::new(Frontiere::default()),
+            file_max: Cell::new(FILE_MAX_OCTETS),
             soi: RefCell::new(Weak::new()),
         });
         *f.soi.borrow_mut() = Rc::downgrade(&f);
@@ -786,6 +881,8 @@ impl Flux {
             .max()
             .unwrap_or(0);
         *self.instantane.borrow_mut() = Some(Instantane {
+            neuf: true,
+            colonnes,
             positions: logiques,
             g_max,
             k_max,
@@ -800,6 +897,16 @@ impl Flux {
 
     /// À appeler juste après l'allocation : attend le calme pour reconvertir les positions.
     pub fn apres_reagencement(&self) {
+        // Instantané pris pour cette allocation, mais même nombre de colonnes qu'avant :
+        // les lignes sont celles d'origine, rien à reconvertir.
+        let inchange = self.instantane.borrow_mut().as_mut().is_some_and(|i| {
+            std::mem::take(&mut i.neuf) && i.colonnes == self.terminal.column_count()
+        });
+        if inchange {
+            *self.instantane.borrow_mut() = None;
+            self.avancer();
+            return;
+        }
         if self.instantane.borrow().is_none() || self.etat.borrow().calme_programme {
             return;
         }
@@ -875,6 +982,17 @@ impl Flux {
         self.avancer();
     }
 
+    /// Change la borne de la file (tests).
+    #[doc(hidden)]
+    pub fn definir_file_max(&self, octets: usize) {
+        self.file_max.set(octets);
+    }
+
+    /// Un réagencement a eu lieu sans avoir été annoncé : positions gardées telles quelles.
+    pub fn reagencement_rate(&self) {
+        self.etat.borrow_mut().reagencements_imprecis += 1;
+    }
+
     /// Temps passé à convertir les positions et nombre de conversions (tests).
     #[doc(hidden)]
     pub fn conversions(&self) -> (Duration, u32, u32) {
@@ -919,30 +1037,53 @@ impl Flux {
 
     fn donner_octets(&self, data: &[u8]) {
         self.suivi_ecran.borrow_mut().suivre(data);
+        self.frontiere.borrow_mut().suivre(data);
         let programmer = {
             let mut e = self.etat.borrow_mut();
             e.octets_depuis_pos = true;
+            e.dernier_octet = Some(Instant::now());
             !std::mem::replace(&mut e.confirmation_programmee, true)
         };
         (self.donner)(data);
         if programmer {
-            let faible = self.soi.borrow().clone();
-            gtk::glib::timeout_add_local_once(REPOS, move || {
-                if let Some(f) = faible.upgrade() {
-                    f.confirmer_repos();
-                }
-            });
+            self.armer_repos(REPOS);
         }
     }
 
-    /// Un moment après les derniers octets : un repère pour savoir que VTE a tout lu.
+    fn armer_repos(&self, delai: Duration) {
+        let faible = self.soi.borrow().clone();
+        gtk::glib::timeout_add_local_once(delai, move || {
+            if let Some(f) = faible.upgrade() {
+                f.confirmer_repos();
+            }
+        });
+    }
+
+    /// Après `REPOS` de vrai silence (le minuteur est repoussé à chaque arrivée d'octets) :
+    /// un repère pour savoir que VTE a tout lu. Jamais sur l'écran alternatif ni ailleurs
+    /// qu'à une frontière propre du flux (pas au milieu d'une séquence ou d'un caractère).
     fn confirmer_repos(&self) {
+        let reste = self
+            .etat
+            .borrow()
+            .dernier_octet
+            .map(|t| REPOS.saturating_sub(t.elapsed()))
+            .filter(|d| !d.is_zero());
+        if let Some(d) = reste {
+            self.armer_repos(d);
+            return;
+        }
         let utile = {
             let mut e = self.etat.borrow_mut();
             e.confirmation_programmee = false;
             e.octets_depuis_pos && e.attente.is_none() && e.file.is_empty()
         };
-        if utile && !self.en_geste() && self.terminal.is_mapped() {
+        if utile
+            && !self.en_geste()
+            && self.terminal.is_mapped()
+            && !self.ecran_alterne()
+            && self.frontiere.borrow().propre()
+        {
             self.attendre(Genre::Repos, b"");
         }
     }
@@ -950,7 +1091,13 @@ impl Flux {
     /// Trop d'octets attendent : on cesse d'attendre VTE, les octets passent et les marques
     /// restantes sont perdues.
     fn borner_file(&self) {
-        if self.etat.borrow().octets_en_file <= FILE_MAX_OCTETS {
+        if self.etat.borrow().octets_en_file <= self.file_max.get() {
+            return;
+        }
+        // Un geste de redimensionnement en cours est terminé d'abord : donner les octets à
+        // VTE déplacerait le curseur, et les positions seraient reconverties de travers.
+        self.restaurer();
+        if self.etat.borrow().octets_en_file <= self.file_max.get() {
             return;
         }
         let travaux: Vec<Travail> = {
@@ -1026,6 +1173,19 @@ impl Flux {
             });
             e.repere
         };
+        // Pas de repère ni de demande au milieu d'une séquence ou d'un caractère : rien n'est
+        // donné, et l'attente est levée au délai de secours (positions lues sur le curseur).
+        if !self.frontiere.borrow().propre() {
+            if matches!(
+                self.etat.borrow().attente.as_ref().map(|a| &a.genre),
+                Some(Genre::Calibrage(_))
+            ) {
+                self.resoudre();
+                return false;
+            }
+            self.armer_delai_court(repere);
+            return true;
+        }
         let mut data = avant.to_vec();
         data.extend_from_slice(format!("\x1b]666;{REPERE}={repere}\x1b\\").as_bytes());
         if avant.starts_with(b"\x1b[6n") {
@@ -1047,6 +1207,16 @@ impl Flux {
         }
         let faible = self.soi.borrow().clone();
         gtk::glib::timeout_add_local_once(self.delai.get(), move || {
+            if let Some(f) = faible.upgrade() {
+                f.repere_expire(repere);
+            }
+        });
+    }
+
+    /// Délai court quand aucun repère n'a pu être donné.
+    fn armer_delai_court(&self, repere: u32) {
+        let faible = self.soi.borrow().clone();
+        gtk::glib::timeout_add_local_once(Duration::from_millis(100), move || {
             if let Some(f) = faible.upgrade() {
                 f.repere_expire(repere);
             }
@@ -1184,7 +1354,7 @@ impl Flux {
     pub fn naviguer(&self, sens: Sens, fini: impl FnOnce(Option<Navigation>) + 'static) {
         // Écran alternatif : les lignes lues seraient celles du programme, pas les nôtres.
         if self.ecran_alterne() {
-            fini(None);
+            fini(Some(Navigation::Indisponible));
             return;
         }
         // Un geste de redimensionnement en cours est terminé d'abord.
@@ -1521,6 +1691,58 @@ mod tests {
         // Sur la ligne logique du curseur mais sous lui (curseur au milieu d'un repli).
         let l0 = vers_logique(p(2, 5), 2, &carte, 80).unwrap();
         assert_eq!(l0.g, 0);
+    }
+
+    #[test]
+    fn frontiere_propre() {
+        let propre = |t: &[u8]| {
+            let mut f = Frontiere::default();
+            f.suivre(t);
+            f.propre()
+        };
+        assert!(propre(b""));
+        assert!(propre(b"abc\r\n"));
+        assert!(propre("é€😀".as_bytes()));
+        assert!(propre(b"\x1b[1;31mrouge\x1b[0m"));
+        assert!(propre(b"\x1b]133;A\x07"));
+        assert!(propre(b"\x1b]0;titre\x1b\\"));
+        assert!(!propre(b"abc\x1b"));
+        assert!(!propre(b"abc\x1b["));
+        assert!(!propre(b"\x1b[1;3"));
+        assert!(!propre(b"\x1b]0;titre"));
+        assert!(!propre(b"\x1b]0;titre\x1b"));
+        assert!(!propre(&"é".as_bytes()[..1]));
+        assert!(!propre(&"😀".as_bytes()[..3]));
+        // Coupures en deux morceaux n'importe où : propre seulement aux frontières.
+        let flux = "a\x1b[1;31mé€😀\x1b[0m\x1b]133;B\x07b".as_bytes();
+        let mut f = Frontiere::default();
+        let mut propres = Vec::new();
+        for (i, &c) in flux.iter().enumerate() {
+            f.octet(c);
+            if f.propre() {
+                propres.push(i + 1);
+            }
+        }
+        for &i in &propres {
+            let (a, b) = flux.split_at(i);
+            // Chaque frontière annoncée propre sépare bien des éléments entiers.
+            assert!(std::str::from_utf8(a).is_ok(), "coupure en {i}");
+            assert!(!a.ends_with(b"\x1b") && !b.starts_with(b"[") || i == 0);
+        }
+        assert!(propres.contains(&flux.len()));
+    }
+
+    #[test]
+    fn ris_revient_a_l_ecran_normal() {
+        let mut s = SuiviEcran::default();
+        s.suivre(b"\x1b[?1049h");
+        assert!(s.alterne);
+        s.suivre(b"\x1bc");
+        assert!(!s.alterne);
+        s.suivre(b"\x1b[?47h\x1b");
+        assert!(s.alterne);
+        s.suivre(b"c");
+        assert!(!s.alterne);
     }
 
     #[test]

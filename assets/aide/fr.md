@@ -306,6 +306,12 @@ lire.
   commande sortie de l'historique du terminal (voir `historique_lignes`) est oubliée. Après un
   changement de largeur de la fenêtre, les commandes d'avant ne sont plus retrouvées : la
   navigation repart des suivantes.
+- Quand un programme plein écran est affiché (`vim`, `less`, `htop`, `mc`…), Ctrl+Maj+↑ et
+  Ctrl+Maj+↓ n'envoient rien au programme et Orca annonce « Navigation indisponible pendant
+  un programme plein écran. » Quittez le programme pour naviguer de nouveau.
+- Un redimensionnement de la fenêtre ou un changement de taille du texte retient l'affichage
+  de la sortie des programmes environ 200 millisecondes, le temps de retrouver les lignes
+  des commandes ; rien n'est perdu.
 - Après une reprise (Pupitre rouvert), les commandes déjà faites servent à la navigation,
   mais seulement celles que le processus de fond a retenues ; si une commande manque, la
   navigation passe simplement à la voisine.

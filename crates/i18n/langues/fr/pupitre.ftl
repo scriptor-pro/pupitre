@@ -323,3 +323,4 @@ commande-vide = Commande vide.
 commande-vide-echec = Commande vide, en échec, code { $code }.
 commande-aucune-avant = Aucune commande avant.
 commande-aucune-apres = Aucune commande après.
+commande-navigation-indisponible = Navigation indisponible pendant un programme plein écran.

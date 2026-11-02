@@ -90,7 +90,7 @@ mod imp {
         /// Police ou zoom changé : la prochaine allocation peut changer le nombre de colonnes.
         pub probable: Cell<bool>,
         /// Avant et après l'allocation d'une nouvelle largeur (VTE réagence ses lignes).
-        pub autour_largeur: RefCell<Option<(SurLargeur, SurLargeur)>>,
+        pub autour_largeur: RefCell<Option<(SurLargeur, SurLargeur, SurLargeur)>>,
     }
 
     impl Default for CadreTerminal {
@@ -135,16 +135,25 @@ mod imp {
             let t = &self.terminal;
             let largeur_changee = largeur != self.largeur.replace(largeur);
             let probable = self.probable.replace(false);
-            let change = largeur_changee || probable;
+            // Le nombre de colonnes que VTE va donner à cette largeur : sans changement,
+            // rien n'est converti (un pixel de plus en tirant le bord ne coûte rien).
+            let avant_cols = t.column_count();
+            let change =
+                probable || (largeur_changee && self.colonnes_predites(largeur) != avant_cols);
             if change {
-                if let Some((avant, _)) = self.autour_largeur.borrow().as_ref() {
+                if let Some((avant, _, _)) = self.autour_largeur.borrow().as_ref() {
                     avant();
                 }
             }
             t.allocate(largeur, hauteur, ligne_de_base, None);
             if change {
-                if let Some((_, apres)) = self.autour_largeur.borrow().as_ref() {
+                if let Some((_, apres, _)) = self.autour_largeur.borrow().as_ref() {
                     apres();
+                }
+            } else if t.column_count() != avant_cols {
+                // Prévision fausse : les lignes ont été réagencées sans être suivies.
+                if let Some((_, _, rate)) = self.autour_largeur.borrow().as_ref() {
+                    rate();
                 }
             }
             let g = (t.column_count(), t.row_count());
@@ -157,6 +166,22 @@ mod imp {
 
         fn grab_focus(&self) -> bool {
             self.terminal.grab_focus()
+        }
+    }
+
+    impl CadreTerminal {
+        /// Colonnes que VTE donnera à `largeur` pixels : la largeur moins les marges CSS,
+        /// divisée par celle d'une cellule.
+        #[allow(deprecated)]
+        fn colonnes_predites(&self, largeur: i32) -> i64 {
+            let t = &self.terminal;
+            let cellule = t.char_width();
+            if cellule <= 0 {
+                return -1;
+            }
+            let marges = t.style_context().padding();
+            let utile = i64::from(largeur) - i64::from(marges.left()) - i64::from(marges.right());
+            (utile / cellule).max(1)
         }
     }
 
@@ -190,8 +215,15 @@ impl CadreTerminal {
     }
 
     /// `avant()` puis `apres()` encadrent chaque allocation d'une largeur nouvelle.
-    pub fn autour_largeur(&self, avant: impl Fn() + 'static, apres: impl Fn() + 'static) {
-        *self.imp().autour_largeur.borrow_mut() = Some((Box::new(avant), Box::new(apres)));
+    /// `rate()` signale un réagencement que la prévision n'avait pas annoncé.
+    pub fn autour_largeur(
+        &self,
+        avant: impl Fn() + 'static,
+        apres: impl Fn() + 'static,
+        rate: impl Fn() + 'static,
+    ) {
+        *self.imp().autour_largeur.borrow_mut() =
+            Some((Box::new(avant), Box::new(apres), Box::new(rate)));
     }
 
     /// `f(colonnes, lignes)` est appelé à chaque nouvelle grille (y compris la première).
@@ -276,7 +308,11 @@ impl TerminalOnglet {
 
         // Largeur changée (zoom, fenêtre, plein écran) : VTE réagence ses lignes ; les
         // lignes des commandes sont suivies à travers ce réagencement.
-        let (avant, apres) = (Rc::downgrade(&flux), Rc::downgrade(&flux));
+        let (avant, apres, rate) = (
+            Rc::downgrade(&flux),
+            Rc::downgrade(&flux),
+            Rc::downgrade(&flux),
+        );
         cadre.autour_largeur(
             move || {
                 if let Some(f) = avant.upgrade() {
@@ -286,6 +322,11 @@ impl TerminalOnglet {
             move || {
                 if let Some(f) = apres.upgrade() {
                     f.apres_reagencement();
+                }
+            },
+            move || {
+                if let Some(f) = rate.upgrade() {
+                    f.reagencement_rate();
                 }
             },
         );
@@ -552,6 +593,12 @@ impl TerminalOnglet {
     #[doc(hidden)]
     pub fn conversions(&self) -> (Duration, u32, u32) {
         self.flux.conversions()
+    }
+
+    /// Change la borne de la file d'octets en attente (tests).
+    #[doc(hidden)]
+    pub fn definir_file_max(&self, octets: usize) {
+        self.flux.definir_file_max(octets);
     }
 
     /// Nombre de commandes repérées dans le flux.
