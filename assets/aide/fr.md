@@ -65,7 +65,7 @@ avec ceux d'Orca.
 | Revenir à l'élément précédent | Ctrl+Maj+Tab |
 | Commande précédente | Ctrl+Maj+↑ |
 | Commande suivante | Ctrl+Maj+↓ |
-| Ouvrir cette aide (à venir) | Ctrl+Maj+H |
+| Ouvrir cette aide | Ctrl+Maj+H |
 
 Les raccourcis suivent la lettre de votre disposition de clavier : Ctrl+Maj+T fonctionne là
 où se trouve la lettre T, en AZERTY, BÉPO ou Dvorak. Pour Alt+1…9 et Ctrl+0, c'est la
@@ -108,6 +108,11 @@ Tout Pupitre s'utilise au clavier.
   tour comprend, selon ce qui est affiché : le bandeau de messages, la barre de recherche, la
   barre d'onglets, le bouton de menu, puis le terminal.
 - **Ouvrir le menu** : Ctrl+Tab jusqu'au bouton « Menu », puis Entrée.
+- **Aide** : Ctrl+Maj+H, ou menu ▸ « Aide », ouvre cette aide dans une fenêtre « Aide de
+  Pupitre » ; elle est comprise dans Pupitre et marche sans réseau. À gauche, la liste des
+  sections et le champ « Rechercher dans l'aide » ; à droite, le texte de la section choisie,
+  que vous lisez avec le curseur comme n'importe quel texte. Ctrl+Tab passe d'une zone à
+  l'autre, Échap ferme la fenêtre. `pupitre aide` affiche la même aide dans le terminal.
 - **Orca** lit le texte du terminal, le nom des onglets, les menus, les dialogues et chaque
   message de Pupitre. Quand le focus arrive sur la barre d'onglets, Orca indique aussi les
   onglets où la cloche a sonné.
@@ -415,7 +420,8 @@ appliqué. `pupitre check --theme CHEMIN` fait la même vérification sans ouvri
 | `pupitre` | ouvre une fenêtre (dans le Pupitre déjà lancé s'il y en a un) |
 | `pupitre check` | vérifie la configuration et le contraste des thèmes |
 | `pupitre check --theme CHEMIN` | vérifie un fichier de thème |
-| `pupitre aide`, `pupitre --help` | affiche le résumé des commandes |
+| `pupitre aide`, `pupitre help` | affiche cette aide complète dans le terminal |
+| `pupitre --help`, `pupitre -h` | affiche le résumé des commandes |
 | `pupitre shells` | liste les shells installés, leur niveau de prise en charge, et la commande d'installation de ceux qui manquent |
 
 Codes de sortie de `pupitre check` : 0 aucun problème, 1 problème trouvé, 2 commande mal

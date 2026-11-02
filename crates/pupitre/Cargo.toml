@@ -64,3 +64,7 @@ harness = false
 [[test]]
 name = "gui_commandes"
 harness = false
+
+[[test]]
+name = "gui_aide"
+harness = false

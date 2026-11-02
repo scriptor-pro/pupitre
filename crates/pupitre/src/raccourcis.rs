@@ -39,6 +39,8 @@ pub enum Raccourci {
     CommandePrecedente,
     /// Ctrl+Maj+↓ : commande suivante.
     CommandeSuivante,
+    /// Ctrl+Maj+H : l'aide de Pupitre (F1 reste aux programmes).
+    Aide,
 }
 
 /// Raccourci correspondant à une touche (`code` = code matériel), s'il y en a un.
@@ -71,6 +73,7 @@ pub fn raccourci(touche: gdk::Key, code: u32, mods: gdk::ModifierType) -> Option
             gdk::Key::c => Some(Raccourci::Copier),
             gdk::Key::v => Some(Raccourci::Coller),
             gdk::Key::f => Some(Raccourci::Rechercher),
+            gdk::Key::h => Some(Raccourci::Aide),
             // « + » et « 0 » demandent Maj sur certaines dispositions (fr, fr dvorak).
             t => zoom(t),
         };
@@ -274,5 +277,116 @@ mod tests {
             Some(Raccourci::PleinEcran)
         );
         assert_eq!(raccourci(gdk::Key::F11, 95, c), None);
+    }
+
+    #[test]
+    fn raccourci_aide() {
+        assert_eq!(raccourci(gdk::Key::H, 43, CS), Some(Raccourci::Aide));
+        assert_eq!(raccourci(gdk::Key::h, 43, CS), Some(Raccourci::Aide));
+        // F1 reste aux programmes (aide de mc, htop, vim…), de même que Ctrl+H et Alt+H.
+        assert_eq!(raccourci(gdk::Key::F1, 67, M::empty()), None);
+        assert_eq!(raccourci(gdk::Key::F1, 67, M::CONTROL_MASK), None);
+        assert_eq!(raccourci(gdk::Key::h, 43, M::CONTROL_MASK), None);
+        assert_eq!(raccourci(gdk::Key::h, 43, M::ALT_MASK), None);
+    }
+
+    /// Touche, code matériel et modificateurs d'un raccourci écrit dans l'aide
+    /// (« Ctrl+Maj+T », « Ctrl+Page suivante », « Alt+3 »…).
+    fn touche_de_l_aide(texte: &str) -> (gdk::Key, u32, M) {
+        let mut mods = M::empty();
+        let mut reste = texte.trim();
+        loop {
+            if let Some(r) = reste.strip_prefix("Ctrl+") {
+                mods |= M::CONTROL_MASK;
+                reste = r;
+            } else if let Some(r) = reste.strip_prefix("Maj+") {
+                mods |= M::SHIFT_MASK;
+                reste = r;
+            } else if let Some(r) = reste.strip_prefix("Alt+") {
+                mods |= M::ALT_MASK;
+                reste = r;
+            } else {
+                break;
+            }
+        }
+        let (touche, code) = match reste {
+            "Page suivante" => (gdk::Key::Page_Down, 117),
+            "Page précédente" => (gdk::Key::Page_Up, 112),
+            "plus" => (gdk::Key::plus, 21),
+            "moins" => (gdk::Key::minus, 20),
+            "0" => (gdk::Key::_0, CODE_TOUCHE_0),
+            "Tab" if mods.contains(M::SHIFT_MASK) => (gdk::Key::ISO_Left_Tab, 23),
+            "Tab" => (gdk::Key::Tab, 23),
+            "↑" => (gdk::Key::Up, 111),
+            "↓" => (gdk::Key::Down, 116),
+            "F11" => (gdk::Key::F11, 95),
+            "F1" => (gdk::Key::F1, 67),
+            chiffre if chiffre.len() == 1 && chiffre.as_bytes()[0].is_ascii_digit() => {
+                let n = u32::from(chiffre.as_bytes()[0] - b'0');
+                (gdk::Key::from_name(chiffre).unwrap(), CODE_TOUCHE_1 + n - 1)
+            }
+            nom => (
+                gdk::Key::from_name(nom).unwrap_or_else(|| panic!("touche inconnue : {nom}")),
+                0,
+            ),
+        };
+        (touche, code, mods)
+    }
+
+    #[test]
+    fn raccourcis_de_l_aide_conformes() {
+        pupitre_i18n::init(&["fr".parse().unwrap()]);
+        let aide = pupitre_i18n::aide();
+        let section = aide
+            .split("\n## ")
+            .find(|s| s.starts_with("2. Raccourcis clavier"))
+            .expect("section 2");
+        let mut lignes = 0;
+        for l in section.lines().filter(|l| l.starts_with('|')) {
+            let cases: Vec<&str> = l.trim_matches('|').split('|').map(str::trim).collect();
+            if cases[0] == "Action" || cases[0].starts_with("---") {
+                continue;
+            }
+            let (action, cite) = (cases[0], cases[1]);
+            // « Alt+1 … Alt+9 » : une plage, vérifiée touche par touche.
+            let citees: Vec<String> = match cite.split_once(" … ") {
+                Some(("Alt+1", "Alt+9")) => (1..=9).map(|n| format!("Alt+{n}")).collect(),
+                Some(_) => panic!("plage inconnue : {cite}"),
+                None => vec![cite.to_string()],
+            };
+            for c in citees {
+                let (t, code, mods) = touche_de_l_aide(&c);
+                let attendu = match action {
+                    "Nouvel onglet" => Some(Raccourci::NouvelOnglet),
+                    "Fermer l'onglet" => Some(Raccourci::FermerOnglet),
+                    "Nouvelle fenêtre" => Some(Raccourci::NouvelleFenetre),
+                    "Connexions SSH" => Some(Raccourci::Connexions),
+                    "Copier" => Some(Raccourci::Copier),
+                    "Coller" => Some(Raccourci::Coller),
+                    "Rechercher dans l'historique" => Some(Raccourci::Rechercher),
+                    "Onglet suivant" => Some(Raccourci::OngletSuivant),
+                    "Onglet précédent" => Some(Raccourci::OngletPrecedent),
+                    "Aller à l'onglet 1 à 9" => Some(Raccourci::Onglet(
+                        c.trim_start_matches("Alt+").parse().unwrap(),
+                    )),
+                    "Agrandir le texte" => Some(Raccourci::ZoomPlus),
+                    "Réduire le texte" => Some(Raccourci::ZoomMoins),
+                    "Taille normale" => Some(Raccourci::ZoomNormal),
+                    "Plein écran" => Some(Raccourci::PleinEcran),
+                    "Quitter le terminal vers l'élément suivant" => Some(Raccourci::FocusSuivant),
+                    "Revenir à l'élément précédent" => Some(Raccourci::FocusPrecedent),
+                    "Commande précédente" => Some(Raccourci::CommandePrecedente),
+                    "Commande suivante" => Some(Raccourci::CommandeSuivante),
+                    "Ouvrir cette aide" => Some(Raccourci::Aide),
+                    autre => panic!("action de l'aide sans test : « {autre} »"),
+                };
+                assert_eq!(raccourci(t, code, mods), attendu, "{action} : {c}");
+                lignes += 1;
+            }
+        }
+        assert!(
+            lignes >= 25,
+            "le tableau de la section 2 n'a pas été lu ({lignes})"
+        );
     }
 }

@@ -510,6 +510,38 @@ def v16_connexions(s):
     exiger(s.attendre(r"ok-42", 6), "après Échap, le terminal n'a pas le clavier")
 
 
+def v19_aide(s):
+    s.revenir_au_terminal()
+    s.marquer()
+    s.touches("ctrl+shift+h")
+    exiger(s.attendre(r"Aide de Pupitre", 6), "la fenêtre « Aide de Pupitre » n'est pas annoncée")
+    exiger(s.attendre(r"bo[iî]te de dialogue|dialog", 3), "le rôle « boîte de dialogue » n'est pas dit")
+    # Le focus est sur la liste des sections : la liste est nommée, puis la première
+    # section est lue (« Aide de Pupitre »), après l'annonce de la fenêtre.
+    exiger(s.attendre(r"Sections de l'aide.*(liste|list)", 4), "la liste « Sections de l'aide » n'est pas annoncée")
+    exiger(s.attendre(r"^Aide de Pupitre\.?$", 4), "la première section « Aide de Pupitre » n'est pas lue")
+    dites = s.paroles()
+    fenetre = next(i for i, p in enumerate(dites) if re.search(r"Aide de Pupitre.*(bo[iî]te de dialogue|dialog)", p))
+    exiger(any(re.fullmatch(r"Aide de Pupitre\.?", p) for p in dites[fenetre + 1:]),
+           "le nom de la première section n'est pas dit après celui de la fenêtre")
+    s.calme()
+    s.marquer()
+    s.touches("Down")
+    exiger(s.attendre(r"Sommaire", 4), "flèche bas : la section « Sommaire » n'est pas lue")
+    # Ctrl+Tab : de la liste au texte de la section, lu ligne par ligne.
+    s.calme()
+    s.marquer()
+    s.touches("ctrl+Tab")
+    exiger(s.attendre(r"Sommaire|Démarrer", 4), "Ctrl+Tab : le texte de la section n'est pas lu")
+    s.calme()
+    s.marquer()
+    s.touches("Escape")
+    s.calme(1.5)
+    s.marquer()
+    s.commande("echo aide-$((6*7))")
+    exiger(s.attendre(r"aide-42", 8), "après Échap, le terminal n'a pas le clavier")
+
+
 VERIFICATIONS = [
     (1, "Lancement : fenêtre et invite annoncées", v01_lancement),
     (2, "Sortie d'une commande lue ligne par ligne, accents compris", v02_sortie),
@@ -527,6 +559,7 @@ VERIFICATIONS = [
     (14, "Commandes d'Orca non captées par Pupitre", v14_commandes_orca),
     (15, "ssh-add : fenêtre de phrase de passe lue, case, Échap", v15_phrase_de_passe),
     (16, "Connexions SSH : liste lue, formulaire, Échap", v16_connexions),
+    (19, "Aide : Ctrl+Maj+H, sections lues, Ctrl+Tab, Échap", v19_aide),
 ]
 
 

@@ -251,6 +251,20 @@ menu-plein-ecran = Plein écran
 menu-renommer-onglet = Renommer l'onglet
 menu-detacher-onglet = Détacher dans une nouvelle fenêtre
 menu-fermer-onglet = Fermer l'onglet
+menu-aide-pupitre = Aide
+
+## Aide intégrée (Ctrl+Maj+H)
+
+aide-titre = Aide de Pupitre
+aide-recherche = Rechercher dans l'aide
+aide-liste = Sections de l'aide
+aide-texte = Texte de la section
+aide-resultats =
+    { $n ->
+        [one] { $n } section trouvée.
+       *[other] { $n } sections trouvées.
+    }
+aide-aucun-resultat = Aucune section trouvée.
 
 connexions-fichier-invalide = Le fichier connexions.toml est invalide ({ $erreur }). Il n'est pas modifié : corrigez-le pour retrouver vos connexions.
 
@@ -262,6 +276,8 @@ usage =
       pupitre check                  vérifier la configuration et le contraste des thèmes
       pupitre check --theme CHEMIN   vérifier un fichier de thème
       pupitre shells                 lister les shells installés et leur prise en charge
+      pupitre aide                   afficher l'aide complète (Ctrl+Maj+H dans la fenêtre)
+      pupitre --help                 afficher ce résumé
 arguments-incorrects = Arguments incorrects.
 argument-inconnu = Argument inconnu « { $argument } ».
 check-config-invalide = Configuration invalide ({ $chemin }), { $erreur }

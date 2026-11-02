@@ -631,6 +631,8 @@ impl Pupitre {
         for o in self.onglets.borrow().iter() {
             o.terminal.appliquer(&config, &theme);
         }
+        // L'aide ouverte prend aussi les nouvelles couleurs et police.
+        crate::aide::definir_apparence(&config.police, &theme);
         *self.theme.borrow_mut() = theme;
     }
 
@@ -1290,6 +1292,20 @@ impl FenetrePupitre {
             Raccourci::Connexions => {
                 crate::connexions::ouvrir_connexions(self);
             }
+            Raccourci::Aide => {
+                // Police, thème et zoom du moment, puis la fenêtre (une seule, rouverte au
+                // premier plan).
+                if let Some(p) = self.pupitre() {
+                    crate::aide::definir_apparence(
+                        &p.config_effective.borrow().police,
+                        &p.theme.borrow(),
+                    );
+                }
+                crate::aide::definir_zoom(actif.as_ref().map_or(100, |o| o.terminal.zoom()));
+                if let Some(app) = self.fenetre().application() {
+                    crate::aide::ouvrir_aide(&app, Some(self.fenetre().upcast_ref()), None);
+                }
+            }
             Raccourci::FermerOnglet => {
                 if let Some(o) = actif {
                     self.demander_fermeture_onglet(&o);
@@ -1467,6 +1483,7 @@ impl FenetrePupitre {
         );
         for (nom, r) in [
             ("connexions", Raccourci::Connexions),
+            ("aide", Raccourci::Aide),
             ("copier", Raccourci::Copier),
             ("coller", Raccourci::Coller),
             ("rechercher", Raccourci::Rechercher),
@@ -1861,6 +1878,13 @@ fn bouton_menu() -> (gtk::MenuButton, gio::Menu) {
         Some("<Control><Shift>w"),
     ));
     m.append_section(None, &onglet);
+    let aide = gio::Menu::new();
+    aide.append_item(&item(
+        &tr("menu-aide-pupitre"),
+        "win.aide",
+        Some("<Control><Shift>h"),
+    ));
+    m.append_section(None, &aide);
     let b = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         // Pas de F10 : la touche reste aux programmes (mc, htop… quittent par F10).

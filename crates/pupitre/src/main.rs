@@ -49,7 +49,13 @@ fn main() -> glib::ExitCode {
             );
             return glib::ExitCode::from(u8::try_from(code).unwrap_or(1));
         }
-        Some("-h" | "--help" | "aide" | "help") => {
+        // L'aide complète (la même que Ctrl+Maj+H, sans la fenêtre) ; `--help` et `-h` gardent
+        // le résumé des commandes, comme tous les programmes.
+        Some("aide" | "help") if args.len() == 1 => {
+            print!("{}", pupitre::aide::texte_brut(pupitre_i18n::aide()));
+            return glib::ExitCode::SUCCESS;
+        }
+        Some("-h" | "--help") => {
             print!("{}", verification::usage());
             return glib::ExitCode::SUCCESS;
         }

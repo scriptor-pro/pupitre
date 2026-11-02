@@ -153,3 +153,31 @@ fn shells_liste_chemin_niveau_et_installation() {
     // Rien n'est écrit chez l'utilisateur.
     assert!(!d.path().join("pupitre").exists());
 }
+
+#[test]
+fn aide_complete_en_ligne_de_commande() {
+    let d = tempfile::tempdir().unwrap();
+    for commande in ["aide", "help"] {
+        let (code, sortie) = pupitre(d.path(), &[commande]);
+        assert_eq!(code, 0, "{sortie}");
+        assert!(sortie.contains("Raccourcis clavier"), "{sortie}");
+        // Tableaux lus ligne par ligne, sans Markdown.
+        assert!(sortie.contains("Nouvel onglet : Ctrl+Maj+T"), "{sortie}");
+        assert!(
+            !sortie.contains("|---") && !sortie.contains("**"),
+            "{sortie}"
+        );
+    }
+}
+
+#[test]
+fn resume_des_commandes_avec_help_et_h() {
+    let d = tempfile::tempdir().unwrap();
+    for option in ["--help", "-h"] {
+        let (code, sortie) = pupitre(d.path(), &[option]);
+        assert_eq!(code, 0, "{sortie}");
+        assert!(sortie.contains("pupitre check"), "{sortie}");
+        assert!(sortie.contains("pupitre aide"), "{sortie}");
+        assert!(!sortie.contains("Raccourcis clavier"), "{sortie}");
+    }
+}
