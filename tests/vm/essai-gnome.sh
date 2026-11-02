@@ -62,8 +62,14 @@ sleep 5
 g eval "essai.fermer_vue()" >/dev/null
 sleep 2
 export WAYLAND_DISPLAY=wayland-0
+# Un clavier virtuel reste branché pendant tout l'essai : le clavier d'une session de bureau à
+# distance disparaît à la fin de chaque appel, et sans clavier la fenêtre n'est pas « active »
+# pour GTK ; la fin de commande n'est alors pas annoncée (seule une fenêtre active l'annonce).
+setsid python3 ~/gnome.py garder 900 >/dev/null 2>&1 &
+sleep 2
 lancer_pupitre
 echo "Essais de Pupitre sous $(gnome-shell --version)"
 derouler
 code=$?
+pkill -u "$(id -u)" -f 'gnome.py garder' 2>/dev/null
 exit $code

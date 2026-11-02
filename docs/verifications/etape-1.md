@@ -132,3 +132,18 @@ KWin est lancé, pas le panneau Plasma : c'est KWin qui décide du focus et des 
 Limite : la VM KDE a été mise au point en partie à la main (noyau, carte graphique) ; ces
 étapes sont reportées dans `scripts/vm.sh`, mais la création complète d'une VM KDE neuve
 par le script n'a pas encore été rejouée.
+
+### Étape 3 : deux essais de plus (2026-11-02)
+
+`tests/vm/commun.sh` gagne « invite Starship affichée » (le texte du terminal, lu par AT-SPI,
+contient `λ`) et « fin de commande annoncée » (événement d'annonce AT-SPI « Commande terminée
+en 6 s. » reçu après `sleep 6`, par `tests/a11y/ecoute.py`). Starship, `python3-gi` et
+`gir1.2-atspi-2.0` sont installés dans la VM par `scripts/vm.sh` (`creer`, ou `deployer` pour
+une VM plus ancienne). Résultat : **15 réussis sur 15** sous Sway 1.10.1, GNOME Shell 48.7 et
+KWin 6.3.6 (KDE Plasma 6.3), chacun deux fois de suite.
+
+Particularité des essais : Pupitre n'annonce la fin d'une commande que si sa fenêtre est active,
+et sous Sway et GNOME (sans écran) la fenêtre ne l'est que tant qu'un clavier est branché. Les
+claviers simulés (wtype, bureau à distance de Mutter) disparaissent à la fin de chaque appel :
+l'essai garde donc un clavier virtuel ouvert pendant tout son déroulé (`essai-sway.sh`,
+`essai-gnome.sh`). Sous KDE (clavier uinput permanent) rien de tel n'est nécessaire.

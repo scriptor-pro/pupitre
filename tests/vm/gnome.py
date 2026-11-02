@@ -5,6 +5,7 @@
   gnome.py ecrire TEXTE         tape le texte, sans Entrée
   gnome.py touches ctrl+shift+t ...  combinaisons (noms : ctrl, shift, alt, return,
                                 escape, prior, next, tab, ou un caractère)
+  gnome.py garder SECONDES      garde un clavier virtuel branché (voir essai-gnome.sh)
   gnome.py fenetres             une ligne par fenêtre : id d'application — titre — focus=…
   gnome.py capture FICHIER      capture d'écran PNG
   gnome.py eval CODE            évalue du JavaScript dans GNOME Shell
@@ -109,6 +110,9 @@ def main():
         with Clavier() as c:
             for combo in args:
                 c.combinaison(combo)
+    elif cmd == "garder":
+        with Clavier():
+            time.sleep(float(args[0]))
     elif cmd == "fenetres":
         fenetres()
     elif cmd == "capture":

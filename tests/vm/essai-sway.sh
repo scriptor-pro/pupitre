@@ -48,10 +48,16 @@ sleep 3
 export WAYLAND_DISPLAY=wayland-1
 SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock | head -1)
 export SWAYSOCK
+# Un clavier virtuel reste branché pendant tout l'essai : sans clavier, la fenêtre n'est jamais
+# « active » pour GTK (un clavier wtype disparaît à la fin de chaque appel) et la fin de commande
+# n'est pas annoncée (l'annonce n'est faite que par une fenêtre active).
+setsid wtype -k Shift_L -s 900000 -k Shift_L >/dev/null 2>&1 &
+sleep 1
 lancer_pupitre
 echo "Essais de Pupitre sous $(sway --version)"
 derouler
 code=$?
 # wl-copy reste en fond pour servir le presse-papiers : il garderait la connexion SSH ouverte.
 pkill -u "$(id -u)" wl-copy 2>/dev/null
+pkill -u "$(id -u)" -f 'wtype -k Shift_L -s 900000' 2>/dev/null
 exit $code
