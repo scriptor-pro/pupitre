@@ -251,7 +251,8 @@ def exiger(ok, quoi):
 
 def v01_lancement(s):
     # Avec l'intégration du shell, le titre est le dossier courant : « <dossier> — Pupitre ».
-    exiger(s.attendre(r"— Pupitre", 15), "la fenêtre « … — Pupitre » n'est pas annoncée")
+    exiger(s.attendre(r"pupitre-orca-\S* — Pupitre", 15),
+           "la fenêtre « <dossier> — Pupitre » n'est pas annoncée")
     exiger(s.attendre(re.escape(INVITE.strip()), 5), "l'invite du shell n'est pas lue")
 
 
@@ -429,15 +430,25 @@ def v13_f10(s):
 
 
 def v14_commandes_orca(s):
-    s.calme()
-    s.marquer()
-    s.orca("h")
-    exiger(s.attendre(r"apprentissage|learn", 4), "Orca+H : le mode apprentissage ne s'ouvre pas")
+    # Attentes d'un état, jamais un délai fixe : Orca+H est reçu quand Orca a fini de lire
+    # ce qui précède (machine chargée), et la revue à plat suit le curseur du terminal.
+    for essai in range(3):
+        s.calme()
+        s.marquer()
+        s.orca("h")
+        if s.attendre(r"apprentissage|learn", 6):
+            break
+    else:
+        raise Echec("Orca+H : le mode apprentissage ne s'ouvre pas")
     s.touches("Escape")
-    s.calme()
-    s.marquer()
-    s.touches("KP_Up")
-    exiger(s.attendre(re.escape(INVITE.strip()), 4), "Orca : lecture de la ligne courante sans effet")
+    s.calme(1.5)
+    for essai in range(3):
+        s.marquer()
+        s.touches("KP_Up")  # pavé 8 : lire la ligne courante
+        if s.attendre(re.escape(INVITE.strip()), 4):
+            return
+        s.calme()
+    raise Echec("Orca : lecture de la ligne courante sans effet")
 
 
 def v15_phrase_de_passe(s):
@@ -510,6 +521,67 @@ def v16_connexions(s):
     exiger(s.attendre(r"ok-42", 6), "après Échap, le terminal n'a pas le clavier")
 
 
+def v17_fin_de_commande(s):
+    # Intégration du shell active (marques OSC 133) : la fin d'une commande de 6 s est annoncée.
+    s.revenir_au_terminal()
+    s.marquer()
+    s.commande("sleep 6")
+    exiger(s.attendre(r"^Commande terminée en 6 s\.?$", 14),
+           "« Commande terminée en 6 s. » n'est pas annoncé après sleep 6")
+
+
+def v18_navigation(s):
+    s.revenir_au_terminal()
+    s.commande("echo un")
+    s.calme()
+    s.commande("echo deux")
+    s.calme(1.5)
+    s.marquer()
+    s.touches("ctrl+shift+Up")
+    exiger(s.attendre(r"^Commande : echo deux$", 6),
+           "Ctrl+Maj+↑ : « Commande : echo deux » n'est pas dit")
+    s.calme()
+    s.marquer()
+    s.touches("ctrl+shift+Up")
+    exiger(s.attendre(r"^Commande : echo un$", 6),
+           "Ctrl+Maj+↑ encore : « Commande : echo un » n'est pas dit")
+
+
+def v20_invite_starship(s):
+    # Invite Starship par défaut : on retire « invite = "shell" » ; la configuration est relue
+    # à chaud, et le nouvel onglet crée starship.toml dans le dossier de Pupitre. Le HOME est
+    # celui, jetable, du test : jamais le ~/.config/starship.toml de l'utilisateur.
+    chemin = os.path.join(s.env["XDG_CONFIG_HOME"], "pupitre", "pupitre.toml")
+    with open(chemin, encoding="utf-8") as f:
+        origine = f.read()
+    with open(chemin, "w", encoding="utf-8") as f:
+        f.write(origine.replace('invite = "shell"\n', ""))
+    try:
+        time.sleep(2)  # relecture à chaud de la configuration
+        s.revenir_au_terminal()
+        s.marquer()
+        s.touches("ctrl+shift+t")
+        # Après un nouvel onglet, Orca a le focus sur l'onglet : Ctrl+Tab le ramène au terminal
+        # (comme v05 et v12). Ctrl+C redessine l'invite, que le terminal annonce : deux lignes
+        # dont celle du symbole « λ ». On attend l'invite, pas un délai.
+        s.calme(1.0, 10)
+        exiger(s.ctrl_tab_jusqu_a(r"^Terminal Page \d"), "Ctrl+Tab ne ramène pas au terminal")
+        s.calme()
+        s.marquer()
+        s.touches("ctrl+c")
+        exiger(s.attendre(r"λ", 10), "Orca ne lit pas une ligne d'invite contenant « λ »")
+        exiger(os.path.exists(os.path.join(s.env["XDG_CONFIG_HOME"], "pupitre", "starship.toml")),
+               "Pupitre n'a pas créé son starship.toml")
+        s.calme()
+        s.marquer()
+        s.commande("sleep 6")
+        exiger(s.attendre(r"^Commande terminée en 6 s\.?$", 14),
+               "avec l'invite Starship, « Commande terminée en 6 s. » n'est pas annoncé")
+    finally:
+        with open(chemin, "w", encoding="utf-8") as f:
+            f.write(origine)
+
+
 def v19_aide(s):
     s.revenir_au_terminal()
     s.marquer()
@@ -559,7 +631,10 @@ VERIFICATIONS = [
     (14, "Commandes d'Orca non captées par Pupitre", v14_commandes_orca),
     (15, "ssh-add : fenêtre de phrase de passe lue, case, Échap", v15_phrase_de_passe),
     (16, "Connexions SSH : liste lue, formulaire, Échap", v16_connexions),
+    (17, "Fin de commande annoncée après sleep 6", v17_fin_de_commande),
+    (18, "Ctrl+Maj+↑ : « Commande : echo deux » puis « echo un »", v18_navigation),
     (19, "Aide : Ctrl+Maj+H, sections lues, Ctrl+Tab, Échap", v19_aide),
+    (20, "Invite Starship par défaut : ligne contenant λ, fin de commande annoncée", v20_invite_starship),
 ]
 
 

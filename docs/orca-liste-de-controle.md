@@ -21,6 +21,11 @@ En disposition « ordinateur de bureau » : pavé numérique 7, 8, 9.
 
 ## Vérifications
 
+Les lignes 1 à 20 sont rejouées automatiquement, Orca muet (rien n'est prononcé), par
+`scripts/test-orca.sh` : le rapport est dans `target/orca/rapport.txt`. Le scénario force
+`invite = "shell"` pour les lignes 1 à 19 (invite connue, intégration du shell active) et
+passe à l'invite Starship par défaut pour la ligne 20.
+
 | # | Manipulation | Résultat attendu | OK | Notes |
 |---|---|---|---|---|
 | 1 | Lancer Pupitre. | Orca annonce la fenêtre « Terminal — Pupitre » puis lit l'invite du shell (ex. « baudouin@machine:~$ »). | [ ok] | |
@@ -37,6 +42,12 @@ En disposition « ordinateur de bureau » : pavé numérique 7, 8, 9.
 | 12 | Dans l'onglet 1 : `sleep 3; printf '\a'` puis Entrée, et passer tout de suite à l'onglet 2 (Alt+2). Attendre 3 s, puis Ctrl+Tab jusqu'aux onglets. | L'onglet 1 affiche « ● » ; Orca le lit « …, cloche ». Revenir sur l'onglet 1 efface le ●. Aucun son, et pas plus de 3 flashs par seconde. | [ ] | |
 | 13 | Dans un onglet, lancer `mc` (ou `htop`), puis F10. | F10 va au programme (il se ferme) ; le menu de Pupitre ne s'ouvre pas. | [ ] | |
 | 14 | Orca+H (mode apprentissage), quelques touches, Échap ; puis Orca+I. | Les commandes d'Orca fonctionnent normalement dans Pupitre : aucune n'est captée par Pupitre. | [ ] | |
+| 15 | Taper `ssh-add ~/.ssh/<clé chiffrée>` puis Entrée. Tab, puis Échap. | Orca annonce la fenêtre « Phrase de passe SSH », « boîte de dialogue », la question avec le chemin de la clé et la saisie de mot de passe ; Tab lit la case « Mémoriser dans le trousseau » (case à cocher, cochée) ; Échap ferme la fenêtre et rend le clavier au terminal. | [ ] | |
+| 16 | Ctrl+Maj+O ; flèche bas ; Tab jusqu'à « Ajouter… », Entrée ; Échap deux fois. | Orca annonce « Connexions SSH », lit chaque ligne (nom, utilisateur@hôte:port) ; le formulaire « Ajouter une connexion » est annoncé, ses champs lus ; chaque Échap ramène à l'écran précédent, puis au terminal. | [ ] | |
+| 17 | Taper `sleep 6` puis Entrée (intégration du shell active). | Au bout de 6 secondes, Orca dit « Commande terminée en 6 s. ». | [ ] | |
+| 18 | Taper `echo un`, Entrée, `echo deux`, Entrée ; puis Ctrl+Maj+↑, et encore Ctrl+Maj+↑. | Orca dit « Commande : echo deux », puis « Commande : echo un ». | [ ] | |
+| 19 | Ctrl+Maj+H. Flèche bas, Ctrl+Tab, Échap. | Orca annonce « Aide de Pupitre, boîte de dialogue », la liste « Sections de l'aide » et la première section ; flèche bas lit « Sommaire » ; Ctrl+Tab lit le texte de la section ; Échap rend le clavier au terminal. | [ ] | |
+| 20 | Avec l'invite par défaut de Pupitre (sans `invite = "shell"` dans `pupitre.toml`, Starship installé) : ouvrir un onglet, Ctrl+C, puis `sleep 6`. | Orca lit une ligne d'invite qui contient « λ » (heure, charge, branche git sur la première ligne ; utilisateur@machine, dossier et « λ » sur la seconde) ; la vérification 17 donne le même résultat. | [ ] | |
 
 ## Résultat
 
