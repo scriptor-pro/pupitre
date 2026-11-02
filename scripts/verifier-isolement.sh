@@ -4,7 +4,7 @@
 # n'écrit rien hors de ses dossiers. Rapport et trace dans target/isolement/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-for outil in xvfb-run xdotool xfwm4 strace ssh-keygen gnome-keyring-daemon; do
+for outil in xvfb-run xdotool xfwm4 strace ssh-keygen gnome-keyring-daemon starship git; do
   command -v "$outil" >/dev/null || { echo "$outil manquant" >&2; exit 2; }
 done
 cargo build -q -p pupitre -p pupitre-fond --bins

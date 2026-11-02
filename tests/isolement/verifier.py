@@ -7,7 +7,11 @@
   $XDG_RUNTIME_DIR (recherche de la chaîne après la session), ni dans les arguments d'un
   `execve` de la trace.
 
-Seuls Pupitre, pupitre-fond et pupitre-askpass sont jugés : les shells lancés dans les onglets (et leurs
+Elle se déroule avec l'invite Starship par défaut, dans un dépôt git : Starship (lancé par
+les shells de Pupitre) est jugé comme Pupitre, et le `~/.config/starship.toml` du HOME de test
+ne doit jamais être ouvert (Pupitre impose son propre fichier avec STARSHIP_CONFIG).
+
+Seuls Pupitre, pupitre-fond, pupitre-askpass et starship sont jugés : les shells lancés dans les onglets (et leurs
 commandes, dont `ssh`) écrivent ce qu'ils veulent, ce n'est pas le fait de Pupitre.
 
 Usage (sur un écran X11, normalement via scripts/verifier-isolement.sh) :
@@ -32,9 +36,12 @@ TOLERES = (
     re.compile(r"^/memfd:"),
 )
 
-# Caches de bibliothèques chargées par GTK (pas par le code de Pupitre), dans
+# Caches de bibliothèques chargées par GTK (pas par le code de Pupitre) et journal de Starship, dans
 # $XDG_CACHE_HOME : signalés à part, sans faire échouer la vérification.
-CACHES_BIBLIOTHEQUES = ("mesa_shader_cache", "mesa_shader_cache_db", "fontconfig")
+CACHES_BIBLIOTHEQUES = ("mesa_shader_cache", "mesa_shader_cache_db", "fontconfig",
+                        # Journal de session de Starship (~/.cache/starship/session_*.log) : écrit
+                        # par Starship lui-même, dans le seul dossier de cache de l'utilisateur.
+                        "starship")
 
 # Phrase de passe de la clé de test (jamais utilisée ailleurs). La clé est créée AVANT le
 # démarrage de strace : `ssh-keygen -N` ne figure donc pas dans la trace.
@@ -59,6 +66,11 @@ def taper(env, texte):
 
 def session_type(env, perso):
     """Onglets, commandes, recherche, zoom, configuration modifiée, fermeture."""
+    # Dans un dépôt git : l'invite Starship lit la branche et l'état à chaque affichage.
+    taper(env, "cd ~/depot && echo modif > nouveau && cd ~")
+    time.sleep(1)
+    taper(env, "cd ~/depot")
+    time.sleep(2)
     taper(env, "echo bonjour; ls /")
     # Clé SSH : ssh-add (la fenêtre de phrase de passe est remplie au clavier, la phrase
     # est mémorisée dans le trousseau jetable), puis une connexion refusée par l'utilisateur.
@@ -129,6 +141,14 @@ def recoller(lignes):
     return sortie
 
 
+def starship_perso_ouvert(trace, chemin):
+    """Ouvertures (en lecture ou écriture, par n'importe quel programme) du fichier `chemin`."""
+    with open(trace, encoding="utf-8", errors="replace") as f:
+        return [l.strip()[:160] for l in recoller(f.readlines())
+                if re.match(r"^\d+\s+(openat|open|creat|stat|newfstatat|statx|access|faccessat2?)\(", l)
+                and f'"{chemin}"' in l]
+
+
 def analyser(trace, autorises, cache):
     programmes = {}  # pid → programme exécuté
     premier = None
@@ -151,7 +171,7 @@ def analyser(trace, autorises, cache):
             premier = premier or pid
         elif appel in ("clone", "clone3", "vfork", "fork") and ret.isdigit():
             programmes.setdefault(ret, programmes.get(pid, "?"))
-    juges = {"pupitre", "pupitre-fond", "pupitre-askpass"}
+    juges = {"pupitre", "pupitre-fond", "pupitre-askpass", "starship"}
     for l in lignes:
         m = LIGNE.match(l)
         if not m:
@@ -214,6 +234,19 @@ def main():
     os.makedirs(ssh, mode=0o700, exist_ok=True)
     subprocess.run(["ssh-keygen", "-t", "ed25519", "-q", "-N", PHRASE_CLE, "-C", "cle-de-test",
                     "-f", os.path.join(ssh, "id_test")], check=True)
+    # Dépôt git de test (créé avant strace) : l'invite Starship affiche branche et état.
+    depot = os.path.join(perso, "depot")
+    os.makedirs(depot)
+    git_env = dict(env, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null",
+                   GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
+    for cmd in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "initial"]):
+        subprocess.run(["git", "-C", depot, *cmd], env=git_env, check=True,
+                       stdout=subprocess.DEVNULL)
+    # Un starship.toml personnel, qui ne doit jamais être ouvert (HOME de test, pas le vrai).
+    perso_toml = os.path.join(env["XDG_CONFIG_HOME"], "starship.toml")
+    with open(perso_toml, "w", encoding="utf-8") as f:
+        f.write('format = "PERSONNEL $character"\n')
     env.update(SHELL="/bin/bash", GDK_BACKEND="x11", GIO_USE_VFS="local",
                GDK_DEBUG="no-portals", PUPITRE_FOND=os.path.abspath(a.fond))
     env.pop("WAYLAND_DISPLAY", None)
@@ -225,7 +258,7 @@ def main():
     proc = subprocess.Popen(
         ["strace", "-f", "-qq", "-o", trace, "-s", "256",
          "-e", "trace=execve,clone,clone3,vfork,fork,connect,bind,openat,open,creat,"
-               "rename,renameat,renameat2,mkdir,mkdirat,unlink,unlinkat",
+               "rename,renameat,renameat2,mkdir,mkdirat,unlink,unlinkat,stat,newfstatat,statx,access,faccessat,faccessat2",
          os.path.abspath(a.pupitre)],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -256,7 +289,9 @@ def main():
     (reseau, ecritures, caches, phrase_argv, programmes,
      ignores) = analyser(trace, autorises, env["XDG_CACHE_HOME"])
     # Les étapes SSH ont-elles eu lieu ? (sinon la vérification ne prouverait rien)
-    manquants = [p for p in ("pupitre-askpass", "ssh-add", "ssh") if p not in programmes]
+    manquants = [p for p in ("pupitre-askpass", "ssh-add", "ssh", "starship") if p not in programmes]
+    perso_ouvert = starship_perso_ouvert(trace, perso_toml)
+    config_pupitre = os.path.exists(os.path.join(env["XDG_CONFIG_HOME"], "pupitre", "starship.toml"))
     try:
         with open(os.path.join(perso, "liste-cles"), encoding="utf-8") as f:
             cle_chargee = "cle-de-test" in f.read()
@@ -269,10 +304,15 @@ def main():
     lignes += [f"  {e}" for e in ecritures]
     lignes.append("Connexions IPv4/IPv6 de programmes non jugés (ssh de l'utilisateur) : "
                   f"{len(ignores)} ({', '.join(sorted(set(ignores))) or 'aucune'})")
-    lignes.append("Étapes SSH exécutées (pupitre-askpass, ssh-add, ssh dans la trace ; clé "
+    lignes.append("Étapes exécutées (pupitre-askpass, ssh-add, ssh, starship dans la trace ; clé "
                   "chargée dans l'agent) : "
                   + ("oui" if not manquants and cle_chargee else
                      f"NON (manquants : {manquants}, clé chargée : {cle_chargee})"))
+    lignes.append("~/.config/starship.toml personnel ouvert ou consulté : "
+                  + ("jamais" if not perso_ouvert else ""))
+    lignes += [f"  {o}" for o in perso_ouvert]
+    lignes.append("Invite Starship de Pupitre (pupitre/starship.toml créé) : "
+                  + ("oui" if config_pupitre else "NON"))
     lignes.append("Phrase de passe de test dans un fichier sous HOME ou XDG_RUNTIME_DIR "
                   f"({lus} fichiers lus) : " + ("aucune" if not fichiers else ""))
     lignes += [f"  {f}" for f in fichiers]
@@ -289,7 +329,7 @@ def main():
     print(rapport)
     shutil.rmtree(perso, ignore_errors=True)
     return 1 if (reseau or ecritures or fichiers or phrase_argv or manquants
-                 or not cle_chargee or arret != "propre") else 0
+                 or not cle_chargee or perso_ouvert or not config_pupitre or arret != "propre") else 0
 
 
 sys.exit(main())

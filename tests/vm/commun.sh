@@ -93,6 +93,37 @@ PY
   verdict "accessibilité : terminal exposé" '^ *terminal « ' "$R/atspi"
   verdict "accessibilité : bouton Menu nommé" 'button « Menu »' "$R/atspi"
 
+  # Invite Starship (installée dans la VM, invite par défaut de Pupitre) : le texte du
+  # terminal, lu par AT-SPI comme le ferait Orca, contient le symbole « λ ».
+  taper "echo invite-42"
+  python3 - > "$R/invite" 2>&1 <<'PY'
+import pyatspi
+def texte(n, prof=0):
+    if n is None or prof > 8:
+        return
+    try:
+        if n.getRoleName() == "terminal":
+            print(n.queryText().getText(0, -1))
+    except Exception:
+        pass
+    for i in range(min(n.childCount, 20)):
+        texte(n.getChildAtIndex(i), prof + 1)
+for app in pyatspi.Registry.getDesktop(0):
+    if app and app.name and "upitre" in app.name:
+        texte(app)
+PY
+  verdict "invite Starship affichée (texte du terminal lu par AT-SPI)" 'λ' "$R/invite"
+
+  # Fin de commande : l'annonce destinée au lecteur d'écran (événement AT-SPI object:announcement)
+  # arrive après une commande de 6 s. L'arbre d'accessibilité vient d'être parcouru ci-dessus.
+  python3 ~/ecoute.py --app pupitre --duree 30 > "$R/annonces" 2>&1 &
+  ecoute=$!
+  for _ in $(seq 40); do grep -q '^pret' "$R/annonces" 2>/dev/null && break; sleep 0.5; done
+  taper "sleep 6"
+  for _ in $(seq 40); do grep -q 'Commande terminée' "$R/annonces" 2>/dev/null && break; sleep 0.5; done
+  kill "$ecoute" 2>/dev/null
+  verdict "fin de commande annoncée (événement d'annonce AT-SPI après sleep 6)" '^annonce.Commande terminée en 6 s\.$' "$R/annonces"
+
   systemctl --user stop pupitre
   echo "BILAN : $REUSSIS réussi(s), $ECHECS échec(s)"
   [ "$ECHECS" -eq 0 ]

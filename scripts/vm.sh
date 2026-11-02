@@ -20,7 +20,8 @@ DEPOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUREAU="${1:-}"
 shift || true
 COMMUNS="grim jq libgtk-4-1 libvte-2.91-gtk4-0 at-spi2-core python3-pyatspi dbus-user-session
-  gnome-keyring libsecret-tools fonts-dejavu-core locales-all"
+  gnome-keyring libsecret-tools fonts-dejavu-core locales-all
+  starship python3-gi gir1.2-atspi-2.0"
 case "$BUREAU" in
   sway) PORT=2222; MEMOIRE=2048; PAQUETS="sway foot wtype wl-clipboard $COMMUNS" ;;
   gnome) PORT=2223; MEMOIRE=3072
@@ -115,6 +116,11 @@ deployer() {
   # sont arrêtés d'abord.
   vm 'systemctl --user stop pupitre 2>/dev/null; pkill -u "$(id -u)" -f '[p]upitre-fond'; sleep 1
       mkdir -p ~/pupitre/bin' || true
+  # Paquets des essais d'invite et d'annonce (déjà là pour une VM créée par « creer » récemment ;
+  # installés ici pour une VM plus ancienne). Sans effet s'ils sont présents.
+  vm "dpkg -s starship python3-gi gir1.2-atspi-2.0 >/dev/null 2>&1 \\
+      || { sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \\
+           starship python3-gi gir1.2-atspi-2.0; }"
   copier "$DEPOT"/target/release/{pupitre,pupitre-fond,pupitre-askpass} essai@127.0.0.1:pupitre/bin/
   copier -r "$DEPOT/assets" essai@127.0.0.1:pupitre/
   echo "Pupitre copié dans la VM"
@@ -122,7 +128,7 @@ deployer() {
 
 essayer() {
   mkdir -p "$VM/captures"
-  copier "$DEPOT"/tests/vm/{essai-$BUREAU.sh,commun.sh,gnome.py,kde.py} essai@127.0.0.1:
+  copier "$DEPOT"/tests/vm/{essai-$BUREAU.sh,commun.sh,gnome.py,kde.py} "$DEPOT"/tests/a11y/ecoute.py essai@127.0.0.1:
   # stdin fermé : wl-copy (lancé par l'essai) ne garde pas la connexion ouverte.
   local code=0
   vm "bash ~/essai-$BUREAU.sh" </dev/null || code=$?
