@@ -11,6 +11,7 @@ pub mod demande;
 pub mod fenetre;
 pub mod messages;
 pub mod polices;
+pub mod preferences;
 pub mod raccourcis;
 pub mod rechargement;
 pub mod recherche;

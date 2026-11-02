@@ -13,6 +13,7 @@ use crate::demande::{ouvrir_demande, DemandeAffichee};
 use crate::messages::{
     annoncer_focus_une_fois_affiche, refaire_annonce_focus, ActionMessage, BandeauMessages,
 };
+use crate::preferences::{FichierPrefs, Lanceur};
 use crate::raccourcis::{raccourci, Raccourci};
 use crate::rechargement::{surveiller, surveiller_fichiers, Surveillance};
 use crate::recherche::BarreRecherche;
@@ -1227,6 +1228,27 @@ impl FenetrePupitre {
         }
     }
 
+    /// Ouvre un fichier de configuration dans l'éditeur par défaut ; le résultat s'affiche
+    /// (et s'annonce) dans le bandeau de la fenêtre.
+    fn ouvrir_preference(&self, fichier: FichierPrefs) {
+        let lanceur = crate::preferences::lanceur_gtk(self.fenetre().clone().upcast());
+        self.ouvrir_preference_avec(fichier, lanceur);
+    }
+
+    /// Comme `ouvrir_preference`, avec un lanceur au choix (tests : échec simulé).
+    pub fn ouvrir_preference_avec(&self, fichier: FichierPrefs, lanceur: Lanceur) {
+        let faible = self.faible();
+        crate::preferences::ouvrir_avec(
+            fichier,
+            lanceur,
+            Rc::new(move |texte| {
+                if let Some(f) = faible.upgrade() {
+                    FenetrePupitre(f).afficher_message(&texte);
+                }
+            }),
+        );
+    }
+
     /// Affiche un message persistant (lu par le lecteur d'écran).
     pub fn afficher_message(&self, texte: &str) {
         self.0.bandeau.afficher(texte, None);
@@ -1493,6 +1515,13 @@ impl FenetrePupitre {
             ("zoom-normal", Raccourci::ZoomNormal),
         ] {
             ajouter(nom, Box::new(move |f| f.executer(r)));
+        }
+        for (nom, fichier) in [
+            ("prefs-configuration", FichierPrefs::Configuration),
+            ("prefs-invite", FichierPrefs::Invite),
+            ("prefs-connexions", FichierPrefs::Connexions),
+        ] {
+            ajouter(nom, Box::new(move |f| f.ouvrir_preference(fichier)));
         }
         ajouter(
             "detacher-onglet",
@@ -1878,6 +1907,17 @@ fn bouton_menu() -> (gtk::MenuButton, gio::Menu) {
         Some("<Control><Shift>w"),
     ));
     m.append_section(None, &onglet);
+    let preferences = gio::Menu::new();
+    let prefs = gio::Menu::new();
+    for (libelle, action) in [
+        ("menu-modifier-config", "win.prefs-configuration"),
+        ("menu-modifier-invite", "win.prefs-invite"),
+        ("menu-modifier-connexions", "win.prefs-connexions"),
+    ] {
+        prefs.append_item(&item(&tr(libelle), action, None));
+    }
+    preferences.append_submenu(Some(&tr("menu-preferences")), &prefs);
+    m.append_section(None, &preferences);
     let aide = gio::Menu::new();
     aide.append_item(&item(
         &tr("menu-aide-pupitre"),

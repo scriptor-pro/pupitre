@@ -252,6 +252,15 @@ menu-renommer-onglet = Renommer l'onglet
 menu-detacher-onglet = Détacher dans une nouvelle fenêtre
 menu-fermer-onglet = Fermer l'onglet
 menu-aide-pupitre = Aide
+menu-preferences = Préférences
+menu-modifier-config = Modifier la configuration…
+menu-modifier-invite = Modifier l'invite…
+menu-modifier-connexions = Modifier les connexions…
+
+## Préférences (ouverture des fichiers de configuration)
+
+prefs-ouvert = Les modifications s'appliquent dès l'enregistrement.
+prefs-ouverture-impossible = Impossible d'ouvrir le fichier dans un éditeur. Ouvrez-le vous-même : { $chemin }
 
 ## Aide intégrée (Ctrl+Maj+H)
 

@@ -334,10 +334,12 @@ lire.
 Le fichier `~/.config/pupitre/pupitre.toml` est créé au premier lancement, avec un commentaire
 pour chaque réglage. Il se modifie avec n'importe quel éditeur de texte.
 
-**Menu ▸ Préférences (à venir)** ouvre directement les fichiers dans votre éditeur de texte :
+**Menu ▸ Préférences** ouvre directement les fichiers dans votre éditeur de texte :
 « Modifier la configuration… » (`pupitre.toml`), « Modifier l'invite… » (`starship.toml`),
-« Modifier les connexions… » (`connexions.toml`). Si aucun éditeur ne s'ouvre, Pupitre affiche
-le chemin du fichier.
+« Modifier les connexions… » (`connexions.toml`). Un fichier absent est d'abord créé, avec des
+commentaires en français ; un fichier existant n'est jamais modifié. Pupitre annonce « Les
+modifications s'appliquent dès l'enregistrement ». Si aucun éditeur ne s'ouvre, Pupitre affiche
+un message avec le chemin complet du fichier, à ouvrir vous-même.
 
 - **Pas besoin de redémarrer** : chaque enregistrement est appliqué aussitôt à toutes les
   fenêtres.
