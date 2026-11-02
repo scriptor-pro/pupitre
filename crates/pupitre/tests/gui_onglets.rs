@@ -74,6 +74,12 @@ fn main() {
     ex.lancer("fermer_une_fenetre_ferme_ses_sessions", || {
         fermer_fenetre(&pupitre, &temoin)
     });
+    ex.lancer("focus_apres_nouvelle_fenetre", || {
+        focus_nouvelle_fenetre(&pupitre, &temoin)
+    });
+    ex.lancer("focus_apres_reprise", || {
+        focus_apres_reprise(&pupitre, &socket)
+    });
     ex.lancer("connexion_perdue_affiche_un_message", || {
         connexion_perdue(&pupitre, &socket)
     });
@@ -184,11 +190,76 @@ fn nouvel_onglet(p: &Rc<Pupitre>, temoin: &Temoin) -> Resultat {
     verifier(Rc::ptr_eq(&actif, &f.onglets()[1]), || {
         "le nouvel onglet n'est pas actif".into()
     })?;
+    // Le terminal du nouvel onglet a le focus (c'est lui que le clavier et Orca suivent).
+    verifier(a_le_focus(&f, &actif), || {
+        "le terminal du nouvel onglet n'a pas le focus de la fenêtre".into()
+    })?;
     verifier(executer(&actif, "echo deux-$((1+1))", "deux-2"), || {
         "le nouvel onglet ne répond pas".into()
     })?;
     let n = temoin.sessions().len();
     verifier(n == 2, || format!("{n} sessions côté fond"))
+}
+
+/// Vrai si le widget qui a le focus dans la fenêtre `f` est le terminal de l'onglet `o`.
+fn a_le_focus(f: &FenetrePupitre, o: &Rc<Onglet>) -> bool {
+    let terminal: gtk::Widget = o.terminal().terminal().clone().upcast();
+    GtkWindowExt::focus(f.fenetre()).is_some_and(|w| w == terminal)
+}
+
+/// Nouvelle fenêtre (Ctrl+Maj+N) : son premier onglet a le focus.
+fn focus_nouvelle_fenetre(p: &Rc<Pupitre>, temoin: &Temoin) -> Resultat {
+    let avant = temoin.sessions().len();
+    let n = fenetres_visibles(p).len();
+    let f = p.nouvelle_fenetre();
+    let ok = attendre(Duration::from_secs(10), || {
+        fenetres_visibles(p).len() == n + 1 && f.onglets().len() == 1
+    });
+    verifier(ok, || "la nouvelle fenêtre n'a pas d'onglet".into())?;
+    let o = f.onglet_actif().ok_or("aucun onglet actif")?;
+    let ok = attendre(Duration::from_secs(5), || a_le_focus(&f, &o));
+    verifier(ok, || {
+        "le terminal du premier onglet de la nouvelle fenêtre n'a pas le focus".into()
+    })?;
+    f.fenetre().close();
+    let ok = attendre(Duration::from_secs(5), || fenetres_visibles(p).len() == n);
+    verifier(ok, || "la nouvelle fenêtre ne s'est pas fermée".into())?;
+    let ok = attendre(Duration::from_secs(5), || temoin.sessions().len() == avant);
+    verifier(ok, || {
+        "la session de la fenêtre fermée existe encore".into()
+    })
+}
+
+/// Reprise : une seconde interface démarre sur le même processus de fond et rattache les
+/// sessions existantes ; dans sa fenêtre, le terminal de l'onglet courant a le focus.
+fn focus_apres_reprise(_p: &Rc<Pupitre>, socket: &Path) -> Resultat {
+    let app = gtk::Application::builder()
+        .application_id("fr.pupitre.TestOngletsReprise")
+        .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+    app.register(gtk::gio::Cancellable::NONE)
+        .map_err(|e| e.to_string())?;
+    let reprise = Pupitre::demarrer(&app, socket.to_path_buf(), Config::default());
+    let ok = attendre(Duration::from_secs(15), || {
+        fenetres_visibles(&reprise)
+            .first()
+            .is_some_and(|f| !f.onglets().is_empty())
+    });
+    verifier(ok, || "aucun onglet restauré par la reprise".into())?;
+    let f = fenetres_visibles(&reprise)[0].clone();
+    let o = f
+        .onglet_actif()
+        .ok_or("aucun onglet actif après la reprise")?;
+    let ok = attendre(Duration::from_secs(5), || a_le_focus(&f, &o));
+    let res = verifier(ok, || {
+        "après la reprise, le terminal de l'onglet courant n'a pas le focus".into()
+    });
+    // Ménage : fermer les fenêtres de la reprise sans fermer les sessions des autres.
+    for g in reprise.fenetres() {
+        g.fenetre().destroy();
+    }
+    drop(reprise);
+    res
 }
 
 fn titre(p: &Rc<Pupitre>) -> Resultat {

@@ -118,14 +118,59 @@ class Session:
             raise Echec("Orca n'a pas démarré (voir orca.out)")
         self.pupitre_proc = self.lancer("pupitre", [self.pupitre])
 
-    def relancer_pupitre(self, signal_=signal.SIGKILL):
-        """Tue l'interface (le fond garde les sessions) et la relance."""
+    def onglets(self, delai=15.0):
+        """Nombre d'onglets (objets « page tab » de Pupitre) dans l'arbre AT-SPI ; attend un
+        résultat non nul."""
+        code = (
+            "import gi\ngi.require_version('Atspi','2.0')\nfrom gi.repository import Atspi\n"
+            "def n(o,p=0):\n"
+            "  if o is None or p>9: return 0\n"
+            "  t=1 if o.get_role_name()=='page tab' else 0\n"
+            "  return t+sum(n(o.get_child_at_index(i),p+1) for i in range(min(o.get_child_count(),40)))\n"
+            "d=Atspi.get_desktop(0)\nr=0\n"
+            "for i in range(d.get_child_count()):\n"
+            "  a=d.get_child_at_index(i)\n"
+            "  if a and (a.get_name() or '').lower()=='pupitre': r+=n(a)\n"
+            "print(r)\n")
+        limite = time.time() + delai
+        while True:
+            r = subprocess.run(["python3", "-c", code], capture_output=True, text=True, timeout=30)
+            try:
+                v = int(r.stdout.strip())
+            except ValueError:
+                v = 0
+            if v or time.time() > limite:
+                return v
+            time.sleep(0.5)
+
+    def tuer_fond(self):
+        """Arrête le fond (ses shells meurent avec lui) et son ssh-agent, reconnus à leur
+        nom et au dossier du test ; jamais Orca ni le gestionnaire de fenêtres."""
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    cmd = f.read()
+                if b"pupitre-fond" in cmd.split(b"\0")[0] or (
+                        b"ssh-agent" in cmd.split(b"\0")[0] and self.perso.encode() in cmd):
+                    with open(f"/proc/{pid}/environ", "rb") as f:
+                        if self.perso.encode() in f.read() or b"ssh-agent" in cmd:
+                            os.kill(int(pid), signal.SIGTERM)
+            except (OSError, ProcessLookupError):
+                pass
+
+    def relancer_pupitre(self, signal_=signal.SIGKILL, fond=False):
+        """Tue l'interface (le fond garde les sessions, sauf `fond`) et la relance."""
         self.pupitre_proc.send_signal(signal_)
         try:
             self.pupitre_proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             self.pupitre_proc.kill()
             self.pupitre_proc.wait()
+        if fond:
+            self.tuer_fond()
+            time.sleep(2)
         time.sleep(1)
         self.marquer()
         self.pupitre_proc = self.lancer("pupitre-reprise", [self.pupitre])
@@ -283,20 +328,19 @@ def v02_sortie(s):
 
 
 def v03_nouvel_onglet(s):
-    # Le repère est posé juste avant Ctrl+Maj+T, après avoir laissé Orca finir de lire l'onglet 1
-    # (sinon l'invite du premier onglet, lue en retard, validerait la vérification). Le nouvel
-    # onglet est lu « vide » (invite pas encore dessinée) ; on lui donne le focus (Ctrl+Tab
-    # jusqu'au terminal, comme v05/v12) puis Entrée redessine son invite, qu'Orca doit lire.
+    # Comme un utilisateur : Ctrl+Maj+T, sans rien d'autre. Le repère est posé juste avant, après
+    # avoir laissé Orca finir de lire l'onglet 1 (sinon son invite, lue en retard, validerait la
+    # vérification). Le nouvel onglet est annoncé « Terminal Page 2 » ; l'invite doit être lue
+    # APRÈS cette annonce, donc être celle du nouvel onglet.
     s.calme(1.5, 15)
     s.marquer()
     s.touches("ctrl+shift+t")
-    exiger(s.attendre(r"Page 2|onglet", 6), "le nouvel onglet n'est pas annoncé")
-    s.calme(1.5, 15)
-    exiger(s.ctrl_tab_jusqu_a(r"^Terminal Page 2"), "Ctrl+Tab ne mène pas au terminal du nouvel onglet")
-    s.calme()
-    s.marquer()
-    s.touches("Return")
+    exiger(s.attendre(r"^Terminal Page 2", 6), "le nouvel onglet n'est pas annoncé (Terminal Page 2)")
     exiger(s.attendre(re.escape(INVITE.strip()), 6), "l'invite du nouvel onglet n'est pas lue")
+    dites = s.paroles()
+    annonce = next(i for i, p in enumerate(dites) if re.search(r"^Terminal Page 2", p))
+    exiger(any(INVITE.strip() in p for p in dites[annonce:]),
+           "l'invite lue n'est pas celle du nouvel onglet (elle précède son annonce)")
 
 
 def v04_alt_chiffres(s):
@@ -571,31 +615,32 @@ def v18_navigation(s):
 
 
 def v20_invite_starship(s):
-    # Invite Starship par défaut : on retire « invite = "shell" » ; la configuration est relue
-    # à chaud, et le nouvel onglet crée starship.toml dans le dossier de Pupitre. Le HOME est
-    # celui, jetable, du test : jamais le ~/.config/starship.toml de l'utilisateur.
+    # Invite Starship par défaut : on retire « invite = "shell" » du pupitre.toml du test, puis
+    # on repart de zéro (interface et fond arrêtés, relancés) : comme au premier lancement, le
+    # terminal est annoncé avec son invite (Pupitre redonne le focus après l'activation). Le
+    # fichier starship.toml de Pupitre est créé au démarrage. Le HOME est celui, jetable, du
+    # test : jamais le ~/.config/starship.toml de l'utilisateur. Pas de nouvel onglet ici :
+    # son annonce ne passe pas par la même voie (voir la correction 2 du rapport).
     chemin = os.path.join(s.env["XDG_CONFIG_HOME"], "pupitre", "pupitre.toml")
     with open(chemin, encoding="utf-8") as f:
         origine = f.read()
     with open(chemin, "w", encoding="utf-8") as f:
         f.write(origine.replace('invite = "shell"\n', ""))
     try:
-        time.sleep(2)  # relecture à chaud de la configuration
-        s.revenir_au_terminal()
-        s.marquer()
-        s.touches("ctrl+shift+t")
-        # Après un nouvel onglet, Orca a le focus sur l'onglet : Ctrl+Tab le ramène au terminal
-        # (comme v05 et v12). Ctrl+C redessine l'invite, que le terminal annonce : deux lignes
-        # dont celle du symbole « λ ». On attend l'invite, pas un délai.
-        s.calme(1.0, 10)
-        exiger(s.ctrl_tab_jusqu_a(r"^Terminal Page \d"), "Ctrl+Tab ne ramène pas au terminal")
         s.calme()
-        s.marquer()
-        s.touches("ctrl+c")
-        exiger(s.attendre(r"λ", 10), "Orca ne lit pas une ligne d'invite contenant « λ »")
+        s.relancer_pupitre(fond=True)
+        # Starship est plus lent que l'invite du shell : le terminal peut être annoncé « vide » au
+        # lancement, l'invite arrivant après. Dans ce cas, une première commande fait relire
+        # l'invite redessinée : sa sortie, puis la ligne contenant « λ ».
+        if not s.attendre(r"λ", 10):
+            s.calme(1.5, 15)
+            s.marquer()
+            s.commande("echo starship-$((6*7))")
+            exiger(s.attendre(r"starship-42", 10), "Starship : la sortie d'une commande n'est pas lue")
+            exiger(s.attendre(r"λ", 10), "Orca ne lit pas une ligne d'invite contenant « λ »")
         exiger(os.path.exists(os.path.join(s.env["XDG_CONFIG_HOME"], "pupitre", "starship.toml")),
                "Pupitre n'a pas créé son starship.toml")
-        s.calme()
+        s.calme(1.5, 15)
         s.marquer()
         s.commande("sleep 6")
         exiger(s.attendre(r"^Commande terminée en 6 s\.?$", 14),
@@ -603,8 +648,8 @@ def v20_invite_starship(s):
     finally:
         with open(chemin, "w", encoding="utf-8") as f:
             f.write(origine)
-        # Attendre la relecture à chaud avant la vérification suivante : une configuration
-        # invalide ou différente ne doit pas la gêner (la relecture ne dit rien si elle réussit).
+        # La relecture à chaud de la configuration ne dit rien si elle réussit : on lui laisse
+        # le temps avant la vérification suivante.
         time.sleep(2)
 
 
@@ -612,11 +657,17 @@ def v21_reprise(s):
     # Reprise : l'interface est tuée (plantage), le fond garde les sessions ; l'interface relancée
     # rattache les onglets. Orca doit ensuite lire la sortie nouvelle et les annonces de fin.
     s.revenir_au_terminal()
+    s.touches("ctrl+shift+t")  # deux onglets avant le plantage
+    s.calme(1.5, 15)
+    avant = s.onglets()
+    exiger(avant >= 2, f"reprise : {avant} onglet(s) avant le plantage (au moins 2 attendus)")
     s.calme()
     s.relancer_pupitre()
     exiger(s.attendre(r"Page \d|— Pupitre", 25), "reprise : la fenêtre n'est pas annoncée")
     s.calme(2.0, 20)
     exiger(s.vivant(), "reprise : Pupitre ne tourne plus")
+    apres = s.onglets()
+    exiger(apres == avant, f"reprise : {apres} onglet(s) restauré(s), {avant} attendus")
     s.marquer()
     s.commande("echo reprise-$((6*7))")
     exiger(s.attendre(r"reprise-42", 10), "reprise : la sortie d'une commande n'est pas lue")
