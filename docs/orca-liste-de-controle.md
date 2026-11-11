@@ -30,8 +30,8 @@ passe à l'invite Starship par défaut pour la ligne 20.
 |---|---|---|---|---|
 | 1 | Lancer Pupitre. | Orca annonce la fenêtre « Terminal — Pupitre » puis lit l'invite du shell (ex. « baudouin@machine:~$ »). | [ ok] | |
 | 2 | Taper `ls` puis Entrée. Lire les lignes avec Orca+U / Orca+O. | La sortie de `ls` est lue ligne par ligne, accents compris. | [ ] | |
-| 3 | Ctrl+Maj+T. | Un second onglet s'ouvre ; Orca annonce le nouvel onglet et lit son invite. | [non ] | |
-| 4 | Alt+1, puis Alt+2 (touches du haut, sans Maj, en fr dvorak). | À chaque fois, Orca annonce l'onglet choisi et son titre. | [ Orca lit la première fois qu'il rencontre un nouveau nom sur un onglet] | |
+| 3 | Ctrl+Maj+T, puis `echo bonjour` et Entrée. | Un second onglet s'ouvre ; Orca lit son invite et annonce « …, onglet 2 sur 2 » ; la sortie « bonjour » est lue. | [non ] | Corrigé le 2026-11-11 (Orca quittait le terminal pour l'onglet) : à revérifier. |
+| 4 | Alt+1, puis Alt+2 (touches du haut, sans Maj, en fr dvorak), puis `echo bonjour` et Entrée. | À chaque fois, Orca annonce « <titre>, onglet N sur 2 » ; la sortie « bonjour » est lue. | [ Orca lit la première fois qu'il rencontre un nouveau nom sur un onglet] | Noms d'onglets désormais signalés à Orca (2026-11-11) : à revérifier. |
 | 5 | Dans un onglet, taper `printf '\e]0;essai\a'` puis Entrée ; puis Ctrl+Tab jusqu'aux onglets. | L'onglet s'appelle « essai » ; Orca le lit en arrivant sur les onglets. Les flèches gauche/droite changent d'onglet et chaque titre est lu. | [ ] | |
 | 6 | Ctrl+Tab jusqu'au bouton du menu, puis Entrée ; parcourir avec les flèches ; Échap. | Orca dit « Menu, bouton bascule » ; dans le menu, chaque entrée est lue avec son raccourci ; Échap ferme le menu. Un nouveau Ctrl+Tab ramène au terminal. | [ ] | |
 | 7 | Taper `sleep 30` puis Entrée ; Ctrl+Maj+W. | Un dialogue s'ouvre ; Orca lit la question « Une commande est en cours dans cet onglet. Fermer quand même ? » puis « Annuler, bouton ». Échap ferme le dialogue sans fermer l'onglet. Ctrl+C arrête `sleep`. | [ ] | |

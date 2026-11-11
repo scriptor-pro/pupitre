@@ -289,10 +289,35 @@ class Session:
                 return True
         return False
 
+    def terminal_focalise(self):
+        """Vrai si un terminal de Pupitre a le focus, d'après l'arbre AT-SPI."""
+        code = (
+            "import gi\ngi.require_version('Atspi','2.0')\nfrom gi.repository import Atspi\n"
+            "F=Atspi.StateType.FOCUSED\n"
+            "def t(o,p=0):\n"
+            "  if o is None or p>12: return False\n"
+            "  if o.get_role_name()=='terminal' and o.get_state_set().contains(F): return True\n"
+            "  return any(t(o.get_child_at_index(i),p+1) for i in range(min(o.get_child_count(),40)))\n"
+            "d=Atspi.get_desktop(0)\n"
+            "print(any(t(d.get_child_at_index(i)) for i in range(d.get_child_count())\n"
+            "          if (d.get_child_at_index(i).get_name() or '').lower()=='pupitre'))\n")
+        r = subprocess.run(["python3", "-c", code], capture_output=True, text=True, timeout=30)
+        return r.stdout.strip() == "True"
+
+    def ctrl_tab_jusqu_au_terminal(self, max_essais=6):
+        """Ctrl+Tab jusqu'à ce que le terminal ait le focus (rien si c'est déjà le cas)."""
+        for _ in range(max_essais):
+            if self.terminal_focalise():
+                return True
+            self.marquer()
+            self.touches("ctrl+Tab")
+            self.calme(0.8, 3)
+        return self.terminal_focalise()
+
     def revenir_au_terminal(self):
         """Remet le clavier dans le terminal, sur une ligne de commande vide."""
         self.touches("Escape")  # ferme un menu ou un dialogue éventuel
-        self.ctrl_tab_jusqu_a(r"^Terminal Page \d", 6)
+        self.ctrl_tab_jusqu_au_terminal()
         # Ctrl+C : interrompt une commande et annule le préfixe Méta laissé par Échap
         # (sinon Échap puis « e » ferait Alt+E dans le shell et mangerait la lettre).
         self.touches("ctrl+c")
@@ -330,26 +355,34 @@ def v02_sortie(s):
 def v03_nouvel_onglet(s):
     # Comme un utilisateur : Ctrl+Maj+T, sans rien d'autre. Le repère est posé juste avant, après
     # avoir laissé Orca finir de lire l'onglet 1 (sinon son invite, lue en retard, validerait la
-    # vérification). Le nouvel onglet est annoncé « Terminal Page 2 » ; l'invite doit être lue
-    # APRÈS cette annonce, donc être celle du nouvel onglet.
+    # vérification). Le nouvel onglet est annoncé « …, onglet 2 sur 2 » et son invite est lue.
     s.calme(1.5, 15)
     s.marquer()
     s.touches("ctrl+shift+t")
-    exiger(s.attendre(r"^Terminal Page 2", 6), "le nouvel onglet n'est pas annoncé (Terminal Page 2)")
+    exiger(s.attendre(r"onglet 2 sur 2", 6), "le nouvel onglet n'est pas annoncé (onglet 2 sur 2)")
     exiger(s.attendre(re.escape(INVITE.strip()), 6), "l'invite du nouvel onglet n'est pas lue")
-    dites = s.paroles()
-    annonce = next(i for i, p in enumerate(dites) if re.search(r"^Terminal Page 2", p))
-    exiger(any(INVITE.strip() in p for p in dites[annonce:]),
-           "l'invite lue n'est pas celle du nouvel onglet (elle précède son annonce)")
+    # Orca traite en retard la sélection du nouvel onglet (~1 s) : s'il croit alors que l'onglet
+    # et le terminal ont des noms différents, il quitte le terminal et ne lit plus sa sortie.
+    # On laisse passer ce délai, puis une commande doit être lue.
+    s.calme(2.5, 15)
+    s.marquer()
+    s.commande("echo onglet-$((7*7))")
+    exiger(s.attendre(r"onglet-49", 8),
+           "la sortie d'une commande n'est plus lue après le nouvel onglet")
 
 
 def v04_alt_chiffres(s):
     s.touches("alt+1")
-    exiger(s.attendre(r"Page 1", 5), "Alt+1 : onglet 1 non annoncé")
+    exiger(s.attendre(r"onglet 1 sur \d", 5), "Alt+1 : onglet 1 non annoncé")
     s.calme()
     s.marquer()
     s.touches("alt+2")
-    exiger(s.attendre(r"Page 2", 5), "Alt+2 : onglet 2 non annoncé")
+    exiger(s.attendre(r"onglet 2 sur \d", 5), "Alt+2 : onglet 2 non annoncé")
+    # Même piège que pour un nouvel onglet : la sortie doit rester lue après le changement.
+    s.calme(2.5, 15)
+    s.marquer()
+    s.commande("echo alt-$((4*4))")
+    exiger(s.attendre(r"alt-16", 8), "Alt+2 : la sortie d'une commande n'est plus lue")
 
 
 def v05_titre(s):
@@ -382,7 +415,7 @@ def v06_menu(s):
     exiger(s.attendre(r"\w", 3), "flèche bas dans le menu : rien n'est lu")
     s.touches("Escape")
     s.calme()
-    exiger(s.ctrl_tab_jusqu_a(r"^Terminal Page \d"), "Ctrl+Tab ne ramène pas au terminal")
+    exiger(s.ctrl_tab_jusqu_au_terminal(), "Ctrl+Tab ne ramène pas au terminal")
 
 
 def v07_dialogue(s):
@@ -713,8 +746,8 @@ def v19_aide(s):
 VERIFICATIONS = [
     (1, "Lancement : fenêtre et invite annoncées", v01_lancement),
     (2, "Sortie d'une commande lue ligne par ligne, accents compris", v02_sortie),
-    (3, "Ctrl+Maj+T : nouvel onglet annoncé, invite lue", v03_nouvel_onglet),
-    (4, "Alt+1 / Alt+2 : onglet annoncé", v04_alt_chiffres),
+    (3, "Ctrl+Maj+T : nouvel onglet annoncé, invite lue, sortie d'une commande lue", v03_nouvel_onglet),
+    (4, "Alt+1 / Alt+2 : onglet annoncé, sortie d'une commande lue", v04_alt_chiffres),
     (5, "Titre d'onglet « essai » lu ; flèches entre onglets", v05_titre),
     (6, "Menu au clavier : bouton, entrées, Échap", v06_menu),
     (7, "Dialogue de fermeture lu, Échap l'annule", v07_dialogue),

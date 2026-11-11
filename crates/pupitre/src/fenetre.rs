@@ -213,6 +213,22 @@ impl Onglet {
         self.terminal
             .terminal()
             .update_property(&[gtk::accessible::Property::Label(&titre)]);
+        // GTK ne signale pas le changement de texte de l'étiquette : les lecteurs d'écran
+        // gardent l'ancien nom de l'onglet. Orca 48, voyant alors un onglet et un terminal de
+        // noms différents, quitte le terminal à la sélection de l'onglet et ne lit plus sa
+        // sortie. Le nom posé sur l'objet « onglet » de GTK, lui, est signalé.
+        if let Some(onglet) = self
+            .tete
+            .parent()
+            .filter(|w| w.accessible_role() == gtk::AccessibleRole::Tab)
+        {
+            let nom = if self.signale.get() {
+                nom_avec_cloche(&titre)
+            } else {
+                titre.clone()
+            };
+            onglet.update_property(&[gtk::accessible::Property::Label(&nom)]);
+        }
         if let Some(c) = self.carnet() {
             c.page(&self.widget()).set_property("menu-label", &titre);
             decrire_onglets(&c);
@@ -1547,7 +1563,14 @@ impl FenetrePupitre {
         self.0.carnet.connect_page_added(|c, page, _| {
             c.set_tab_reorderable(page, true);
             c.set_tab_detachable(page, true);
-            decrire_onglets(c);
+            // Décrire une fois l'onglet rendu actif et nommé : Orca ne lit que la première
+            // description d'une rafale ; elle doit donner la bonne position.
+            let c = c.downgrade();
+            glib::idle_add_local_once(move || {
+                if let Some(c) = c.upgrade() {
+                    decrire_onglets(&c);
+                }
+            });
         });
         let faible = Rc::downgrade(&self.0);
         self.0.carnet.connect_switch_page(move |c, page, _| {
