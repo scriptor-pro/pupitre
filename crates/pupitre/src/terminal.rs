@@ -369,26 +369,40 @@ impl TerminalOnglet {
         terminal.add_controller(clic);
 
         // Copie à la sélection : au relâchement du bouton gauche, une fois que VTE a fini la
-        // sélection. Pas sur « selection-changed » : la recherche sélectionne aussi ce
-        // qu'elle trouve, et ne doit pas remplacer le presse-papiers.
+        // sélection, et seulement si ce geste l'a changée (glisser, double clic, Maj+clic).
+        // Pas sur « selection-changed » seul : la recherche sélectionne aussi ce qu'elle
+        // trouve. Pas à chaque relâchement : sous un programme qui capte la souris (tmux,
+        // vim), un simple clic laisse la sélection affichée, qui serait recopiée.
         let copie_selection = Rc::new(Cell::new(true));
+        // `Some(changée)` pendant un geste du bouton gauche, `None` sinon.
+        let geste: Rc<Cell<Option<bool>>> = Rc::new(Cell::new(None));
+        let g = geste.clone();
+        terminal.connect_selection_changed(move |_| {
+            if g.get().is_some() {
+                g.set(Some(true));
+            }
+        });
         let observateur = gtk::EventControllerLegacy::new();
         observateur.set_propagation_phase(gtk::PropagationPhase::Capture);
         let (t, actif) = (terminal.downgrade(), copie_selection.clone());
         observateur.connect_event(move |_, ev| {
-            let relache = ev.event_type() == gdk::EventType::ButtonRelease
-                && ev
-                    .downcast_ref::<gdk::ButtonEvent>()
-                    .is_some_and(|b| b.button() == 1);
-            if relache && actif.get() {
-                let (t, actif) = (t.clone(), actif.clone());
-                glib::idle_add_local_once(move || {
-                    if let Some(t) = t.upgrade() {
-                        if actif.get() && t.has_selection() {
-                            t.copy_clipboard_format(vte4::Format::Text);
+            let bouton_gauche = ev
+                .downcast_ref::<gdk::ButtonEvent>()
+                .is_some_and(|b| b.button() == 1);
+            match ev.event_type() {
+                gdk::EventType::ButtonPress if bouton_gauche => geste.set(Some(false)),
+                gdk::EventType::ButtonRelease if bouton_gauche => {
+                    let (t, actif, geste) = (t.clone(), actif.clone(), geste.clone());
+                    glib::idle_add_local_once(move || {
+                        let changee = geste.replace(None) == Some(true);
+                        if let Some(t) = t.upgrade() {
+                            if actif.get() && changee && t.has_selection() {
+                                t.copy_clipboard_format(vte4::Format::Text);
+                            }
                         }
-                    }
-                });
+                    });
+                }
+                _ => {}
             }
             glib::Propagation::Proceed
         });

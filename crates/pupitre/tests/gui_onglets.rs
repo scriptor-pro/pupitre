@@ -265,9 +265,35 @@ fn focus_apres_reprise(_p: &Rc<Pupitre>, socket: &Path) -> Resultat {
 fn titre(p: &Rc<Pupitre>) -> Resultat {
     let f = fenetres_visibles(p)[0].clone();
     let o = f.onglet_actif().ok_or("aucun onglet actif")?;
+    // Le nouveau nom de l'onglet doit être signalé aux lecteurs d'écran : sinon Orca garde
+    // l'ancien, le croit différent de celui du terminal et quitte le terminal.
+    let mut ecoute = Command::new("python3")
+        .arg(racine().join("tests/a11y/ecoute.py"))
+        .args(["--app", NOM_APPLI, "--duree", "6"])
+        .args(["--evenement", "object:property-change:accessible-name"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    patienter(Duration::from_secs(2));
     executer(&o, "printf '\\033]0;mon-titre\\007'; echo fait", "fait");
     let ok = attendre(Duration::from_secs(5), || o.titre() == "mon-titre");
+    attendre(Duration::from_secs(15), || {
+        matches!(ecoute.try_wait(), Ok(Some(_)))
+    });
+    let _ = ecoute.kill();
+    let mut sortie = String::new();
+    if let Some(mut s) = ecoute.stdout.take() {
+        let _ = std::io::Read::read_to_string(&mut s, &mut sortie);
+    }
+    let _ = ecoute.wait();
     verifier(ok, || format!("titre « {} »", o.titre()))?;
+    let lignes: Vec<&str> = sortie.lines().collect();
+    let signale = lignes
+        .windows(2)
+        .any(|l| l[0] == "annonce\tmon-titre" && l[1] == "source\tpage tab");
+    verifier(signale, || {
+        format!("nouveau nom de l'onglet non signalé ; écoute : {sortie:?}")
+    })?;
     let titre_fenetre = f
         .fenetre()
         .title()

@@ -393,6 +393,42 @@ fn selection_souris(f: &FenetrePupitre) -> Resultat {
     t.unselect_all();
     verifier(ok, || format!("sélection non copiée : {contenu:?}"))?;
 
+    // Un simple clic ne recopie pas une sélection restée affichée (ex. celle d'une
+    // recherche), même quand un programme capte la souris (tmux, vim) : VTE ne l'efface
+    // alors pas, et le clic va au programme.
+    let cliquer = || {
+        let (x, y) = (
+            ((haut.x() + bas.x()) / 2.0).round().to_string(),
+            ((haut.y() + bas.y()) / 2.0).round().to_string(),
+        );
+        let pid = std::process::id().to_string();
+        let fenetre = Command::new("xdotool")
+            .args(["search", "--onlyvisible", "--pid", &pid])
+            .output()
+            .ok()
+            .and_then(|s| String::from_utf8(s.stdout).ok())
+            .and_then(|s| s.lines().next().map(str::to_owned))
+            .unwrap_or_default();
+        xdotool(&["mousemove", "--window", &fenetre, &x, &y]) && xdotool(&["click", "1"])
+    };
+    o.terminal().on_output(b"\x1b[?1000h");
+    patienter(Duration::from_millis(300));
+    t.select_all();
+    t.clipboard().set_text("temoin-clic");
+    let res = (|| {
+        verifier(cliquer(), || "xdotool".into())?;
+        patienter(Duration::from_millis(500));
+        let contenu = lire_presse_papiers(&t);
+        verifier(contenu == "temoin-clic", || {
+            format!("un simple clic a recopié la sélection : {contenu:?}")
+        })
+    })();
+    o.terminal().on_output(b"\x1b[?1000l");
+    // La sortie est passée à VTE un peu plus tard : laisser le mode souris se refermer.
+    patienter(Duration::from_millis(300));
+    t.unselect_all();
+    res?;
+
     o.terminal().appliquer(
         &Config {
             copie_selection: false,

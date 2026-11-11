@@ -2,9 +2,11 @@
 """Écoute les annonces faites au lecteur d'écran (événement AT-SPI « object:announcement »,
 émis par gtk_accessible_announce) par une application, pendant une durée donnée.
 
-Usage : python3 ecoute.py --app NOM --duree SECONDES
+Usage : python3 ecoute.py --app NOM --duree SECONDES [--evenement TYPE]
 Écrit « pret » dès que l'écoute est active, puis une ligne « annonce<TAB>texte » par
-annonce reçue. Code 0 dans tous les cas.
+événement reçu (suivie de « source<TAB>rôle »). TYPE vaut par défaut « object:announcement » ;
+« object:property-change:accessible-name » écoute les changements de nom.
+Code 0 dans tous les cas.
 """
 import argparse
 import sys
@@ -19,6 +21,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--app", required=True)
     p.add_argument("--duree", type=float, default=5.0)
+    p.add_argument("--evenement", default="object:announcement")
     a = p.parse_args()
     nom = a.app.lower()
 
@@ -37,7 +40,7 @@ def main():
             pass
 
     ecouteur = Atspi.EventListener.new(recu)
-    ecouteur.register("object:announcement")
+    ecouteur.register(a.evenement)
     print("pret", flush=True)
     GLib.timeout_add(int(a.duree * 1000), lambda: (Atspi.event_quit(), False)[1])
     Atspi.event_main()

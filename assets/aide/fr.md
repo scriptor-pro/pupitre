@@ -132,6 +132,8 @@ Tout Pupitre s'utilise au clavier.
 - **Copie automatique** : du texte sélectionné à la souris est copié dans le presse-papiers
   dès que le bouton est relâché ; Ctrl+Maj+V le colle. Pour la désactiver :
   `copie_selection = false` dans `pupitre.toml`. La recherche ne touche pas au presse-papiers.
+  Attention : un mot de passe ou un secret sélectionné à la souris est copié lui aussi, et
+  d'autres applications peuvent lire le presse-papiers.
 
 ### Liens
 Les adresses web écrites dans le terminal sont reconnues. **Ctrl+clic** les ouvre dans votre
