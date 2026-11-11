@@ -61,6 +61,8 @@ pub struct Config {
     pub invite: Invite,
     /// Quand la fin d'une commande est annoncée.
     pub annonce_fin_commande: AnnonceFin,
+    /// Texte sélectionné à la souris copié dans le presse-papiers au relâchement du bouton.
+    pub copie_selection: bool,
     /// Commandes proposées dans « Nouvel onglet avec » (lancées telles quelles).
     pub shells: Vec<ShellDeclare>,
 }
@@ -104,6 +106,7 @@ impl Default for Config {
             shell: String::new(),
             invite: Invite::Starship,
             annonce_fin_commande: AnnonceFin::Longues,
+            copie_selection: true,
             shells: Vec::new(),
         }
     }
@@ -155,7 +158,7 @@ pub(crate) fn lire_toml_avec<T: de::DeserializeOwned>(
 }
 
 const CLES_CONFIG: &str =
-    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue, shell, invite, annonce_fin_commande, shells";
+    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue, shell, invite, annonce_fin_commande, copie_selection, shells";
 
 /// Lit un fichier (ordinaire, taille bornée, UTF-8).
 pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {

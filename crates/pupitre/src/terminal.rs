@@ -250,6 +250,8 @@ pub struct TerminalOnglet {
     lanceur: Rc<RefCell<Lanceur>>,
     flashs: Rc<Cell<u32>>,
     sur_cloche: RappelCloche,
+    /// Réglage `copie_selection` : sélection à la souris copiée dans le presse-papiers.
+    copie_selection: Rc<Cell<bool>>,
     reglages: Option<(gtk::Settings, glib::SignalHandlerId)>,
 }
 
@@ -366,6 +368,32 @@ impl TerminalOnglet {
         });
         terminal.add_controller(clic);
 
+        // Copie à la sélection : au relâchement du bouton gauche, une fois que VTE a fini la
+        // sélection. Pas sur « selection-changed » : la recherche sélectionne aussi ce
+        // qu'elle trouve, et ne doit pas remplacer le presse-papiers.
+        let copie_selection = Rc::new(Cell::new(true));
+        let observateur = gtk::EventControllerLegacy::new();
+        observateur.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let (t, actif) = (terminal.downgrade(), copie_selection.clone());
+        observateur.connect_event(move |_, ev| {
+            let relache = ev.event_type() == gdk::EventType::ButtonRelease
+                && ev
+                    .downcast_ref::<gdk::ButtonEvent>()
+                    .is_some_and(|b| b.button() == 1);
+            if relache && actif.get() {
+                let (t, actif) = (t.clone(), actif.clone());
+                glib::idle_add_local_once(move || {
+                    if let Some(t) = t.upgrade() {
+                        if actif.get() && t.has_selection() {
+                            t.copy_clipboard_format(vte4::Format::Text);
+                        }
+                    }
+                });
+            }
+            glib::Propagation::Proceed
+        });
+        terminal.add_controller(observateur);
+
         // Cloche : flash limité (sauf animations réduites), puis rappel de la fenêtre.
         installer_style();
         let flashs = Rc::new(Cell::new(0u32));
@@ -415,6 +443,7 @@ impl TerminalOnglet {
             lanceur,
             flashs,
             sur_cloche,
+            copie_selection,
             reglages,
         };
         onglet.appliquer(config, theme);
@@ -645,6 +674,7 @@ impl TerminalOnglet {
         );
         t.set_allow_hyperlink(true);
         t.set_audible_bell(false);
+        self.copie_selection.set(config.copie_selection);
     }
 }
 

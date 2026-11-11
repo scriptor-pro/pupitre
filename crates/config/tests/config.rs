@@ -203,6 +203,18 @@ fn defaut_commente_est_valide() {
 }
 
 #[test]
+fn copie_selection_activee_par_defaut_et_desactivable() -> R {
+    assert!(Config::default().copie_selection);
+    let d = tempfile::tempdir()?;
+    let chemin = d.path().join("pupitre.toml");
+    std::fs::write(&chemin, "copie_selection = false\n")?;
+    assert!(!charger(&chemin).map_err(|e| e.message)?.copie_selection);
+    std::fs::write(&chemin, "copie_selection = \"oui\"\n")?;
+    assert_eq!(charger(&chemin).unwrap_err().ligne, Some(1));
+    Ok(())
+}
+
+#[test]
 fn defauts_par_langue_memes_reglages() {
     // Chaque fichier par défaut, quelle que soit sa langue, donne exactement les mêmes clés et
     // valeurs que le français (seuls les commentaires diffèrent).

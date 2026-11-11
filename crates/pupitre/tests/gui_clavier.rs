@@ -75,6 +75,14 @@ fn main() {
     ex.lancer("copier_met_la_selection_dans_le_presse_papiers", || {
         copier(&f)
     });
+    ex.lancer("recherche_laisse_le_presse_papiers", || {
+        recherche_sans_copie(&f)
+    });
+    if x11 {
+        ex.lancer("selection_a_la_souris_copiee", || selection_souris(&f));
+    } else {
+        println!("test selection_a_la_souris_copiee ... ignoré (xdotool : X11 seulement)");
+    }
     ex.lancer("coller_envoie_au_shell", || coller(&f));
     ex.lancer("cloches_rapprochees_limitees", || cloches(&f));
     ex.lancer("lien_non_ouvert_sans_ctrl", || lien(&f));
@@ -290,6 +298,123 @@ fn copier(f: &FenetrePupitre) -> Resultat {
     verifier(contenu.contains("copie-42"), || {
         format!("presse-papiers : {contenu:?}")
     })
+}
+
+/// Contenu texte du presse-papiers (vide si illisible).
+fn lire_presse_papiers(t: &vte4::Terminal) -> String {
+    let lu: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let l = lu.clone();
+    t.clipboard()
+        .read_text_async(gtk::gio::Cancellable::NONE, move |r| {
+            *l.borrow_mut() = Some(r.ok().flatten().map(|s| s.to_string()).unwrap_or_default());
+        });
+    attendre(Duration::from_secs(3), || lu.borrow().is_some());
+    let contenu = lu.borrow().clone().unwrap_or_default();
+    contenu
+}
+
+/// La recherche sélectionne ce qu'elle trouve : cela ne doit pas remplacer le presse-papiers.
+fn recherche_sans_copie(f: &FenetrePupitre) -> Resultat {
+    let o = actif(f);
+    let t = o.terminal().terminal().clone();
+    t.clipboard().set_text("temoin-recherche");
+    verifier(
+        executer(&o, "echo trouvaille-$((3*3))", "trouvaille-9"),
+        || "echo".into(),
+    )?;
+    touche(f, gdk::Key::F, 41, CTRL_MAJ);
+    let entree = f.entree_recherche();
+    entree.set_text("trouvaille-9");
+    entree.emit_by_name::<()>("activate", &[]);
+    let selection = attendre(Duration::from_secs(3), || {
+        if !t.has_selection() {
+            entree.emit_by_name::<()>("activate", &[]);
+        }
+        t.has_selection()
+    });
+    f.fermer_recherche();
+    t.unselect_all();
+    let contenu = lire_presse_papiers(&t);
+    verifier(selection, || "la recherche n'a rien sélectionné".into())?;
+    verifier(contenu == "temoin-recherche", || {
+        format!("presse-papiers remplacé par la recherche : {contenu:?}")
+    })
+}
+
+/// Vrai glisser de la souris sur tout le terminal (xdotool) : avec `copie_selection`, le
+/// texte sélectionné arrive dans le presse-papiers ; sans, le presse-papiers ne change pas.
+fn selection_souris(f: &FenetrePupitre) -> Resultat {
+    let xdotool = |args: &[&str]| {
+        Command::new("xdotool")
+            .args(args)
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let o = actif(f);
+    let t = o.terminal().terminal().clone();
+    verifier(executer(&o, "echo souris-$((8*8))", "souris-64"), || {
+        "echo".into()
+    })?;
+    f.fenetre().present();
+    patienter(Duration::from_millis(300));
+    let racine = t.root().ok_or("terminal sans fenêtre")?;
+    let haut = t
+        .compute_point(&racine, &gtk::graphene::Point::new(2.0, 2.0))
+        .ok_or("position du terminal")?;
+    let bas = t
+        .compute_point(
+            &racine,
+            &gtk::graphene::Point::new(t.width() as f32 - 2.0, t.height() as f32 - 2.0),
+        )
+        .ok_or("position du terminal")?;
+    let glisser = || {
+        let (x0, y0) = (haut.x().round().to_string(), haut.y().round().to_string());
+        let (x1, y1) = (bas.x().round().to_string(), bas.y().round().to_string());
+        let pid = std::process::id().to_string();
+        let fenetre = Command::new("xdotool")
+            .args(["search", "--onlyvisible", "--pid", &pid])
+            .output()
+            .ok()
+            .and_then(|s| String::from_utf8(s.stdout).ok())
+            .and_then(|s| s.lines().next().map(str::to_owned))
+            .unwrap_or_default();
+        xdotool(&["mousemove", "--window", &fenetre, &x0, &y0])
+            && xdotool(&["mousedown", "1"])
+            && xdotool(&["mousemove", "--window", &fenetre, &x1, &y1])
+            && xdotool(&["mouseup", "1"])
+    };
+
+    t.clipboard().set_text("temoin-souris");
+    verifier(glisser(), || "xdotool".into())?;
+    let ok = attendre(Duration::from_secs(3), || {
+        lire_presse_papiers(&t).contains("souris-64")
+    });
+    let contenu = lire_presse_papiers(&t);
+    t.unselect_all();
+    verifier(ok, || format!("sélection non copiée : {contenu:?}"))?;
+
+    o.terminal().appliquer(
+        &Config {
+            copie_selection: false,
+            ..Config::default()
+        },
+        &pupitre_config::theme_sombre(),
+    );
+    t.clipboard().set_text("temoin-souris");
+    let res = (|| {
+        verifier(glisser(), || "xdotool".into())?;
+        patienter(Duration::from_millis(500));
+        let selection = t.has_selection();
+        let contenu = lire_presse_papiers(&t);
+        verifier(selection, || "le glisser n'a rien sélectionné".into())?;
+        verifier(contenu == "temoin-souris", || {
+            format!("copie malgré copie_selection = false : {contenu:?}")
+        })
+    })();
+    t.unselect_all();
+    o.terminal()
+        .appliquer(&Config::default(), &pupitre_config::theme_sombre());
+    res
 }
 
 fn coller(f: &FenetrePupitre) -> Resultat {

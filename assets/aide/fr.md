@@ -129,7 +129,9 @@ Tout Pupitre s'utilise au clavier.
   même s'il contient un retour à la ligne, dans les shells qui le permettent.
 - **Sélection primaire** : sélectionner du texte puis cliquer avec le bouton du milieu le
   colle, comme partout sous Linux.
-- Sélectionner ne copie pas automatiquement dans le presse-papiers.
+- **Copie automatique** : du texte sélectionné à la souris est copié dans le presse-papiers
+  dès que le bouton est relâché ; Ctrl+Maj+V le colle. Pour la désactiver :
+  `copie_selection = false` dans `pupitre.toml`. La recherche ne touche pas au presse-papiers.
 
 ### Liens
 Les adresses web écrites dans le terminal sont reconnues. **Ctrl+clic** les ouvre dans votre
@@ -358,6 +360,7 @@ un message avec le chemin complet du fichier, à ouvrir vous-même.
 | `shell` | `""` (shell de connexion) | nom ou chemin, ex. `"fish"` |
 | `invite` | `"starship"` | `"starship"` ou `"shell"` |
 | `annonce_fin_commande` | `"longues"` | `"longues"`, `"toutes"`, `"aucune"` |
+| `copie_selection` | `true` | `true` ou `false` |
 | `langue` (à venir) | `""` (langue du système) | `"fr"`, `"en"`, `"es"`, `"it"`, `"de"`, `"nl"` ; appliqué au prochain lancement |
 
 Exemple de shells déclarés (le premier élément de `commande` est le programme, sans `-` au

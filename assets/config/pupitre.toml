@@ -47,6 +47,10 @@ invite = "starship"
 #   "aucune"   aucune annonce
 annonce_fin_commande = "longues"
 
+# Copie automatique : le texte sélectionné à la souris est copié dans le presse-papiers
+# dès que le bouton est relâché (Ctrl+Maj+V pour le coller). true (oui) ou false (non).
+copie_selection = true
+
 # Autres programmes proposés dans le menu « Nouvel onglet avec », lancés tels quels.
 # Un bloc [[shells]] par programme : nom affiché, et commande (le premier élément est le
 # programme, sans « - » au début). Exemple :

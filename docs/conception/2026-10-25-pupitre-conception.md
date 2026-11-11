@@ -340,7 +340,7 @@ Bulles via les notifications de GIO (locales). Respect du mode « Ne pas dérang
 | Historique de défilement | 10 000 lignes par onglet, en mémoire uniquement |
 | Recherche dans l'historique | Ctrl+Maj+F, texte simple ou expression régulière |
 | Copier / coller | Ctrl+Maj+C / Ctrl+Maj+V ; sélection primaire (clic du milieu) active |
-| Copie automatique à la sélection | non |
+| Copie automatique à la sélection | oui, au relâchement du bouton de la souris (réglage `copie_selection`, désactivable) ; la recherche ne copie pas [demandé par le porteur, 2026-11-11] |
 | Nouvel onglet / fermer / fenêtre | Ctrl+Maj+T / Ctrl+Maj+W / Ctrl+Maj+N |
 | Connexions SSH | Ctrl+Maj+O |
 | Onglet suivant / précédent | Ctrl+PgSuiv / Ctrl+PgPréc ; Alt+1…9 |
