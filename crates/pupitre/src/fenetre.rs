@@ -1174,9 +1174,14 @@ impl FenetrePupitre {
     }
 
     /// Refait le sous-menu « Nouvel onglet avec » d'après les shells installés et les réglages.
+    /// Inchangé : laissé tel quel (le refaire pendant qu'il est ouvert perd la surbrillance et
+    /// le clic en cours).
     fn rafraichir_shells(&self) {
         let Some(p) = self.pupitre() else { return };
         let entrees = shells::entrees_menu(&p.config.borrow(), &shells::path_courant());
+        if entrees == self.entrees_nouvel_onglet_avec() {
+            return;
+        }
         let m = &self.0.sous_menu_shells;
         m.remove_all();
         for (libelle, cible) in entrees {
