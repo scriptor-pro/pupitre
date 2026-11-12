@@ -519,11 +519,11 @@ impl Pupitre {
     }
 
     /// Envoie une bulle de bureau pour `o`, sauf si l'onglet en a déjà fait partir une il y
-    /// a moins de `INTERVALLE_BULLES`.
-    fn envoyer_bulle(&self, o: &Rc<Onglet>, titre: String, corps: String) {
+    /// a moins de `INTERVALLE_BULLES`. Renvoie `true` si la bulle est partie.
+    fn envoyer_bulle(&self, o: &Rc<Onglet>, titre: String, corps: String) -> bool {
         let maintenant = Instant::now();
         if !bulle_permise(o.derniere_bulle.get(), maintenant) {
-            return;
+            return false;
         }
         o.derniere_bulle.set(Some(maintenant));
         let session = o.terminal.id();
@@ -535,6 +535,7 @@ impl Pupitre {
             titre,
             corps,
         });
+        true
     }
 
     /// Fin d'une commande vue en direct dans `o` : annonce à Orca, indicateur ✓ ou ✗ si
@@ -549,8 +550,17 @@ impl Pupitre {
         if doit_annoncer(mode, duree) && affiche {
             o.annoncer_commande(&texte_annonce(code, duree));
         }
+        // Jamais un seul canal : quand une bulle part, l'indicateur est posé même si la case
+        // `fin_commande_onglet` est à false.
+        let bulle = reglages.fin_commande_bulle
+            && duree.is_some_and(|d| d > SEUIL_BULLE_COMMANDE_MS)
+            && self.aucune_fenetre_active()
+            && self.envoyer_bulle(o, o.titre(), texte_annonce(code, duree));
         // Une notification de programme en attente n'est pas remplacée par ✓ ou ✗.
-        if !affiche && reglages.fin_commande_onglet && o.indicateur() != Indicateur::Signale {
+        if !affiche
+            && (reglages.fin_commande_onglet || bulle)
+            && o.indicateur() != Indicateur::Signale
+        {
             let echec = code.is_some_and(|c| c != 0);
             o.indiquer(
                 if echec {
@@ -561,12 +571,6 @@ impl Pupitre {
                 false,
             );
         }
-        if reglages.fin_commande_bulle
-            && duree.is_some_and(|d| d > SEUIL_BULLE_COMMANDE_MS)
-            && self.aucune_fenetre_active()
-        {
-            self.envoyer_bulle(o, o.titre(), texte_annonce(code, duree));
-        }
     }
 
     /// Notification d'un programme (OSC 9, 777) : ● sur l'onglet, bulle du bureau.
@@ -575,14 +579,14 @@ impl Pupitre {
             return;
         };
         let reglages = self.config.borrow().notifications;
-        if reglages.programme_onglet {
+        let titre = titre
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| o.titre());
+        let bulle = reglages.programme_bulle && self.envoyer_bulle(&o, titre, corps);
+        // Jamais un seul canal : quand une bulle part, l'indicateur est posé même si la case
+        // `programme_onglet` est à false.
+        if reglages.programme_onglet || bulle {
             o.indiquer(Indicateur::Signale, false);
-        }
-        if reglages.programme_bulle {
-            let titre = titre
-                .filter(|t| !t.trim().is_empty())
-                .unwrap_or_else(|| o.titre());
-            self.envoyer_bulle(&o, titre, corps);
         }
     }
 

@@ -65,11 +65,13 @@ copie_selection = true
 # certains, par une bulle du bureau (le mode « Ne pas déranger » du bureau est respecté).
 # Chaque ligne : true (oui) ou false (non).
 [notifications]
-# Commande finie dans un onglet non affiché : ✓ ou ✗ sur l'onglet.
+# Commande finie dans un onglet non affiché : ✓ ou ✗ sur l'onglet. (Si la bulle ci-dessous
+# part, l'indicateur est posé même à false : jamais un seul canal.)
 fin_commande_onglet = true
 # Commande de plus de 10 s finie alors qu'aucune fenêtre de Pupitre n'est active : bulle.
 fin_commande_bulle = true
-# Notification envoyée par un programme (OSC 9 ou 777) : ● sur l'onglet.
+# Notification envoyée par un programme (OSC 9 ou 777) : ● sur l'onglet. (Si la bulle
+# ci-dessous part, le ● est posé même à false : jamais un seul canal.)
 programme_onglet = true
 # La même notification, en bulle du bureau.
 programme_bulle = true

@@ -49,6 +49,15 @@ fn main() {
     ex.lancer("indicateur_efface_a_l_activation", efface_a_l_activation);
     ex.lancer("nom_accessible_avec_indicateur", nom_accessible);
     ex.lancer("notification_programme_point", notification_point);
+    ex.lancer("notification_sans_titre_repli", notification_sans_titre);
+    ex.lancer(
+        "bulle_programme_force_indicateur",
+        bulle_force_indicateur_programme,
+    );
+    ex.lancer(
+        "bulle_commande_force_indicateur",
+        bulle_force_indicateur_commande,
+    );
     ex.lancer("copie_programme_message", copie_message);
     ex.lancer("copie_desactivee", copie_desactivee);
     ex.lancer("notifications_en_rafale_bornees", rafale);
@@ -352,12 +361,10 @@ fn notification_point() -> Resultat {
     b.cacher_premier()?;
     b.fond.notification(1, Some("Compilation"), "terminée");
     b.attendre_indicateur(&b.o, Indicateur::Signale)?;
+    let ok = attendre(DELAI, || !b.bulles.borrow().is_empty());
+    patienter(Duration::from_millis(300));
     let t = b.o.titre_affiche();
     let signale = b.o.signale();
-    // Sans titre : le nom de l'onglet.
-    b.fond.notification(1, None, "autre");
-    let ok = attendre(DELAI, || !b.bulles.borrow().is_empty());
-    let titre = b.o.titre();
     let bulles = b.bulles.borrow().clone();
     b.fermer();
     verifier(t.starts_with("● "), || format!("étiquette « {t} »"))?;
@@ -368,10 +375,71 @@ fn notification_point() -> Resultat {
         u.titre == "Compilation" && u.corps == "terminée" && u.session == 1,
         || format!("bulle : {u:?}"),
     )?;
-    verifier(u.id == "onglet-1", || format!("identifiant : {}", u.id))?;
-    // La seconde (sans titre) est dans l'intervalle : pas de seconde bulle ; son titre
-    // serait celui de l'onglet.
-    verifier(!titre.is_empty(), || "titre vide".into())
+    verifier(u.id == "onglet-1", || format!("identifiant : {}", u.id))
+}
+
+fn notification_sans_titre() -> Resultat {
+    let b = Banc::nouveau(Config::default());
+    b.cacher_premier()?;
+    b.o.renommer(Some("Serveur"));
+    b.fond.notification(1, None, "prêt");
+    let ok = attendre(DELAI, || !b.bulles.borrow().is_empty());
+    patienter(Duration::from_millis(300));
+    // Un titre vide donne le même repli, sur l'autre onglet (intervalle propre à chacun).
+    let autre = b.f.onglets().into_iter().find(|x| !Rc::ptr_eq(x, &b.o));
+    let autre = autre.ok_or("un seul onglet")?;
+    autre.renommer(Some("Autre"));
+    b.fond.notification(2, Some("  "), "fini");
+    let ok2 = attendre(DELAI, || b.bulles.borrow().len() >= 2);
+    let bulles = b.bulles.borrow().clone();
+    b.fermer();
+    verifier(ok && ok2 && bulles.len() == 2, || {
+        format!("bulles : {bulles:?}")
+    })?;
+    verifier(
+        bulles[0].titre == "Serveur" && bulles[0].corps == "prêt",
+        || format!("bulle 1 : {:?}", bulles[0]),
+    )?;
+    verifier(
+        bulles[1].titre == "Autre" && bulles[1].id == "onglet-2",
+        || format!("bulle 2 : {:?}", bulles[1]),
+    )
+}
+
+fn config_bulle_sans_case_onglet() -> Config {
+    Config {
+        notifications: ReglagesNotifications {
+            fin_commande_onglet: false,
+            programme_onglet: false,
+            ..ReglagesNotifications::default()
+        },
+        ..Config::default()
+    }
+}
+
+fn bulle_force_indicateur_programme() -> Resultat {
+    let b = Banc::nouveau(config_bulle_sans_case_onglet());
+    b.cacher_premier()?;
+    b.fond.notification(1, Some("T"), "corps");
+    let ok = attendre(DELAI, || !b.bulles.borrow().is_empty());
+    let r = b.attendre_indicateur(&b.o, Indicateur::Signale);
+    let n = b.bulles.borrow().len();
+    b.fermer();
+    r?;
+    verifier(ok && n == 1, || format!("{n} bulle(s)"))
+}
+
+fn bulle_force_indicateur_commande() -> Resultat {
+    let b = Banc::nouveau(config_bulle_sans_case_onglet());
+    b.cacher_premier()?;
+    pupitre::commandes::forcer_fenetres_inactives(true);
+    b.fond.commande(1, 0, Some(20_000));
+    let ok = attendre(DELAI, || !b.bulles.borrow().is_empty());
+    let r = b.attendre_indicateur(&b.o, Indicateur::Reussi);
+    let n = b.bulles.borrow().len();
+    b.fermer();
+    r?;
+    verifier(ok && n == 1, || format!("{n} bulle(s)"))
 }
 
 fn copie_message() -> Resultat {
@@ -434,7 +502,7 @@ fn rafale() -> Resultat {
     let r = b.synchroniser();
     let duree = debut.elapsed();
     let bulles = b.bulles.borrow().len();
-    // L'interface répond encore : un indicateur s'efface à la frappe.
+    // L'interface répond encore et l'indicateur est posé.
     let signale = b.o.indicateur();
     b.fermer();
     r?;

@@ -196,6 +196,9 @@ par un seul canal : une bulle du bureau est toujours doublée d'un indicateur su
   bulle d'onglet ne se répète pas plus d'une fois toutes les 10 secondes, et le mode « Ne pas
   déranger » du bureau est toujours respecté.
 - Chaque case se règle dans la section `[notifications]` de `pupitre.toml` (voir section 11).
+  Une case d'indicateur (`fin_commande_onglet`, `programme_onglet`) à `false` ne coupe
+  l'indicateur que si aucune bulle ne part : quand une bulle part, l'onglet reçoit toujours son
+  indicateur.
 - **Claude Code** : sur un terminal qu'il ne connaît pas, Claude Code n'envoie de notification
   que si l'on choisit, dans son réglage du canal de notification, `iterm2` ou `ghostty`. Pupitre
   comprend ces deux canaux (OSC 9) ; ce choix se fait dans Claude Code, pas dans Pupitre.
@@ -403,9 +406,9 @@ La section `[notifications]` a six cases, chacune `true` (oui, par défaut) ou `
 
 | Clé | Effet |
 |---|---|
-| `fin_commande_onglet` | ✓ ou ✗ sur l'onglet quand une commande finit dans un onglet non affiché |
+| `fin_commande_onglet` | ✓ ou ✗ sur l'onglet quand une commande finit dans un onglet non affiché (posé aussi, même à `false`, quand une bulle part) |
 | `fin_commande_bulle` | bulle du bureau pour une commande de plus de 10 s finie quand aucune fenêtre n'est active |
-| `programme_onglet` | ● sur l'onglet pour la notification d'un programme |
+| `programme_onglet` | ● sur l'onglet pour la notification d'un programme (posé aussi, même à `false`, quand une bulle part) |
 | `programme_bulle` | bulle du bureau pour la notification d'un programme |
 | `presse_papiers` | accepter (et signaler) les copies demandées par un programme ; à `false`, elles sont refusées |
 | `cloche_onglet` | ● sur l'onglet non affiché où la cloche a sonné |
