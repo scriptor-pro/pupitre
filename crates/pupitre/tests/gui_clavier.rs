@@ -92,6 +92,10 @@ fn main() {
     ex.lancer("bandeau_place_et_texte", || bandeau_place(&p, &f, x11));
     ex.lancer("bandeau_masque", || bandeau_masque(&p, &f));
     ex.lancer("une_annonce_par_changement", || annonce_unique(&p, &f));
+    ex.lancer("pas_d_annonce_sans_disposition_connue", || {
+        pas_d_annonce_au_debut(&p)
+    });
+    ex.lancer("bandeau_dans_chaque_onglet", || bandeau_par_onglet(&p, &f));
     ex.lancer("bandeau_non_focalisable", || {
         bandeau_non_focalisable(&p, &f)
     });
@@ -613,11 +617,18 @@ const EN_US: &str = "English (US)";
 /// qui porte aussi le terminal) ; sous X11 il porte un texte, sans clavier (Weston sans
 /// écran) il est caché sans erreur.
 fn bandeau_place(p: &Rc<Pupitre>, f: &FenetrePupitre, x11: bool) -> Resultat {
-    let b = f.bandeau_clavier();
-    let carnet = f.carnet();
+    let b = f.bandeau_clavier().ok_or("pas d'onglet actif")?;
+    let o = actif(f);
+    let terminal = o.terminal().widget().clone();
+    // Page de l'onglet : le bandeau, puis le terminal ; la page est dans le carnet, dont la
+    // barre d'onglets est au-dessus.
     verifier(
-        carnet.next_sibling().as_ref() == Some(b.upcast_ref()),
-        || "bandeau de disposition pas juste après la barre d'onglets".into(),
+        b.next_sibling().as_ref() == Some(terminal.upcast_ref())
+            && b.prev_sibling().is_none()
+            && b.parent().as_ref() == Some(&o.widget())
+            && o.widget().ancestor(gtk::Notebook::static_type()).as_ref()
+                == Some(f.carnet().upcast_ref()),
+        || "bandeau pas en tête de la page de l'onglet, avant le terminal".into(),
     )?;
     verifier(!b.is_focusable() && !b.can_focus(), || {
         "bandeau focalisable".into()
@@ -658,7 +669,7 @@ fn bandeau_place(p: &Rc<Pupitre>, f: &FenetrePupitre, x11: bool) -> Resultat {
 
 /// Masqué : aucun bandeau, mais le changement est annoncé.
 fn bandeau_masque(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
-    let b = f.bandeau_clavier();
+    let b = f.bandeau_clavier().ok_or("pas d'onglet actif")?;
     let s = p.disposition();
     s.changer_pour_tests(&[FR_DVORAK, EN_US], 0);
     s.definir_mode(BandeauClavier::Masque);
@@ -696,9 +707,10 @@ fn annonce_unique(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
             format!("{} annonces pour un changement", s.annonces().len() - avant)
         })?;
         for fen in [f, &f2] {
-            verifier(fen.bandeau_clavier().label() == EN_US, || {
-                "bandeau d'une fenêtre pas à jour".into()
-            })?;
+            verifier(
+                fen.bandeau_clavier().is_some_and(|b| b.label() == EN_US),
+                || "bandeau d'une fenêtre pas à jour".into(),
+            )?;
         }
         s.changer_pour_tests(&[FR_DVORAK, EN_US], 1);
         s.changer_pour_tests(&[FR_DVORAK, EN_US, "German"], 1);
@@ -715,7 +727,7 @@ fn annonce_unique(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
 /// Ctrl+Tab ne s'arrête jamais sur le bandeau de disposition.
 fn bandeau_non_focalisable(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
     p.disposition().changer_pour_tests(&[FR_DVORAK], 0);
-    let b = f.bandeau_clavier();
+    let b = f.bandeau_clavier().ok_or("pas d'onglet actif")?;
     verifier(b.is_visible(), || "bandeau caché".into())?;
     actif(f).terminal().terminal().grab_focus();
     patienter(Duration::from_millis(100));
@@ -730,4 +742,80 @@ fn bandeau_non_focalisable(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
     }
     actif(f).terminal().terminal().grab_focus();
     Ok(())
+}
+
+/// GDK donne parfois d'abord une liste vide, puis les noms : pas d'annonce tant qu'aucune
+/// disposition n'était connue.
+fn pas_d_annonce_au_debut(p: &Rc<Pupitre>) -> Resultat {
+    let s = p.disposition();
+    s.changer_pour_tests(&[], -1);
+    let avant = s.annonces().len();
+    s.changer_pour_tests(&[FR_DVORAK], 0);
+    verifier(s.annonces().len() == avant, || {
+        "annonce alors qu'aucune disposition n'était connue".into()
+    })?;
+    // Ensuite, un vrai changement est annoncé.
+    s.changer_pour_tests(&[FR_DVORAK, EN_US], 1);
+    verifier(s.annonces().len() == avant + 1, || {
+        "changement suivant non annoncé".into()
+    })?;
+    s.changer_pour_tests(&[FR_DVORAK], 0);
+    Ok(())
+}
+
+/// Chaque onglet a son bandeau : un nouvel onglet porte le texte courant, un onglet
+/// détaché dans une autre fenêtre garde le sien et suit les changements.
+fn bandeau_par_onglet(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
+    let s = p.disposition();
+    s.changer_pour_tests(&[FR_DVORAK, EN_US], 0);
+    let n0 = f.onglets().len();
+    f.ouvrir_session();
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() > n0);
+    verifier(ok, || "pas de deuxième onglet".into())?;
+    let res = (|| {
+        let nouveau = actif(f);
+        let b = nouveau.bandeau_clavier();
+        verifier(b.label() == FR_DVORAK && b.is_visible(), || {
+            format!("bandeau du nouvel onglet : {:?}", b.label())
+        })?;
+        let avant = s.annonces().len();
+        s.changer_pour_tests(&[FR_DVORAK, EN_US], 1);
+        verifier(s.annonces().len() == avant + 1, || {
+            "plusieurs annonces avec plusieurs onglets".into()
+        })?;
+        for o in f.onglets() {
+            verifier(o.bandeau_clavier().label() == EN_US, || {
+                "bandeau d'un onglet pas à jour".into()
+            })?;
+        }
+        // Détacher : l'onglet change de fenêtre avec son bandeau.
+        let id = nouveau.terminal().id();
+        let avant_detache = f.onglets().len();
+        f.detacher_onglet(id);
+        patienter(Duration::from_millis(300));
+        verifier(f.onglets().len() == avant_detache - 1, || {
+            "onglet non détaché".into()
+        })?;
+        s.changer_pour_tests(&[FR_DVORAK, EN_US], 0);
+        verifier(nouveau.bandeau_clavier().label() == FR_DVORAK, || {
+            "bandeau de l'onglet détaché ne suit pas".into()
+        })?;
+        let carnet_detache = nouveau.widget().ancestor(gtk::Notebook::static_type());
+        verifier(
+            carnet_detache.is_some() && carnet_detache.as_ref() != Some(f.carnet().upcast_ref()),
+            || "l'onglet détaché est resté dans la fenêtre d'origine".into(),
+        )?;
+        verifier(
+            f.bandeau_clavier().is_some_and(|b| b.label() == FR_DVORAK),
+            || "bandeau de l'onglet resté ne suit pas".into(),
+        )
+    })();
+    for fen in p.fenetres() {
+        if fen.fenetre() != f.fenetre() {
+            fen.fenetre().close();
+        }
+    }
+    patienter(Duration::from_millis(300));
+    s.changer_pour_tests(&[FR_DVORAK], 0);
+    res
 }

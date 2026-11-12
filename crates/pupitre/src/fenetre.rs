@@ -68,6 +68,10 @@ const TAILLE_DE_SECOURS: i32 = 11;
 /// Un onglet : un terminal et son étiquette (titre ou nom choisi, modifiable sur place).
 pub struct Onglet {
     terminal: TerminalOnglet,
+    /// Page du carnet : le bandeau de disposition du clavier, puis le terminal.
+    page: gtk::Box,
+    /// Bandeau de disposition de cet onglet (suivi par `SuiviDisposition`).
+    disposition: gtk::Label,
     /// Tête d'onglet : l'étiquette, ou la saisie du nom pendant un renommage. Une boîte
     /// et non une GtkStack : GTK 4.18 publie l'enfant caché d'une GtkStack avec une
     /// taille aberrante, et Orca boucle sans fin dessus (revue à plat).
@@ -114,7 +118,12 @@ impl Onglet {
     }
 
     pub fn widget(&self) -> gtk::Widget {
-        self.terminal.widget().clone().upcast()
+        self.page.clone().upcast()
+    }
+
+    /// Bandeau de disposition du clavier, en tête de la page de l'onglet.
+    pub fn bandeau_clavier(&self) -> gtk::Label {
+        self.disposition.clone()
     }
 
     /// Une commande tourne au premier plan dans le shell.
@@ -476,12 +485,12 @@ impl Pupitre {
         p
     }
 
-    /// Remplace l'envoi des bulles de bureau (les tests y comptent les bulles).
     /// Suivi de la disposition du clavier (un seul pour toute l'application).
     pub fn disposition(&self) -> Rc<SuiviDisposition> {
         self.disposition.clone()
     }
 
+    /// Remplace l'envoi des bulles de bureau (les tests y comptent les bulles).
     pub fn remplacer_envoi_bulle(&self, envoi: EnvoiBulle) {
         *self.envoi_bulle.borrow_mut() = envoi;
     }
@@ -900,7 +909,7 @@ impl Pupitre {
         self.onglets
             .borrow()
             .iter()
-            .find(|o| o.terminal.widget().upcast_ref::<gtk::Widget>() == w)
+            .find(|o| o.page.upcast_ref::<gtk::Widget>() == w)
             .cloned()
     }
 
@@ -1282,8 +1291,6 @@ impl Pupitre {
 pub struct FenetreInterne {
     fenetre: gtk::ApplicationWindow,
     carnet: gtk::Notebook,
-    /// Disposition du clavier, sous la barre d'onglets (indicateur seul).
-    disposition: gtk::Label,
     bandeau: Rc<BandeauMessages>,
     recherche: Rc<BarreRecherche>,
     menu: gtk::MenuButton,
@@ -1330,14 +1337,11 @@ impl FenetrePupitre {
         boite.append(bandeau.widget());
         boite.append(recherche.widget());
         boite.append(&carnet);
-        let disposition = pupitre.disposition.creer_bandeau();
-        boite.append(&disposition);
         fenetre.set_child(Some(&boite));
 
         let f = FenetrePupitre(Rc::new(FenetreInterne {
             fenetre,
             carnet,
-            disposition,
             bandeau,
             recherche,
             menu,
@@ -1373,9 +1377,9 @@ impl FenetrePupitre {
         f
     }
 
-    /// Bandeau de disposition du clavier (juste après la barre d'onglets).
-    pub fn bandeau_clavier(&self) -> gtk::Label {
-        self.0.disposition.clone()
+    /// Bandeau de disposition de l'onglet actif (en tête de sa page, sous la barre d'onglets).
+    pub fn bandeau_clavier(&self) -> Option<gtk::Label> {
+        self.onglet_actif().map(|o| o.bandeau_clavier())
     }
 
     /// Carnet d'onglets (barre d'onglets et terminaux).
@@ -2049,8 +2053,14 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
     tete.append(&etiquette);
     tete.append(&entree);
 
+    let disposition = p.disposition.creer_bandeau();
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    page.append(&disposition);
+    page.append(terminal.widget());
     let o = Rc::new(Onglet {
         terminal,
+        page,
+        disposition,
         tete,
         etiquette,
         entree,

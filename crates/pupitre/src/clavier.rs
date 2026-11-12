@@ -85,6 +85,8 @@ pub struct SuiviDisposition {
     etiquettes: RefCell<Vec<glib::WeakRef<gtk::Label>>>,
     /// Une écoute est posée sur un clavier (évite d'en poser deux).
     branche: Cell<bool>,
+    /// Attente de l'arrivée d'un clavier : siège et écoute de `device-added` (une seule).
+    attente: RefCell<Option<(gdk::Seat, glib::SignalHandlerId)>>,
     /// Dernières annonces faites, pour les tests.
     annonces: RefCell<Vec<String>>,
 }
@@ -99,6 +101,7 @@ impl SuiviDisposition {
             actif: Cell::new(-1),
             etiquettes: RefCell::new(Vec::new()),
             branche: Cell::new(false),
+            attente: RefCell::new(None),
             annonces: RefCell::new(Vec::new()),
         });
         s.brancher();
@@ -116,17 +119,25 @@ impl SuiviDisposition {
             return;
         }
         let Some(clavier) = Self::clavier() else {
-            if let Some(siege) = gdk::Display::default().and_then(|d| d.default_seat()) {
-                let faible = Rc::downgrade(self);
-                siege.connect_device_added(move |_, _| {
-                    if let Some(s) = faible.upgrade() {
-                        s.brancher();
-                    }
-                });
+            if self.attente.borrow().is_none() {
+                if let Some(siege) = gdk::Display::default().and_then(|d| d.default_seat()) {
+                    let faible = Rc::downgrade(self);
+                    let id = siege.connect_device_added(move |_, _| {
+                        if let Some(s) = faible.upgrade() {
+                            s.brancher();
+                        }
+                    });
+                    *self.attente.borrow_mut() = Some((siege, id));
+                }
             }
             return;
         };
         self.branche.set(true);
+        // Clavier trouvé : plus besoin d'attendre (l'emprunt est relâché avant la déconnexion).
+        let attente = self.attente.borrow_mut().take();
+        if let Some((siege, id)) = attente {
+            siege.disconnect(id);
+        }
         self.lire(&clavier, false);
         let faible: Weak<Self> = Rc::downgrade(self);
         clavier.connect_layout_names_notify({
@@ -154,14 +165,16 @@ impl SuiviDisposition {
     }
 
     /// Nouvelle disposition : met à jour les bandeaux et annonce le changement réel du nom
-    /// (jamais d'annonce si le nom ne change pas, ni si la disposition est illisible).
+    /// (jamais d'annonce si le nom ne change pas, si la disposition est illisible, ni si
+    /// aucune disposition n'était encore connue : GDK donne parfois une liste vide au
+    /// démarrage, puis les noms).
     fn mettre_a_jour(&self, noms: Vec<String>, actif: i32, annoncer: bool) {
         let avant = texte_disposition(&self.noms.borrow(), self.actif.get(), BandeauClavier::Nom);
         let apres = texte_disposition(&noms, actif, BandeauClavier::Nom);
         *self.noms.borrow_mut() = noms;
         self.actif.set(actif);
         self.rafraichir();
-        if let (true, Some(nom), true) = (annoncer, &apres, apres != avant) {
+        if let (true, true, Some(nom), true) = (annoncer, avant.is_some(), &apres, apres != avant) {
             self.annoncer(nom);
         }
     }

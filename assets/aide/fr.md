@@ -122,7 +122,7 @@ Tout Pupitre s'utilise au clavier.
 - **Orca** lit le texte du terminal, le nom des onglets, les menus, les dialogues et chaque
   message de Pupitre. Quand le focus arrive sur la barre d'onglets, Orca indique aussi les
   onglets qui signalent quelque chose (cloche, commande finie, notification).
-- **Disposition du clavier** : une ligne sous la barre d'onglets indique la disposition en
+- **Disposition du clavier** : une ligne entre la barre d'onglets et le terminal indique la disposition en
   cours (par exemple « French (Dvorak) »). Chaque changement de disposition est annoncé :
   « Disposition du clavier : French (Dvorak) », même si la ligne est masquée. Elle n'est
   pas dans le tour de Ctrl+Tab ; le réglage `bandeau_clavier` choisit le nom complet, un
