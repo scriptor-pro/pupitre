@@ -382,8 +382,12 @@ impl Etat {
                         // Copie ou notification : transmises en direct seulement (jamais
                         // gardées pour la relecture, une reprise ne recopie ni ne renotifie),
                         // dans la même limite de débit que les marques.
-                        Morceau::PressePapiers(_) | Morceau::Notification { .. }
+                        Morceau::Notification { .. }
                             if !s.limite_marques.admettre_evenement(maintenant) => {}
+                        // Une copie compte aussi en octets (budget par seconde) : la file d'un
+                        // client est bornée en messages, pas en octets.
+                        Morceau::PressePapiers(texte)
+                            if !s.limite_marques.admettre_copie(texte.len(), maintenant) => {}
                         Morceau::PressePapiers(texte) => {
                             envoyer_octets(&mut messages, sid, &mut octets);
                             messages.push(ServerMsg::PressePapiers { id: sid, texte });

@@ -24,6 +24,9 @@ pub const PRESSE_PAPIERS_MAX: usize = 1 << 20;
 /// Longueur maximale, en caractères, du titre et du corps d'une notification ; au-delà, le
 /// texte est tronqué et terminé par « … ».
 pub const NOTIFICATION_MAX: usize = 1024;
+/// Octets de texte copié (OSC 52) transmis au plus par seconde et par session : les copies
+/// sont grosses, et la file d'un client est bornée en messages, pas en octets.
+pub const COPIES_OCTETS_PAR_SECONDE: usize = 4 << 20;
 /// Longueur du base64 (avec bourrage) du texte le plus long accepté.
 const BASE64_MAX: usize = PRESSE_PAPIERS_MAX.div_ceil(3) * 4;
 /// Longueur maximale du contenu d'une OSC 52 : `52;`, les cibles (au plus 16), `;`, la charge.
@@ -53,6 +56,8 @@ pub struct LimiteMarques {
     dans_la_lecture: u32,
     debut_fenetre: Option<Instant>,
     dans_la_fenetre: u32,
+    /// Octets de copies transmis dans la fenêtre courante.
+    copies_dans_la_fenetre: usize,
     /// Un `C` a été transmis et son `D` n'est pas encore passé.
     execution_transmise: bool,
 }
@@ -90,16 +95,35 @@ impl LimiteMarques {
         self.compter(maintenant)
     }
 
-    /// Compte un événement dans la lecture et la fenêtre ; faux si l'une des limites est
-    /// atteinte.
-    fn compter(&mut self, maintenant: Instant) -> bool {
+    /// Vrai si une copie de `octets` octets peut être transmise : un événement de plus, et
+    /// au plus [`COPIES_OCTETS_PAR_SECONDE`] octets de copies par seconde.
+    pub fn admettre_copie(&mut self, octets: usize, maintenant: Instant) -> bool {
+        self.rouler_fenetre(maintenant);
+        if self.copies_dans_la_fenetre.saturating_add(octets) > COPIES_OCTETS_PAR_SECONDE
+            || !self.compter(maintenant)
+        {
+            return false;
+        }
+        self.copies_dans_la_fenetre += octets;
+        true
+    }
+
+    /// Ouvre une nouvelle fenêtre d'une seconde si la précédente est finie.
+    fn rouler_fenetre(&mut self, maintenant: Instant) {
         match self.debut_fenetre {
             Some(d) if maintenant.saturating_duration_since(d) < FENETRE => {}
             _ => {
                 self.debut_fenetre = Some(maintenant);
                 self.dans_la_fenetre = 0;
+                self.copies_dans_la_fenetre = 0;
             }
         }
+    }
+
+    /// Compte un événement dans la lecture et la fenêtre ; faux si l'une des limites est
+    /// atteinte.
+    fn compter(&mut self, maintenant: Instant) -> bool {
+        self.rouler_fenetre(maintenant);
         if self.dans_la_lecture >= MARQUES_PAR_LECTURE
             || self.dans_la_fenetre >= MARQUES_PAR_SECONDE
         {
@@ -328,11 +352,16 @@ impl LecteurMarques {
     }
 }
 
-/// Retire les caractères de contrôle, borne la longueur et enlève les blancs de rive.
+/// Caractères de mise en forme bidirectionnelle, qui pourraient faire lire un texte à l'envers.
+fn est_format_bidi(c: char) -> bool {
+    matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Retire les caractères de contrôle et de mise en forme bidirectionnelle, borne la longueur et enlève les blancs de rive.
 fn texte_notification(octets: &[u8]) -> String {
     let texte: String = String::from_utf8_lossy(octets)
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() && !est_format_bidi(*c))
         .collect();
     let texte = texte.trim();
     if texte.chars().count() > NOTIFICATION_MAX {
@@ -344,9 +373,12 @@ fn texte_notification(octets: &[u8]) -> String {
     }
 }
 
-/// `9;<texte>` (iTerm2) ; `9;4;…` est une barre de progression (ConEmu), ignorée.
+/// `9;<texte>` (iTerm2) ; `9;<chiffres>;…` sont les sous-commandes de ConEmu, ignorées.
 fn notification_9(reste: &[u8]) -> Option<Morceau> {
-    if reste == b"4" || reste.starts_with(b"4;") {
+    // Les sous-commandes de ConEmu (`9;4;…` progression, `9;9;chemin`, `9;1;…`) commencent
+    // par des chiffres suivis de `;` (ou finissent là) : pas des notifications.
+    let chiffres = reste.iter().take_while(|o| o.is_ascii_digit()).count();
+    if chiffres > 0 && matches!(reste.get(chiffres), None | Some(&b';')) {
         return None;
     }
     let corps = texte_notification(reste);
@@ -898,6 +930,55 @@ mod tests {
         assert_eq!(corps.chars().count(), NOTIFICATION_MAX + 1);
         assert!(corps.ends_with('…'));
         assert!(corps.starts_with("éé"));
+    }
+
+    #[test]
+    fn copies_limitees_en_octets() {
+        let t0 = Instant::now();
+        let mo = 1 << 20;
+        let mut l = LimiteMarques::new();
+        let mut transmis = 0;
+        for _ in 0..10 {
+            l.nouvelle_lecture();
+            for _ in 0..5 {
+                if l.admettre_copie(mo, t0) {
+                    transmis += mo;
+                }
+            }
+        }
+        assert_eq!(transmis, COPIES_OCTETS_PAR_SECONDE);
+        // Nouvelle seconde : le budget est rendu.
+        l.nouvelle_lecture();
+        assert!(l.admettre_copie(mo, t0 + Duration::from_millis(1100)));
+        // Une petite copie passe tant qu'il reste du budget.
+        let mut l = LimiteMarques::new();
+        assert!(l.admettre_copie(COPIES_OCTETS_PAR_SECONDE - 1, t0));
+        assert!(l.admettre_copie(1, t0));
+        assert!(!l.admettre_copie(1, t0));
+    }
+
+    #[test]
+    fn osc9_sous_commandes_conemu_ignorees() {
+        let entree =
+            b"\x1b]9;9;C:\\tmp\x07\x1b]9;1;500\x07\x1b]9;2;msg\x07\x1b]9;12\x07\x1b]9;10;x\x1b\\";
+        let m = LecteurMarques::new().lire(entree, Instant::now());
+        assert!(evenements_de(&m).is_empty());
+        assert_eq!(octets_de(&m), entree);
+        // Un texte qui commence par un chiffre mais n'est pas une sous-commande reste.
+        let m = LecteurMarques::new().lire(b"\x1b]9;3 fichiers\x07\x1b]9;4x\x07", Instant::now());
+        assert_eq!(
+            evenements_de(&m),
+            vec![notif(None, "3 fichiers"), notif(None, "4x")]
+        );
+    }
+
+    #[test]
+    fn mise_en_forme_bidi_retiree() {
+        let m = LecteurMarques::new().lire(
+            "\x1b]777;notify;a\u{202e}b\u{200f};c\u{2066}d\u{2069}e\u{202a}\u{200e}\x07".as_bytes(),
+            Instant::now(),
+        );
+        assert_eq!(evenements_de(&m), vec![notif(Some("ab"), "cde")]);
     }
 
     #[test]
