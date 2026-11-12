@@ -2186,17 +2186,27 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
 fn police_de_secours(police: &str) -> Option<(String, String)> {
     let demandee = gtk::pango::FontDescription::from_string(police);
     let famille = demandee.family().map(|f| f.to_string()).unwrap_or_default();
-    let contexte = gtk::Label::new(None).pango_context();
-    let connue = !famille.is_empty()
-        && famille.split(',').any(|f| {
-            let f = f.trim();
-            contexte
-                .list_families()
-                .iter()
-                .any(|x| x.name().eq_ignore_ascii_case(f))
-        });
-    if connue {
+    let connue = || {
+        let contexte = gtk::Label::new(None).pango_context();
+        !famille.is_empty()
+            && famille.split(',').any(|f| {
+                let f = f.trim();
+                contexte
+                    .list_families()
+                    .iter()
+                    .any(|x| x.name().eq_ignore_ascii_case(f))
+            })
+    };
+    if connue() {
         return None;
+    }
+    // Une police installée depuis le démarrage n'est pas encore connue : fontconfig est relu
+    // une fois avant de se rabattre sur la police de secours.
+    if !famille.is_empty() {
+        crate::polices::relire_polices();
+        if connue() {
+            return None;
+        }
     }
     let mut secours = gtk::pango::FontDescription::new();
     secours.set_family(POLICE_DE_SECOURS);

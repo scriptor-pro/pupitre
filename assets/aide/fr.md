@@ -470,6 +470,11 @@ appliqué. `pupitre check --theme CHEMIN` fait la même vérification sans ouvri
 - Par défaut : **B612 Mono**, 11 points, fournie avec Pupitre.
 - Aussi fournie : **Atkinson Hyperlegible Mono**, dessinée pour les personnes malvoyantes :
   `police = "Atkinson Hyperlegible Mono 12"`.
+- Également fournies : **IBM Plex Mono** (`police = "IBM Plex Mono 12"`), **Nordwand Mono**
+  (`police = "Nordwand Mono 12"`) et **Ioskeley Mono** (`police = "Ioskeley Mono 12"`), chacune
+  en normal, gras, italique et gras italique, sous licence SIL OFL 1.1.
+- `pupitre polices` liste, une par ligne, les polices à chasse fixe utilisables ; celles qui
+  viennent avec Pupitre sont suivies de « (fournie avec Pupitre) ».
 - Toute police à chasse fixe installée sur votre système peut servir : indiquez son nom et sa
   taille dans `police`, par exemple `police = "Iosevka 13"`. Une police installée pendant que
   Pupitre est ouvert est prise en compte sans redémarrer.
@@ -485,6 +490,7 @@ appliqué. `pupitre check --theme CHEMIN` fait la même vérification sans ouvri
 | `pupitre check --theme CHEMIN` | vérifie un fichier de thème |
 | `pupitre aide`, `pupitre help` | affiche cette aide complète dans le terminal |
 | `pupitre --help`, `pupitre -h` | affiche le résumé des commandes |
+| `pupitre polices` | liste les polices à chasse fixe utilisables, celles fournies avec Pupitre étant marquées |
 | `pupitre shells` | liste les shells installés, leur niveau de prise en charge, et la commande d'installation de ceux qui manquent |
 
 Codes de sortie de `pupitre check` : 0 aucun problème, 1 problème trouvé, 2 commande mal

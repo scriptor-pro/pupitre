@@ -30,6 +30,24 @@ fn main() {
     let perso = isoler_dossiers();
     glib::set_prgname(Some(NOM_APPLI));
     glib::set_application_name(NOM_APPLI);
+    // Police d'essai : un vrai TTF libre du système (DejaVu Sans Mono), repéré avant d'isoler
+    // fontconfig. Pour que Pupitre ne la voie qu'une fois « installée » par le test, ce
+    // processus n'utilise que le dossier de polices de l'utilisateur (vide au départ) et les
+    // polices embarquées.
+    let source_police = chemin_police_libre();
+    let polices_perso = perso.path().join(".local/share/fonts");
+    std::fs::create_dir_all(&polices_perso).unwrap();
+    let conf = perso.path().join("fonts.conf");
+    std::fs::write(
+        &conf,
+        format!(
+            "<?xml version=\"1.0\"?>\n<fontconfig>\n<dir>{}</dir>\n<cachedir>{}</cachedir>\n</fontconfig>\n",
+            polices_perso.display(),
+            perso.path().join(".cache/fontconfig").display()
+        ),
+    )
+    .unwrap();
+    std::env::set_var("FONTCONFIG_FILE", &conf);
     assert!(enregistrer_polices_embarquees(&dossier_polices().unwrap()));
     gtk::init().unwrap();
 
@@ -69,6 +87,9 @@ fn main() {
     });
     ex.lancer("config_invalide_garde_l_ancienne", || invalide(&f, &config));
     ex.lancer("police_inconnue_replie_sur_b612", || police(&f, &config));
+    ex.lancer("nouvelle_police_sans_redemarrer", || {
+        nouvelle_police(&f, &config, &source_police, &polices_perso)
+    });
     ex.lancer("theme_fichier_avec_probleme_applique_et_signale", || {
         theme_fichier(&f, &config, perso.path())
     });
@@ -267,6 +288,56 @@ fn police(f: &FenetrePupitre, config: &Path) -> Resultat {
     });
     verifier(ok.is_some(), || {
         format!("message resté : {:?}", f.messages())
+    })
+}
+
+/// Fichier TTF de DejaVu Sans Mono (libre, très répandue), hors polices embarquées. Rien n'est
+/// téléchargé : le test échoue clairement si le système ne l'a pas.
+fn chemin_police_libre() -> std::path::PathBuf {
+    let o = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", "DejaVu Sans Mono"])
+        .output()
+        .expect("fc-match");
+    let chemin = std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).into_owned());
+    assert!(
+        chemin
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with("DejaVuSansMono")),
+        "DejaVu Sans Mono absente du système ({})",
+        chemin.display()
+    );
+    chemin
+}
+
+/// Une police installée pendant que Pupitre tourne est prise au rechargement : fontconfig est
+/// relu une fois, sans repli sur B612 Mono et sans redémarrer.
+fn nouvelle_police(
+    f: &FenetrePupitre,
+    config: &Path,
+    source: &Path,
+    polices_perso: &Path,
+) -> Resultat {
+    let demande = "police = \"DejaVu Sans Mono 12\"\n";
+    // Avant l'installation : introuvable, repli signalé.
+    ecrire_et_attendre(config, demande, || {
+        f.messages().iter().any(|m| m.contains("DejaVu Sans Mono"))
+    })
+    .ok_or("police absente non signalée avant l'installation")?;
+    let famille = famille_effective(f);
+    verifier(famille == "B612 Mono", || {
+        format!("pas de repli : famille « {famille} »")
+    })?;
+    // Installation, puis rechargement de la configuration : la police est prise, sans repli.
+    std::fs::copy(source, polices_perso.join("DejaVuSansMono.ttf")).unwrap();
+    let ok = ecrire_et_attendre(config, &format!("{demande}# rechargé\n"), || {
+        f.messages().is_empty()
+    });
+    verifier(ok.is_some(), || {
+        format!("police installée non prise : {:?}", f.messages())
+    })?;
+    let famille = famille_effective(f);
+    verifier(famille == "DejaVu Sans Mono", || {
+        format!("famille effective « {famille} »")
     })
 }
 

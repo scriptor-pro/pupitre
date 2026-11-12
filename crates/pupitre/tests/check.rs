@@ -181,3 +181,42 @@ fn resume_des_commandes_avec_help_et_h() {
         assert!(!sortie.contains("Raccourcis clavier"), "{sortie}");
     }
 }
+
+/// `pupitre polices` : une famille par ligne, les polices embarquées marquées, code 0, sans
+/// affichage.
+#[test]
+fn pupitre_polices_liste() {
+    let d = tempfile::tempdir().unwrap();
+    let (code, sortie) = pupitre(d.path(), &["polices"]);
+    assert_eq!(code, 0, "{sortie}");
+    let lignes: Vec<&str> = sortie.lines().collect();
+    for famille in [
+        "B612 Mono",
+        "Atkinson Hyperlegible Mono",
+        "IBM Plex Mono",
+        "Nordwand Mono",
+        "Ioskeley Mono",
+    ] {
+        let voulue = format!("{famille} (fournie avec Pupitre)");
+        assert_eq!(
+            lignes.iter().filter(|l| **l == voulue).count(),
+            1,
+            "« {voulue} » absente ou en double : {sortie}"
+        );
+    }
+    let mut vues = lignes.clone();
+    vues.sort_unstable();
+    vues.dedup();
+    assert_eq!(vues.len(), lignes.len(), "doublons : {sortie}");
+    let mut triees = lignes.clone();
+    triees.sort_by_key(|l| l.to_lowercase());
+    assert_eq!(lignes, triees, "{sortie}");
+}
+
+/// Arguments en trop : refusés comme pour les autres commandes.
+#[test]
+fn pupitre_polices_refuse_un_argument() {
+    let d = tempfile::tempdir().unwrap();
+    let (code, _) = pupitre(d.path(), &["polices", "x"]);
+    assert_eq!(code, 2);
+}

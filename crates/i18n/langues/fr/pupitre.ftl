@@ -248,6 +248,7 @@ theme-illisible = Thème { $chemin } illisible, { $erreur }
 theme-illisible-conserve = Thème { $chemin } illisible, { $erreur } : thème précédent conservé
 theme-contraste-insuffisant = Thème « { $nom } » : contraste insuffisant — { $liste }
 police-introuvable = Police « { $famille } » introuvable : { $secours } utilisée.
+polices-fournie = { $famille } (fournie avec Pupitre)
 
 fermeture-titre = Fermer ?
 fermeture-fenetre-une-commande = Une commande est en cours dans un onglet de cette fenêtre. Fermer quand même ?
@@ -303,6 +304,7 @@ usage =
       pupitre check                  vérifier la configuration et le contraste des thèmes
       pupitre check --theme CHEMIN   vérifier un fichier de thème
       pupitre shells                 lister les shells installés et leur prise en charge
+      pupitre polices                lister les polices à chasse fixe utilisables
       pupitre aide                   afficher l'aide complète (Ctrl+Maj+H dans la fenêtre)
       pupitre --help                 afficher ce résumé
 arguments-incorrects = Arguments incorrects.

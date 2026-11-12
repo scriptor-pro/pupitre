@@ -49,6 +49,14 @@ fn main() -> glib::ExitCode {
             );
             return glib::ExitCode::from(u8::try_from(code).unwrap_or(1));
         }
+        // Familles à chasse fixe, embarquées comprises : celles-ci sont enregistrées d'abord.
+        Some("polices") if args.len() == 1 => {
+            if let Some(d) = dossier_polices() {
+                enregistrer_polices_embarquees(&d);
+            }
+            let code = pupitre::polices::executer_polices(&mut std::io::stdout());
+            return glib::ExitCode::from(u8::try_from(code).unwrap_or(1));
+        }
         // L'aide complète (la même que Ctrl+Maj+H, sans la fenêtre) ; `--help` et `-h` gardent
         // le résumé des commandes, comme tous les programmes.
         Some("aide" | "help") if args.len() == 1 => {

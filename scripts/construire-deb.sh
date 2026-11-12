@@ -88,6 +88,25 @@ License: OFL-1.1
  The Atkinson Hyperlegible Mono font is licensed under the SIL Open Font
  License, Version 1.1. The full text is in
  /usr/share/pupitre/fonts/OFL-AtkinsonHyperlegibleMono.txt.
+
+Files: usr/share/pupitre/fonts/IBMPlexMono-*
+Copyright: 2017 IBM Corp. (https://github.com/IBM/plex)
+License: OFL-1.1
+ The IBM Plex Mono font is licensed under the SIL Open Font License, Version
+ 1.1. The full text is in /usr/share/pupitre/fonts/OFL-IBMPlexMono.txt.
+
+Files: usr/share/pupitre/fonts/NordwandMono-*
+Copyright: 2026 Tanguy VIVIER (https://github.com/tywr/Nordwand-Mono)
+License: OFL-1.1
+ The Nordwand Mono font is licensed under the SIL Open Font License, Version
+ 1.1. The full text is in /usr/share/pupitre/fonts/OFL-NordwandMono.txt.
+
+Files: usr/share/pupitre/fonts/IoskeleyMono-*
+Copyright: 2025 Ahmed Hatem (https://github.com/ahatem/IoskeleyMono)
+ 2015-2026 Renzhi Li (Iosevka, on which Ioskeley Mono is built)
+License: OFL-1.1
+ The Ioskeley Mono font is licensed under the SIL Open Font License, Version
+ 1.1. The full text is in /usr/share/pupitre/fonts/OFL-IoskeleyMono.txt.
 EOF
 DATE="$(date -R -d "@$(git log -1 --format=%ct 2>/dev/null || date +%s)")"
 cat > "$SORTIE/changelog.Debian" <<EOF

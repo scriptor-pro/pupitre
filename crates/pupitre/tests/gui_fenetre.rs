@@ -12,7 +12,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use pupitre::apparence::{suivre_preference_systeme, theme_systeme, Preference};
 use pupitre::client::{connect_or_spawn_at, Client};
-use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
+use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees, polices_chasse_fixe};
 use pupitre::terminal::TerminalOnglet;
 use pupitre_config::{contrast_ratio, theme_clair, theme_sombre, Config, Rgb, Theme};
 use pupitre_proto::{ClientMsg, ServerMsg, SessionId};
@@ -80,6 +80,7 @@ fn main() {
         "police_atkinson_embarquee",
         police_atkinson_embarquee(&banc),
     );
+    lancer("polices_chasse_fixe_vues", polices_chasse_fixe_vues());
     lancer("curseur_fixe_par_defaut", curseur_fixe_par_defaut(&banc));
     lancer(
         "saisie_et_sortie_passent_par_le_fond",
@@ -267,6 +268,30 @@ fn police_atkinson_embarquee(banc: &Banc) -> Resultat {
         Ok(())
     } else {
         Err(format!("police effective « {famille} »"))
+    }
+}
+
+/// Les familles à chasse fixe vues par Pango : triées, sans doublon, avec les cinq embarquées.
+fn polices_chasse_fixe_vues() -> Resultat {
+    let familles = polices_chasse_fixe();
+    for voulue in [
+        "B612 Mono",
+        "Atkinson Hyperlegible Mono",
+        "IBM Plex Mono",
+        "Nordwand Mono",
+        "Ioskeley Mono",
+    ] {
+        if !familles.iter().any(|f| f == voulue) {
+            return Err(format!("« {voulue} » absente de {familles:?}"));
+        }
+    }
+    let mut triees = familles.clone();
+    triees.sort_by_key(|f| f.to_lowercase());
+    triees.dedup();
+    if triees == familles {
+        Ok(())
+    } else {
+        Err(format!("pas triée sans doublon : {familles:?}"))
     }
 }
 
