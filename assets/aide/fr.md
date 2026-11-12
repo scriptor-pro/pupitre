@@ -95,10 +95,10 @@ Touches laissées volontairement aux programmes :
   « Une commande est en cours dans cet onglet. Fermer quand même ? ». « Annuler » est le
   choix par défaut, Échap aussi annule. Fermer une fenêtre pose la même question pour
   l'ensemble de ses onglets.
-- **Shell terminé** : `exit` (ou Ctrl+D) ferme l'onglet ; le dernier onglet ferme la fenêtre.
-  Si le shell s'arrête sur une erreur (`exit 3`, erreur dans `.bashrc`…), l'onglet reste
-  ouvert avec le message « Le shell s'est terminé (code N). Appuyez sur Entrée pour en ouvrir
-  un nouveau. »
+- **Shell terminé** : `exit` (ou Ctrl+D) ferme l'onglet, même après une commande en échec ;
+  le dernier onglet ferme la fenêtre. Si le shell s'arrête avant d'afficher son invite (erreur
+  dans `.bashrc`…) ou s'il est tué, l'onglet reste ouvert avec le message « Le shell s'est
+  terminé (code N). Appuyez sur Entrée pour en ouvrir un nouveau. »
 - **Cloche** : quand un programme fait sonner la cloche, Pupitre ne fait aucun bruit. L'écran
   clignote brièvement (au plus 3 fois par seconde ; remplacé par un simple marqueur si le
   bureau demande de réduire les animations). Dans un onglet caché, le nom de l'onglet reçoit

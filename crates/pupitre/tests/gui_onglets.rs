@@ -66,6 +66,9 @@ fn main() {
         fermeture_occupee(&pupitre, &temoin)
     });
     ex.lancer("exit_ferme_l_onglet", || exit_ferme(&pupitre));
+    ex.lancer("echec_au_demarrage_garde_l_onglet", || {
+        echec_au_demarrage(&pupitre)
+    });
     ex.lancer("onglet_shell_termine_affiche_message", || {
         shell_termine(&pupitre)
     });
@@ -398,7 +401,8 @@ fn fermeture_occupee(p: &Rc<Pupitre>, temoin: &Temoin) -> Resultat {
     verifier(ok, || "la session fermée existe encore".into())
 }
 
-/// Fin normale du shell (`exit`, Ctrl+D) : l'onglet se ferme, les autres restent.
+/// Fin voulue du shell (`exit`, Ctrl+D) : l'onglet se ferme, les autres restent. Après une
+/// commande en échec, `exit` rend le code de cette commande (1) : l'onglet se ferme aussi.
 fn exit_ferme(p: &Rc<Pupitre>) -> Resultat {
     let f = fenetres_visibles(p)[0].clone();
     let avant = f.onglets().len();
@@ -410,6 +414,7 @@ fn exit_ferme(p: &Rc<Pupitre>) -> Resultat {
     verifier(executer(&o, "echo pret-$((1+1))", "pret-2"), || {
         "le shell ne répond pas".into()
     })?;
+    o.terminal().terminal().feed_child(b"false\n");
     o.terminal().terminal().feed_child(b"exit\n");
     let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant);
     verifier(ok, || format!("{} onglet(s) après exit", f.onglets().len()))?;
@@ -418,16 +423,48 @@ fn exit_ferme(p: &Rc<Pupitre>) -> Resultat {
     })
 }
 
-/// Fin sur erreur : l'onglet reste, avec le code et le moyen d'en rouvrir un.
+/// Programme qui échoue avant toute invite (comme un `.bashrc` en erreur) : l'onglet reste,
+/// avec le code, pour que l'utilisateur voie ce qui s'est passé.
+fn echec_au_demarrage(p: &Rc<Pupitre>) -> Resultat {
+    let f = fenetres_visibles(p)[0].clone();
+    let avant = f.onglets().len();
+    f.ouvrir_connexion(
+        vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "echo demarrage-rate; exit 3".into(),
+        ],
+        "essai".into(),
+    );
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant + 1);
+    verifier(ok, || "pas de nouvel onglet".into())?;
+    let o = f.onglet_actif().ok_or("aucun onglet actif")?;
+    let ok = attendre(Duration::from_secs(10), || o.termine());
+    verifier(ok, || "fin du programme non signalée".into())?;
+    patienter(Duration::from_millis(300));
+    verifier(f.onglets().len() == avant + 1, || {
+        "l'onglet d'un programme en échec au démarrage a été fermé".into()
+    })?;
+    verifier(texte(&o).contains("(code 3)"), || {
+        format!("code absent : {:?}", texte(&o))
+    })?;
+    f.executer(Raccourci::FermerOnglet);
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant);
+    verifier(ok, || "onglet de l'essai non refermé".into())
+}
+
+/// Shell tué (signal) : l'onglet reste, avec le message et le moyen d'en rouvrir un.
 fn shell_termine(p: &Rc<Pupitre>) -> Resultat {
     let f = fenetres_visibles(p)[0].clone();
     let o = f.onglet_actif().ok_or("aucun onglet actif")?;
     let ancien = o.terminal().id();
-    o.terminal().terminal().feed_child(b"exit 3\n");
+    o.terminal().terminal().feed_child(b"kill -9 $$\n");
     let ok = attendre(Duration::from_secs(10), || o.termine());
     verifier(ok, || "fin du shell non signalée".into())?;
     let (ok, arbre) = sonder_jusqu_a(NOM_APPLI, Duration::from_secs(10), |a| {
-        a.contains("Le shell s'est terminé (code 3). Appuyez sur Entrée pour en ouvrir un nouveau.")
+        a.contains(
+            "Le shell s'est terminé (code signal). Appuyez sur Entrée pour en ouvrir un nouveau.",
+        )
     });
     verifier(ok, || {
         format!("message absent de l'arbre AT-SPI :\n{arbre}")

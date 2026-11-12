@@ -252,6 +252,9 @@ pub struct TerminalOnglet {
     sur_cloche: RappelCloche,
     /// Réglage `copie_selection` : sélection à la souris copiée dans le presse-papiers.
     copie_selection: Rc<Cell<bool>>,
+    /// Le shell de la session a affiché son invite au moins une fois (marque A reçue) : une
+    /// fin avec un code est alors voulue (`exit`, Ctrl+D), même après une commande en échec.
+    invite_vue: Cell<bool>,
     reglages: Option<(gtk::Settings, glib::SignalHandlerId)>,
 }
 
@@ -458,6 +461,7 @@ impl TerminalOnglet {
             flashs,
             sur_cloche,
             copie_selection,
+            invite_vue: Cell::new(false),
             reglages,
         };
         onglet.appliquer(config, theme);
@@ -521,6 +525,12 @@ impl TerminalOnglet {
     pub fn relier(&self, id: SessionId) {
         self.id.set(id);
         self.muet.set(false);
+        self.invite_vue.set(false);
+    }
+
+    /// Le shell a affiché son invite au moins une fois depuis le lancement de la session.
+    pub fn invite_vue(&self) -> bool {
+        self.invite_vue.get()
     }
 
     /// Coupe (ou rétablit) l'envoi des frappes et des tailles vers la session.
@@ -606,6 +616,9 @@ impl TerminalOnglet {
     /// Marque de commande (OSC 133) reçue du shell, à sa place dans le flux ; `rejouee` :
     /// vue lors d'une reprise (sert à la navigation, jamais annoncée).
     pub fn marque(&self, marque: MarqueCommande, rejouee: bool) {
+        if marque == MarqueCommande::Invite {
+            self.invite_vue.set(true);
+        }
         self.flux.marque(marque, rejouee);
     }
 
@@ -613,6 +626,9 @@ impl TerminalOnglet {
     pub fn rejouer(&self, data: &[u8], marques: &[(u32, MarqueCommande)]) {
         for (marque, octets) in segments_de_rejeu(data, marques) {
             if let Some(m) = marque {
+                if m == MarqueCommande::Invite {
+                    self.invite_vue.set(true);
+                }
                 self.flux.marque(m, true);
             }
             self.flux.octets(octets);
@@ -731,4 +747,37 @@ fn rgba(c: Rgb) -> gdk::RGBA {
         f32::from(c.b) / 255.0,
         1.0,
     )
+}
+
+/// Fin voulue d'une session (l'onglet se ferme) : code 0, ou tout code une fois l'invite
+/// affichée (`exit` après une commande en échec rend le code de cette commande). Un arrêt
+/// avant la première invite (`.bashrc` en erreur, programme sans intégration) ou par un
+/// signal garde l'onglet, avec le code, pour le diagnostic.
+pub fn fin_voulue(code: Option<i32>, invite_vue: bool) -> bool {
+    match code {
+        Some(0) => true,
+        Some(_) => invite_vue,
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fin_voulue_selon_code_et_invite() {
+        assert!(fin_voulue(Some(0), false));
+        assert!(fin_voulue(Some(0), true));
+        assert!(
+            fin_voulue(Some(1), true),
+            "exit après une commande en échec"
+        );
+        assert!(
+            !fin_voulue(Some(3), false),
+            "échec avant la première invite"
+        );
+        assert!(!fin_voulue(None, true), "tué par un signal");
+        assert!(!fin_voulue(None, false));
+    }
 }

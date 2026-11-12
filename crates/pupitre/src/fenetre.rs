@@ -769,9 +769,10 @@ impl Pupitre {
             }
             ServerMsg::Exited { id, code } => {
                 if let Some(o) = self.onglet(id) {
-                    if code == Some(0) {
-                        // Fin voulue (exit, Ctrl+D) : l'onglet se ferme. Sur erreur ou signal,
-                        // il reste, avec le code et le moyen d'ouvrir un nouveau shell.
+                    if crate::terminal::fin_voulue(code, o.terminal.invite_vue()) {
+                        // Fin voulue (exit, Ctrl+D) : l'onglet se ferme. Avant la première
+                        // invite ou par un signal, il reste, avec le code et le moyen d'ouvrir
+                        // un nouveau shell.
                         o.termine.set(true);
                         self.fermer_onglet(&o);
                     } else {
