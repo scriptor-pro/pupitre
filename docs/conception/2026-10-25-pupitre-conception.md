@@ -43,6 +43,9 @@ Le porteur du projet ne code pas : Claude écrit et entretient le code.
   root, titre de fenêtre, annonce Orca), couleurs tirées du thème.
 - Changement de nom envisagé (« a11tty ») : écarté par le porteur le 2026-11-12, le nom reste
   « pupitre ». Le paquet `.deb` est avancé avant les autres fonctions de l'étape 4.
+- Bouton « + » dans la barre de menu, qui ouvre un nouvel onglet au clic : prévu plus tard
+  [demandé par le porteur, 2026-11-12]. Il doublera Ctrl+Maj+T ; nom accessible
+  « Nouvel onglet », atteignable au clavier.
 - Restauration des sessions après redémarrage de l'ordinateur.
 - Ligatures, images (sixel/kitty), emoji composés, protocole clavier kitty, synchronisation de
   l'affichage : absents de VTE (voir §4.2).
