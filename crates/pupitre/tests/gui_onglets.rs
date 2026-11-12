@@ -65,6 +65,7 @@ fn main() {
     ex.lancer("fermeture_occupee_demande_confirmation", || {
         fermeture_occupee(&pupitre, &temoin)
     });
+    ex.lancer("exit_ferme_l_onglet", || exit_ferme(&pupitre));
     ex.lancer("onglet_shell_termine_affiche_message", || {
         shell_termine(&pupitre)
     });
@@ -397,15 +398,36 @@ fn fermeture_occupee(p: &Rc<Pupitre>, temoin: &Temoin) -> Resultat {
     verifier(ok, || "la session fermée existe encore".into())
 }
 
+/// Fin normale du shell (`exit`, Ctrl+D) : l'onglet se ferme, les autres restent.
+fn exit_ferme(p: &Rc<Pupitre>) -> Resultat {
+    let f = fenetres_visibles(p)[0].clone();
+    let avant = f.onglets().len();
+    WidgetExt::activate_action(f.fenetre(), "win.nouvel-onglet", None)
+        .map_err(|e| e.to_string())?;
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant + 1);
+    verifier(ok, || "pas de nouvel onglet".into())?;
+    let o = f.onglet_actif().ok_or("aucun onglet actif")?;
+    verifier(executer(&o, "echo pret-$((1+1))", "pret-2"), || {
+        "le shell ne répond pas".into()
+    })?;
+    o.terminal().terminal().feed_child(b"exit\n");
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant);
+    verifier(ok, || format!("{} onglet(s) après exit", f.onglets().len()))?;
+    verifier(!f.onglets().iter().any(|x| Rc::ptr_eq(x, &o)), || {
+        "l'onglet fermé est encore là".into()
+    })
+}
+
+/// Fin sur erreur : l'onglet reste, avec le code et le moyen d'en rouvrir un.
 fn shell_termine(p: &Rc<Pupitre>) -> Resultat {
     let f = fenetres_visibles(p)[0].clone();
     let o = f.onglet_actif().ok_or("aucun onglet actif")?;
     let ancien = o.terminal().id();
-    o.terminal().terminal().feed_child(b"exit\n");
+    o.terminal().terminal().feed_child(b"exit 3\n");
     let ok = attendre(Duration::from_secs(10), || o.termine());
     verifier(ok, || "fin du shell non signalée".into())?;
     let (ok, arbre) = sonder_jusqu_a(NOM_APPLI, Duration::from_secs(10), |a| {
-        a.contains("Le shell s'est terminé (code 0). Appuyez sur Entrée pour en ouvrir un nouveau.")
+        a.contains("Le shell s'est terminé (code 3). Appuyez sur Entrée pour en ouvrir un nouveau.")
     });
     verifier(ok, || {
         format!("message absent de l'arbre AT-SPI :\n{arbre}")

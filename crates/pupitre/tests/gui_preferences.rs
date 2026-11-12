@@ -156,15 +156,16 @@ fn ouverture_impossible(p: &Rc<Pupitre>) -> Resultat {
     verifier(c.exists(), || "le fichier devrait avoir été créé".into())
 }
 
-/// `$VISUAL` défini : le fichier s'ouvre avec lui dans un nouvel onglet de Pupitre (ici `cat`,
-/// qui affiche le fichier et se termine), nommé d'après le fichier.
+/// `$VISUAL` défini : le fichier s'ouvre avec lui dans un nouvel onglet de Pupitre (ici
+/// `tail -f`, qui affiche le fichier et reste ouvert comme un éditeur : un programme qui se
+/// termine normalement fermerait l'onglet), nommé d'après le fichier.
 fn editeur_terminal(p: &Rc<Pupitre>) -> Resultat {
     let f = premiere_fenetre(p)?;
     let ok = attendre(Duration::from_secs(10), || !f.onglets().is_empty());
     verifier(ok, || "pas d'onglet au démarrage".into())?;
     let avant = f.onglets().len();
     let (visual, editor) = (std::env::var_os("VISUAL"), std::env::var_os("EDITOR"));
-    std::env::set_var("VISUAL", "cat");
+    std::env::set_var("VISUAL", "tail -n 200 -f");
     std::env::remove_var("EDITOR");
     f.ouvrir_preference(FichierPrefs::Configuration);
     for (v, a) in [("VISUAL", visual), ("EDITOR", editor)] {

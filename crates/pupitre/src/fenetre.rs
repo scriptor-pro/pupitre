@@ -769,7 +769,14 @@ impl Pupitre {
             }
             ServerMsg::Exited { id, code } => {
                 if let Some(o) = self.onglet(id) {
-                    o.marquer_termine(code);
+                    if code == Some(0) {
+                        // Fin voulue (exit, Ctrl+D) : l'onglet se ferme. Sur erreur ou signal,
+                        // il reste, avec le code et le moyen d'ouvrir un nouveau shell.
+                        o.termine.set(true);
+                        self.fermer_onglet(&o);
+                    } else {
+                        o.marquer_termine(code);
+                    }
                 }
             }
             ServerMsg::Error(e) if e == CONNEXION_PERDUE => self.connexion_perdue(),

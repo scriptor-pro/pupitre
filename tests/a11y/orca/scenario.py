@@ -434,7 +434,8 @@ def v07_dialogue(s):
 def v08_shell_termine(s):
     s.calme()
     s.marquer()
-    s.commande("exit")
+    # Fin sur erreur : l'onglet reste (un simple « exit » le fermerait).
+    s.commande("exit 3")
     if not s.attendre(r"s.est terminé", 4):
         s.marquer()
         s.touches("KP_Up")  # pavé 8 : lire la ligne courante

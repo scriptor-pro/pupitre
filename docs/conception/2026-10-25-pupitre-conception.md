@@ -140,6 +140,9 @@ sauf la lecture OSC 52 qu'il supprime. Les événements extraits sont transmis *
 - **Onglets** [Décidé] : renommage, réorganisation clavier et souris, détachement dans une nouvelle
   fenêtre, titre annoncé au lecteur d'écran. Indicateurs : ✓ (commande réussie), ✗ (échec),
   ● (activité / notification / cloche), toujours doublés d'un texte accessible.
+- **Fin du shell** : `exit` (code 0) ferme l'onglet, le dernier ferme la fenêtre ; sur erreur
+  ou signal, l'onglet reste avec le code et « Entrée pour en ouvrir un nouveau »
+  [décidé par le porteur, 2026-11-12 ; avant : jamais de fermeture automatique].
 - **Plusieurs fenêtres** : oui. **Panneaux divisés** : non (v1).
 - **Menu « nouveau terminal avec… »** listant les shells détectés.
 - **Bandeau de disposition clavier** [Décidé] : entre la barre d'onglets et la zone de texte ;
