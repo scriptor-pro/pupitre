@@ -36,6 +36,13 @@ Le porteur du projet ne code pas : Claude écrit et entretient le code.
 - Panneaux divisés (*splits*) — tmux suffit.
 - Fenêtre de réglages graphique (prévue plus tard, sur le même fichier de configuration).
 - Assistant IA intégré (local possible plus tard ; en ligne exclu).
+- Indication de mode par onglet (root, SSH, conteneur, saisie masquée, affichage figé) : prévue
+  dans une version ultérieure [demandé par le porteur, 2026-11-11]. Esquisse retenue pour plus
+  tard : détection par le processus de fond (programme au premier plan, OSC 7, titre `root@`),
+  information doublée sur quatre canaux (onglet avec symbole et mot, cadre coloré — rayé pour
+  root, titre de fenêtre, annonce Orca), couleurs tirées du thème.
+- Changement de nom envisagé (« a11tty ») : écarté par le porteur le 2026-11-12, le nom reste
+  « pupitre ». Le paquet `.deb` est avancé avant les autres fonctions de l'étape 4.
 - Restauration des sessions après redémarrage de l'ordinateur.
 - Ligatures, images (sixel/kitty), emoji composés, protocole clavier kitty, synchronisation de
   l'affichage : absents de VTE (voir §4.2).

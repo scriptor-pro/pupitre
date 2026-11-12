@@ -76,6 +76,10 @@ fn main() {
     };
     let banc = Banc::nouveau(&racine);
     lancer("police_b612_utilisee", police_b612_utilisee(&banc));
+    lancer(
+        "police_atkinson_embarquee",
+        police_atkinson_embarquee(&banc),
+    );
     lancer("curseur_fixe_par_defaut", curseur_fixe_par_defaut(&banc));
     lancer(
         "saisie_et_sortie_passent_par_le_fond",
@@ -241,6 +245,25 @@ fn police_b612_utilisee(banc: &Banc) -> Resultat {
         .unwrap_or_default();
     fenetre.destroy();
     if famille == "B612 Mono" {
+        Ok(())
+    } else {
+        Err(format!("police effective « {famille} »"))
+    }
+}
+
+/// Atkinson Hyperlegible Mono, embarquée, est trouvée quand on la demande (dossier personnel vide :
+/// aucune copie installée par l'utilisateur).
+fn police_atkinson_embarquee(banc: &Banc) -> Resultat {
+    let (onglet, fenetre) = banc.ouvrir(&theme_sombre());
+    let demandee = gtk::pango::FontDescription::from_string("Atkinson Hyperlegible Mono 11");
+    let famille = onglet
+        .terminal()
+        .pango_context()
+        .load_font(&demandee)
+        .and_then(|p| p.describe().family().map(|f| f.to_string()))
+        .unwrap_or_default();
+    fenetre.destroy();
+    if famille == "Atkinson Hyperlegible Mono" {
         Ok(())
     } else {
         Err(format!("police effective « {famille} »"))

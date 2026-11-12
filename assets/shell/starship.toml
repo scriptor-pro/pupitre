@@ -6,7 +6,7 @@
 #
 # Ligne 1 : heure, charge sur 1 minute, branche git, état git (Δ modifié, ● indexé, ○ non suivi).
 # Ligne 2 : ⚙⚙⚙ si ENVIRONMENT=prod, ⌁⌁⌁ en SSH, utilisateur@machine, dossier, puis le symbole :
-#   ≠ si ENVIRONMENT=prod, sinon # pour root, » en SSH, λ sinon.
+#   ≠ si ENVIRONMENT=prod, sinon # pour root, » en SSH, λ sinon ; le symbole est suivi d'une espace.
 # Uniquement des noms de couleurs ANSI (le thème du terminal décide des teintes) ; aucune icône
 # Nerd Font. Ce fichier est copié dans ~/.config/pupitre/starship.toml s'il manque : vous pouvez
 # le modifier, Pupitre ne le réécrit jamais.
@@ -20,7 +20,7 @@ format = """
 $time${custom.charge}$git_branch$git_status
 ${custom.marque_prod}${custom.marque_ssh}$username$hostname$directory\
 ${custom.symbole_prod}${custom.symbole_prod_echec}${custom.symbole_root}${custom.symbole_root_echec}\
-${custom.symbole_ssh}${custom.symbole_ssh_echec}${custom.symbole}${custom.symbole_echec}"""
+${custom.symbole_ssh}${custom.symbole_ssh_echec}${custom.symbole}${custom.symbole_echec} """
 
 [time]
 disabled = false

@@ -55,6 +55,7 @@ mod tests {
     fn dossier_des_sources_trouve() {
         let d = dossier_polices().unwrap();
         assert!(d.join("B612Mono-Regular.ttf").is_file());
+        assert!(d.join("AtkinsonHyperlegibleMono-Regular.ttf").is_file());
         assert!(enregistrer_polices_embarquees(&d));
     }
 }

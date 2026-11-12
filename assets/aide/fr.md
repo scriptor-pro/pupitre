@@ -414,6 +414,8 @@ appliqué. `pupitre check --theme CHEMIN` fait la même vérification sans ouvri
 ## 13. Polices
 
 - Par défaut : **B612 Mono**, 11 points, fournie avec Pupitre.
+- Aussi fournie : **Atkinson Hyperlegible Mono**, dessinée pour les personnes malvoyantes :
+  `police = "Atkinson Hyperlegible Mono 12"`.
 - Toute police à chasse fixe installée sur votre système peut servir : indiquez son nom et sa
   taille dans `police`, par exemple `police = "Iosevka 13"`. Une police installée pendant que
   Pupitre est ouvert est prise en compte sans redémarrer.

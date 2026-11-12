@@ -4,7 +4,8 @@
 # En cas d'erreur, Pupitre garde la configuration précédente et indique la ligne fautive.
 # Une ligne qui commence par # est un commentaire. Supprimer une ligne = revenir à la valeur par défaut.
 
-# Police et taille du texte, ex. "B612 Mono 11", "Iosevka 13".
+# Police et taille du texte, ex. "B612 Mono 11", "Atkinson Hyperlegible Mono 12", "Iosevka 13".
+# Fournies avec Pupitre : B612 Mono et Atkinson Hyperlegible Mono.
 # Si la police n'est pas installée, Pupitre revient à B612 Mono (fournie).
 police = "B612 Mono 11"
 
