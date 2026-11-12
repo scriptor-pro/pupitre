@@ -69,6 +69,15 @@ pub fn duree_lisible(duree_ms: u64) -> String {
 
 thread_local! {
     static ACTIVE_FORCEE: Cell<bool> = const { Cell::new(false) };
+    static INACTIVES_FORCEES: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Pour les tests : aucune fenêtre n'est tenue pour active (même si le compositeur en dit
+/// autrement), pour essayer ce que Pupitre fait quand l'utilisateur est ailleurs. Prime sur
+/// `forcer_fenetre_active`. Réservé aux tests.
+#[doc(hidden)]
+pub fn forcer_fenetres_inactives(oui: bool) {
+    INACTIVES_FORCEES.with(|a| a.set(oui));
 }
 
 /// Pour les tests sous un compositeur sans clavier (Weston sans écran), où aucune fenêtre
@@ -80,7 +89,7 @@ pub fn forcer_fenetre_active(oui: bool) {
 
 /// Vrai si la fenêtre `active` l'est vraiment (ou si les tests l'ont forcé).
 pub fn fenetre_active(active: bool) -> bool {
-    active || ACTIVE_FORCEE.with(Cell::get)
+    !INACTIVES_FORCEES.with(Cell::get) && (active || ACTIVE_FORCEE.with(Cell::get))
 }
 
 /// Phrase annoncée à la fin d'une commande.

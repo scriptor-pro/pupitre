@@ -10,6 +10,7 @@ pub mod connexions;
 pub mod demande;
 pub mod fenetre;
 pub mod messages;
+pub mod notifications;
 pub mod polices;
 pub mod preferences;
 pub mod raccourcis;

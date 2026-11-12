@@ -372,3 +372,70 @@ fn valeurs_inconnues_refusees() {
     assert!(e.message.contains("parfois"));
     assert_eq!(erreur("shell = 3\n").ligne, Some(1));
 }
+
+#[test]
+fn notifications_par_defaut() {
+    let n = Config::default().notifications;
+    assert_eq!(
+        n,
+        ReglagesNotifications {
+            fin_commande_onglet: true,
+            fin_commande_bulle: true,
+            programme_onglet: true,
+            programme_bulle: true,
+            presse_papiers: true,
+            cloche_onglet: true,
+        }
+    );
+    // Section absente : mêmes valeurs.
+    let c: Config = toml::from_str("police = \"B612 Mono 11\"\n").unwrap();
+    assert_eq!(c.notifications, n);
+}
+
+#[test]
+fn notifications_lues() -> R {
+    let d = tempfile::tempdir()?;
+    let chemin = d.path().join("pupitre.toml");
+    std::fs::write(
+        &chemin,
+        "[notifications]\nfin_commande_bulle = false\npresse_papiers = false\n",
+    )?;
+    let c = charger(&chemin).map_err(|e| e.message)?;
+    assert_eq!(
+        c.notifications,
+        ReglagesNotifications {
+            fin_commande_bulle: false,
+            presse_papiers: false,
+            ..ReglagesNotifications::default()
+        }
+    );
+    // Les autres réglages ne bougent pas.
+    assert_eq!(
+        Config {
+            notifications: ReglagesNotifications::default(),
+            ..c
+        },
+        Config::default()
+    );
+    std::fs::write(&chemin, "[notifications]\ncloche_onglet = \"non\"\n")?;
+    assert_eq!(charger(&chemin).unwrap_err().ligne, Some(2));
+    Ok(())
+}
+
+#[test]
+fn cle_inconnue_refusee() -> R {
+    let d = tempfile::tempdir()?;
+    let chemin = d.path().join("pupitre.toml");
+    std::fs::write(&chemin, "[notifications]\nbip = true\n")?;
+    let e = charger(&chemin).unwrap_err();
+    assert_eq!(e.ligne, Some(2));
+    assert!(
+        e.message.starts_with("clé inconnue « bip »"),
+        "{}",
+        e.message
+    );
+    // La liste proposée est celle de la section, pas celle du haut du fichier.
+    assert!(e.message.contains("presse_papiers"), "{}", e.message);
+    assert!(!e.message.contains("police"), "{}", e.message);
+    Ok(())
+}

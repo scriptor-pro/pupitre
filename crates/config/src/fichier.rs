@@ -65,6 +65,40 @@ pub struct Config {
     pub copie_selection: bool,
     /// Commandes proposées dans « Nouvel onglet avec » (lancées telles quelles).
     pub shells: Vec<ShellDeclare>,
+    /// Section `[notifications]` : ce qui signale un événement, et par quel canal.
+    pub notifications: ReglagesNotifications,
+}
+
+/// Section `[notifications]` : chaque case est réglable, tout est actif par défaut.
+/// Aucun son, jamais ; une bulle du bureau est toujours doublée d'un indicateur d'onglet.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReglagesNotifications {
+    /// ✓ ou ✗ sur l'onglet quand une commande finit dans un onglet non affiché.
+    pub fin_commande_onglet: bool,
+    /// Bulle du bureau pour une commande longue finie quand aucune fenêtre n'est active.
+    pub fin_commande_bulle: bool,
+    /// ● sur l'onglet quand un programme envoie une notification.
+    pub programme_onglet: bool,
+    /// Bulle du bureau pour la notification d'un programme.
+    pub programme_bulle: bool,
+    /// Copie dans le presse-papiers demandée par un programme (OSC 52), signalée.
+    pub presse_papiers: bool,
+    /// ● sur l'onglet non affiché où la cloche a sonné.
+    pub cloche_onglet: bool,
+}
+
+impl Default for ReglagesNotifications {
+    fn default() -> Self {
+        ReglagesNotifications {
+            fin_commande_onglet: true,
+            fin_commande_bulle: true,
+            programme_onglet: true,
+            programme_bulle: true,
+            presse_papiers: true,
+            cloche_onglet: true,
+        }
+    }
 }
 
 /// Réglage `invite`.
@@ -108,6 +142,7 @@ impl Default for Config {
             annonce_fin_commande: AnnonceFin::Longues,
             copie_selection: true,
             shells: Vec::new(),
+            notifications: ReglagesNotifications::default(),
         }
     }
 }
@@ -158,7 +193,10 @@ pub(crate) fn lire_toml_avec<T: de::DeserializeOwned>(
 }
 
 const CLES_CONFIG: &str =
-    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue, shell, invite, annonce_fin_commande, copie_selection, shells";
+    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue, shell, invite, annonce_fin_commande, copie_selection, shells, notifications";
+
+const CLES_NOTIFICATIONS: &str =
+    "fin_commande_onglet, fin_commande_bulle, programme_onglet, programme_bulle, presse_papiers, cloche_onglet";
 
 /// Lit un fichier (ordinaire, taille bornée, UTF-8).
 pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {
@@ -195,10 +233,28 @@ pub(crate) fn lire_texte(chemin: &Path) -> Result<String, ErreurConfig> {
 
 /// Convertit une erreur toml en erreur française avec numéro de ligne.
 pub(crate) fn erreur_toml(texte: &str, e: &toml::de::Error, cles: &str) -> ErreurConfig {
+    // Une clé inconnue de la section [notifications] cite les clés de cette section.
+    let cles = match e.span() {
+        Some(s) if derniere_section(texte, s.start) == Some("[notifications]") => {
+            CLES_NOTIFICATIONS
+        }
+        _ => cles,
+    };
     ErreurConfig {
         ligne: e.span().map(|s| numero_de_ligne(texte, s.start)),
         message: traduire(e.message().trim(), cles),
     }
+}
+
+/// En-tête de table (`[x]`, sans `[[x]]`) le plus récent avant l'octet `octet`.
+fn derniere_section(texte: &str, octet: usize) -> Option<&str> {
+    let fin = octet.min(texte.len());
+    let avant = texte.get(..fin)?;
+    avant
+        .lines()
+        .map(str::trim)
+        .rfind(|l| l.starts_with('['))
+        .map(|l| l.split('#').next().unwrap_or(l).trim_end())
 }
 
 /// Traduit en français les messages courants de toml/serde ; les autres sont donnés tels quels,

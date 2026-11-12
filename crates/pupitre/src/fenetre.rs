@@ -13,6 +13,9 @@ use crate::demande::{ouvrir_demande, DemandeAffichee};
 use crate::messages::{
     annoncer_focus_une_fois_affiche, refaire_annonce_focus, ActionMessage, BandeauMessages,
 };
+use crate::notifications::{
+    bulle_permise, id_bulle, Bulle, EnvoiBulle, Indicateur, SEUIL_BULLE_COMMANDE_MS,
+};
 use crate::preferences::{FichierPrefs, Lanceur};
 use crate::raccourcis::{raccourci, Raccourci};
 use crate::rechargement::{surveiller, surveiller_fichiers, Surveillance};
@@ -33,7 +36,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use vte4::prelude::*;
 
 /// Grille annoncée pour une session tant que la vraie n'est pas connue.
@@ -41,12 +44,12 @@ const GRILLE_PAR_DEFAUT: (u16, u16) = (80, 24);
 /// Délai avant de provoquer un redessin après la relecture (le temps d'une allocation).
 const DELAI_REDESSIN: Duration = Duration::from_millis(150);
 const GROUPE_ONGLETS: &str = "pupitre-onglets";
-/// Marque d'un onglet où la cloche a sonné (doublée de « , cloche » pour le lecteur d'écran).
-const MARQUE_CLOCHE: &str = "● ";
 /// Délai avant de refaire l'annonce du lancement (voir `reannoncer_au_lancement`).
 const DELAI_REANNONCE: Duration = Duration::from_millis(500);
 /// Durée d'affichage des messages brefs (onglet fermé en arrière-plan, shell disparu).
 const DUREE_MESSAGE_BREF: Duration = Duration::from_secs(5);
+/// Durée du message « Un programme a copié N caractères ».
+const DUREE_MESSAGE_COPIE: Duration = Duration::from_secs(3);
 
 /// Clés des messages persistants (un seul message par clé).
 const CLE_PANNE: &str = "panne";
@@ -78,8 +81,12 @@ pub struct Onglet {
     termine: Cell<bool>,
     /// Rattaché après une reprise : la sortie est ignorée jusqu'à la relecture.
     attend_relecture: Cell<bool>,
-    /// Indicateur ● (cloche dans un onglet non visible).
-    signale: Cell<bool>,
+    /// Indicateur d'onglet : ✓, ✗ ou ● (voir `notifications`).
+    indicateur: Cell<Indicateur>,
+    /// Le ● vient de la cloche (et non d'une notification de programme) : nom « cloche ».
+    par_cloche: Cell<bool>,
+    /// Dernière bulle de bureau envoyée pour cet onglet (au plus une par intervalle).
+    derniere_bulle: Cell<Option<Instant>>,
     /// Dernières annonces de commandes faites au lecteur d'écran (les plus anciennes sont
     /// oubliées).
     annonces: RefCell<VecDeque<String>>,
@@ -146,7 +153,25 @@ impl Onglet {
 
     /// Un événement attend l'attention de l'utilisateur dans cet onglet (●).
     pub fn signale(&self) -> bool {
-        self.signale.get()
+        self.indicateur.get() == Indicateur::Signale
+    }
+
+    /// Indicateur actuellement porté par l'onglet.
+    pub fn indicateur(&self) -> Indicateur {
+        self.indicateur.get()
+    }
+
+    /// Nom accessible de l'onglet, indicateur compris (« titre, commande réussie »…).
+    pub fn nom_accessible(&self) -> String {
+        self.nom_pour(&self.titre())
+    }
+
+    fn nom_pour(&self, titre: &str) -> String {
+        if self.par_cloche.get() {
+            nom_avec_cloche(titre)
+        } else {
+            self.indicateur.get().nom_accessible(titre)
+        }
     }
 
     /// Texte de l'étiquette de l'onglet, indicateur compris.
@@ -200,28 +225,52 @@ impl Onglet {
         });
     }
 
+    /// La cloche a sonné (`true`) ; ou tout indicateur est effacé (`false`).
     fn signaler(&self, oui: bool) {
-        if self.signale.replace(oui) != oui {
+        if oui {
+            self.indiquer(Indicateur::Signale, true);
+        } else {
+            self.indiquer(Indicateur::Aucun, false);
+        }
+    }
+
+    /// Pose l'indicateur de l'onglet (`cloche` : le ● est celui de la cloche).
+    fn indiquer(&self, i: Indicateur, cloche: bool) {
+        let cloche = cloche && i == Indicateur::Signale;
+        let change_i = self.indicateur.replace(i) != i;
+        let change_c = self.par_cloche.replace(cloche) != cloche;
+        if change_i || change_c {
             self.rafraichir_titre();
         }
     }
 
     fn rafraichir_titre(&self) {
         let titre = self.titre();
-        if self.signale.get() {
-            // Le ● est doublé d'un texte pour le lecteur d'écran.
-            self.etiquette.set_text(&format!("{MARQUE_CLOCHE}{titre}"));
-            self.etiquette.set_tooltip_text(Some(&ta(
-                "onglet-infobulle-cloche",
-                &[("titre", ArgI18n::from(titre.as_str()))],
-            )));
+        let indicateur = self.indicateur.get();
+        if indicateur != Indicateur::Aucun {
+            // La marque est doublée d'un texte pour le lecteur d'écran.
+            let nom = self.nom_pour(&titre);
             self.etiquette
-                .update_property(&[gtk::accessible::Property::Label(&nom_avec_cloche(&titre))]);
+                .set_text(&format!("{}{titre}", indicateur.marque()));
+            self.etiquette
+                .set_tooltip_text(Some(&if self.par_cloche.get() {
+                    ta(
+                        "onglet-infobulle-cloche",
+                        &[("titre", ArgI18n::from(titre.as_str()))],
+                    )
+                } else {
+                    indicateur.infobulle(&titre)
+                }));
+            self.etiquette
+                .update_property(&[gtk::accessible::Property::Label(&nom)]);
+            // Relu par `nom_onglet` (description du carnet).
+            self.etiquette.set_widget_name(&nom);
         } else {
             self.etiquette.set_text(&titre);
             self.etiquette.set_tooltip_text(Some(&titre));
             self.etiquette
                 .reset_property(gtk::AccessibleProperty::Label);
+            self.etiquette.set_widget_name("");
         }
         // Le nom accessible de l'onglet suit son étiquette ; le terminal porte le même nom.
         self.terminal
@@ -236,11 +285,7 @@ impl Onglet {
             .parent()
             .filter(|w| w.accessible_role() == gtk::AccessibleRole::Tab)
         {
-            let nom = if self.signale.get() {
-                nom_avec_cloche(&titre)
-            } else {
-                titre.clone()
-            };
+            let nom = self.nom_pour(&titre);
             onglet.update_property(&[gtk::accessible::Property::Label(&nom)]);
         }
         if let Some(c) = self.carnet() {
@@ -348,6 +393,8 @@ pub struct Pupitre {
     garde: RefCell<Option<gio::ApplicationHoldGuard>>,
     /// Avertissements de lancement déjà montrés : un seul par lancement de Pupitre.
     avertis: RefCell<HashSet<String>>,
+    /// Envoi des bulles de bureau (remplaçable par les tests).
+    envoi_bulle: RefCell<EnvoiBulle>,
 }
 
 impl Pupitre {
@@ -376,7 +423,9 @@ impl Pupitre {
             messages_sans_fenetre: RefCell::new(Vec::new()),
             garde: RefCell::new(Some(app.hold())),
             avertis: RefCell::new(HashSet::new()),
+            envoi_bulle: RefCell::new(crate::notifications::envoi_reel(app)),
         });
+        p.installer_action_montrer_onglet();
         p.appliquer_config(Ok(config));
         // Fenêtre fermée (quelle qu'en soit la raison) : retirée de la liste. Le signal
         // `destroy` ne convient pas : il n'arrive qu'à la dernière référence relâchée.
@@ -421,6 +470,144 @@ impl Pupitre {
             }
         }
         p
+    }
+
+    /// Remplace l'envoi des bulles de bureau (les tests y comptent les bulles).
+    pub fn remplacer_envoi_bulle(&self, envoi: EnvoiBulle) {
+        *self.envoi_bulle.borrow_mut() = envoi;
+    }
+
+    /// Action `app.montrer-onglet` (paramètre : numéro de session, `t`) : le clic sur une
+    /// bulle montre la fenêtre et l'onglet.
+    fn installer_action_montrer_onglet(self: &Rc<Self>) {
+        let action = gio::SimpleAction::new("montrer-onglet", Some(glib::VariantTy::UINT64));
+        let faible = Rc::downgrade(self);
+        action.connect_activate(move |_, valeur| {
+            if let (Some(p), Some(id)) = (faible.upgrade(), valeur.and_then(|v| v.get::<u64>())) {
+                p.montrer_onglet(id);
+            }
+        });
+        self.app.add_action(&action);
+    }
+
+    /// Montre l'onglet de la session `id` : sa fenêtre est présentée, l'onglet choisi.
+    /// Une session inconnue (onglet fermé depuis) est sans effet.
+    fn montrer_onglet(&self, id: SessionId) {
+        let Some(o) = self.onglet(id) else { return };
+        let Some(f) = self.fenetre_de_onglet(&o) else {
+            return;
+        };
+        if let Some(n) = f.0.carnet.page_num(&o.widget()) {
+            f.0.carnet.set_current_page(Some(n));
+        }
+        f.fenetre().present();
+        o.terminal.widget().grab_focus();
+    }
+
+    fn fenetre_de_onglet(&self, o: &Rc<Onglet>) -> Option<FenetrePupitre> {
+        self.fenetres()
+            .into_iter()
+            .find(|f| f.onglets().iter().any(|x| Rc::ptr_eq(x, o)))
+    }
+
+    /// Aucune fenêtre de Pupitre n'est active : l'utilisateur est ailleurs.
+    fn aucune_fenetre_active(&self) -> bool {
+        !self
+            .fenetres()
+            .iter()
+            .any(|f| crate::commandes::fenetre_active(f.fenetre().is_active()))
+    }
+
+    /// Envoie une bulle de bureau pour `o`, sauf si l'onglet en a déjà fait partir une il y
+    /// a moins de `INTERVALLE_BULLES`.
+    fn envoyer_bulle(&self, o: &Rc<Onglet>, titre: String, corps: String) {
+        let maintenant = Instant::now();
+        if !bulle_permise(o.derniere_bulle.get(), maintenant) {
+            return;
+        }
+        o.derniere_bulle.set(Some(maintenant));
+        let session = o.terminal.id();
+        // Copié avant l'appel : le rappel ne tient aucun emprunt.
+        let envoi = self.envoi_bulle.borrow().clone();
+        envoi(&Bulle {
+            id: id_bulle(session),
+            session,
+            titre,
+            corps,
+        });
+    }
+
+    /// Fin d'une commande vue en direct dans `o` : annonce à Orca, indicateur ✓ ou ✗ si
+    /// l'onglet n'est pas affiché dans une fenêtre active, bulle si l'utilisateur est parti
+    /// (aucune fenêtre active) et que la commande a duré plus de 10 s.
+    fn fin_commande(&self, o: &Rc<Onglet>, code: Option<i32>, duree: Option<u64>) {
+        let (mode, reglages) = {
+            let c = self.config.borrow();
+            (c.annonce_fin_commande, c.notifications)
+        };
+        let affiche = o.visible_et_actif();
+        if doit_annoncer(mode, duree) && affiche {
+            o.annoncer_commande(&texte_annonce(code, duree));
+        }
+        // Une notification de programme en attente n'est pas remplacée par ✓ ou ✗.
+        if !affiche && reglages.fin_commande_onglet && o.indicateur() != Indicateur::Signale {
+            let echec = code.is_some_and(|c| c != 0);
+            o.indiquer(
+                if echec {
+                    Indicateur::Echec
+                } else {
+                    Indicateur::Reussi
+                },
+                false,
+            );
+        }
+        if reglages.fin_commande_bulle
+            && duree.is_some_and(|d| d > SEUIL_BULLE_COMMANDE_MS)
+            && self.aucune_fenetre_active()
+        {
+            self.envoyer_bulle(o, o.titre(), texte_annonce(code, duree));
+        }
+    }
+
+    /// Notification d'un programme (OSC 9, 777) : ● sur l'onglet, bulle du bureau.
+    fn notification_programme(&self, id: SessionId, titre: Option<String>, corps: String) {
+        let Some(o) = self.onglet(id).filter(|o| !o.attend_relecture.get()) else {
+            return;
+        };
+        let reglages = self.config.borrow().notifications;
+        if reglages.programme_onglet {
+            o.indiquer(Indicateur::Signale, false);
+        }
+        if reglages.programme_bulle {
+            let titre = titre
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or_else(|| o.titre());
+            self.envoyer_bulle(&o, titre, corps);
+        }
+    }
+
+    /// Copie demandée par un programme (OSC 52, écriture) : dans le presse-papiers, et
+    /// toujours signalée dans la fenêtre pendant 3 s (« Un programme a copié N caractères »).
+    fn copie_programme(&self, id: SessionId, texte: &str) {
+        if !self.config.borrow().notifications.presse_papiers || texte.is_empty() {
+            return;
+        }
+        let Some(o) = self.onglet(id).filter(|o| !o.attend_relecture.get()) else {
+            return;
+        };
+        o.terminal.terminal().clipboard().set_text(texte);
+        let n = i64::try_from(texte.chars().count()).unwrap_or(i64::MAX);
+        let message = ta("presse-papiers-copie", &[("n", ArgI18n::Nombre(n))]);
+        // La fenêtre où l'on regarde : l'active, sinon celle de l'onglet.
+        let cible = self
+            .fenetres()
+            .into_iter()
+            .find(|f| crate::commandes::fenetre_active(f.fenetre().is_active()))
+            .or_else(|| self.fenetre_de_onglet(&o))
+            .or_else(|| self.fenetres().into_iter().next());
+        if let Some(f) = cible {
+            f.0.bandeau.afficher(&message, Some(DUREE_MESSAGE_COPIE));
+        }
     }
 
     /// Applique une configuration relue : valide → appliquée à tous les onglets ;
@@ -844,8 +1031,10 @@ impl Pupitre {
                     f.afficher_message(&t);
                 }
             }
-            // Copie OSC 52 et notification de programme : traitées plus tard (étape 4).
-            ServerMsg::PressePapiers { .. } | ServerMsg::Notification { .. } => {}
+            ServerMsg::PressePapiers { id, texte } => self.copie_programme(id, &texte),
+            ServerMsg::Notification { id, titre, corps } => {
+                self.notification_programme(id, titre, corps);
+            }
             ServerMsg::Welcome { .. } | ServerMsg::Sessions(_) | ServerMsg::Reponse { .. } => {}
         }
     }
@@ -1150,6 +1339,16 @@ impl FenetrePupitre {
         crate::raccourcis::installer_raccourcis(&f);
         f.installer_signaux();
         f.reannoncer_au_lancement();
+        // Fenêtre redevenue active : l'onglet affiché perd son indicateur (on le voit).
+        let faible = Rc::downgrade(&f.0);
+        f.0.fenetre.connect_is_active_notify(move |w| {
+            if !w.is_active() {
+                return;
+            }
+            if let Some(o) = FenetrePupitre::depuis_faible(&faible).and_then(|f| f.onglet_actif()) {
+                o.signaler(false);
+            }
+        });
         pupitre.fenetres.borrow_mut().push(f.clone());
         pupitre.garde.borrow_mut().take();
         f
@@ -1831,29 +2030,29 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
         occupe: Cell::new(false),
         termine: Cell::new(false),
         attend_relecture: Cell::new(false),
-        signale: Cell::new(false),
+        indicateur: Cell::new(Indicateur::Aucun),
+        par_cloche: Cell::new(false),
+        derniere_bulle: Cell::new(None),
         annonces: RefCell::new(VecDeque::new()),
         choix: RefCell::new(Choix::Defaut),
     });
 
-    // Fin d'une commande vue en direct : annoncée selon le réglage, seulement si l'onglet
-    // est affiché dans la fenêtre active.
+    // Fin d'une commande vue en direct : annonce, indicateur, bulle (voir `fin_commande`).
     let (faible, pupitre) = (Rc::downgrade(&o), Rc::downgrade(p));
     o.terminal.connecter_fin_commande(move |code, duree| {
-        let (Some(o), Some(p)) = (faible.upgrade(), pupitre.upgrade()) else {
-            return;
-        };
-        let mode = p.config.borrow().annonce_fin_commande;
-        if doit_annoncer(mode, duree) && o.visible_et_actif() {
-            o.annoncer_commande(&texte_annonce(code, duree));
+        if let (Some(o), Some(p)) = (faible.upgrade(), pupitre.upgrade()) {
+            p.fin_commande(&o, code, duree);
         }
     });
 
     // Cloche : ● si l'onglet n'est pas visible, ou si le flash est remplacé (animations
     // réduites). Effacé quand l'onglet devient actif ou à la prochaine frappe.
-    let faible = Rc::downgrade(&o);
+    let (faible, pupitre) = (Rc::downgrade(&o), Rc::downgrade(p));
     o.terminal.connecter_cloche(move || {
-        if let Some(o) = faible.upgrade() {
+        let (Some(o), Some(p)) = (faible.upgrade(), pupitre.upgrade()) else {
+            return;
+        };
+        if p.config.borrow().notifications.cloche_onglet {
             let visible = o
                 .carnet()
                 .is_some_and(|c| c.page_num(&o.widget()) == c.current_page());
@@ -2179,25 +2378,29 @@ pub(crate) fn confirmer_action(
     annuler.grab_focus();
 }
 
-/// Nom d'onglet tel que lu par le lecteur d'écran (« titre » ou « titre, cloche »).
+/// Nom d'onglet tel que lu par le lecteur d'écran (« titre », « titre, cloche », « titre,
+/// commande réussie »…) : celui posé par `Onglet::rafraichir_titre` sur l'étiquette.
 fn nom_onglet(c: &gtk::Notebook, page: &gtk::Widget) -> Option<String> {
-    let (titre, cloche) = titre_onglet(c, page)?;
-    Some(if cloche {
-        nom_avec_cloche(&titre)
+    let etiquette = etiquette_onglet(c, page)?;
+    let nom = etiquette.widget_name();
+    Some(if nom.is_empty() || nom == "GtkLabel" {
+        etiquette.text().to_string()
     } else {
-        titre
+        nom.to_string()
     })
 }
 
-/// Titre d'un onglet et indication de cloche, lus sur son étiquette.
-fn titre_onglet(c: &gtk::Notebook, page: &gtk::Widget) -> Option<(String, bool)> {
+/// Étiquette de la tête d'un onglet.
+fn etiquette_onglet(c: &gtk::Notebook, page: &gtk::Widget) -> Option<gtk::Label> {
     let tete = c.tab_label(page)?.downcast::<gtk::Box>().ok()?;
-    let etiquette = tete.first_child()?.downcast::<gtk::Label>().ok()?;
-    let texte = etiquette.text();
-    Some(match texte.strip_prefix(MARQUE_CLOCHE) {
-        Some(titre) => (titre.to_string(), true),
-        None => (texte.to_string(), false),
-    })
+    tete.first_child()?.downcast::<gtk::Label>().ok()
+}
+
+/// Titre d'un onglet et indicateur qu'il porte, lus sur son étiquette.
+fn titre_onglet(c: &gtk::Notebook, page: &gtk::Widget) -> Option<(String, Indicateur)> {
+    let texte = etiquette_onglet(c, page)?.text();
+    let (indicateur, titre) = Indicateur::separer(&texte);
+    Some((titre.to_string(), indicateur))
 }
 
 /// « titre, cloche » : le nom accessible d'un onglet où la cloche a sonné.
@@ -2211,14 +2414,14 @@ fn titre_fenetre(titre: &str) -> String {
 }
 
 /// Met à jour la description accessible du carnet : « essai, onglet 2 sur 3 », suivie
-/// des autres onglets où la cloche a sonné. Orca la lit quand Ctrl+Tab arrive sur la
+/// des autres onglets qui signalent quelque chose (cloche, commande finie, notification). Orca la lit quand Ctrl+Tab arrive sur la
 /// barre d'onglets, et la relit quand l'onglet change (son nom, lui, n'est pas relu
 /// quand le focus remonte du terminal vers le carnet).
 fn decrire_onglets(c: &gtk::Notebook) {
     let n = c.n_pages();
     let courant = c.current_page();
     let mut texte = String::new();
-    let mut cloches = Vec::new();
+    let mut signales = Vec::new();
     for i in 0..n {
         let Some(page) = c.nth_page(Some(i)) else {
             continue;
@@ -2234,19 +2437,19 @@ fn decrire_onglets(c: &gtk::Notebook) {
                     ("n", ArgI18n::from(i64::from(n))),
                 ],
             );
-        } else if let Some((titre, true)) = titre_onglet(c, &page) {
-            cloches.push(ta(
-                "onglets-autre-cloche",
-                &[("titre", ArgI18n::from(titre)), ("i", numero)],
+        } else if titre_onglet(c, &page).is_some_and(|(_, i)| i != Indicateur::Aucun) {
+            signales.push(ta(
+                "onglets-autre-signale",
+                &[("nom", ArgI18n::from(nom)), ("i", numero)],
             ));
         }
     }
-    if !cloches.is_empty() {
+    if !signales.is_empty() {
         texte = ta(
-            "onglets-cloche-dans",
+            "onglets-signale-dans",
             &[
                 ("texte", ArgI18n::from(texte)),
-                ("liste", ArgI18n::from(cloches.join(", "))),
+                ("liste", ArgI18n::from(signales.join(", "))),
             ],
         );
     }

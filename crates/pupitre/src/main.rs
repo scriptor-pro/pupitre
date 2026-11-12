@@ -74,6 +74,8 @@ fn main() -> glib::ExitCode {
         _ => eprintln!("pupitre: polices embarquées introuvables ; police du système utilisée"),
     }
     glib::set_application_name(&pupitre_i18n::t("fenetre-nom"));
+    // Nom de programme affiché par le bureau sur les bulles de notification.
+    glib::set_prgname(Some("pupitre"));
     let app = gtk::Application::builder()
         .application_id(ID_APPLICATION)
         .build();

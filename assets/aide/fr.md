@@ -121,7 +121,7 @@ Tout Pupitre s'utilise au clavier.
   l'autre, Échap ferme la fenêtre. `pupitre aide` affiche la même aide dans le terminal.
 - **Orca** lit le texte du terminal, le nom des onglets, les menus, les dialogues et chaque
   message de Pupitre. Quand le focus arrive sur la barre d'onglets, Orca indique aussi les
-  onglets où la cloche a sonné.
+  onglets qui signalent quelque chose (cloche, commande finie, notification).
 - **Dialogues** : Échap annule toujours ; le bouton par défaut est le choix sans risque.
 - **Focus visible** : l'élément actif est toujours encadré.
 - Les informations ne passent jamais par un seul canal : une couleur ou un symbole est
@@ -174,6 +174,31 @@ message est lu par Orca dès son apparition.
   problème soit corrigé, ou jusqu'à ce que vous le fermiez avec son bouton « Fermer ce
   message ».
 - Pour y accéder au clavier : Ctrl+Tab depuis le terminal.
+
+### Notifications : onglets, bulles du bureau, copies
+
+Pupitre ne fait jamais de bruit. Chaque événement est signalé par un texte lu par Orca, jamais
+par un seul canal : une bulle du bureau est toujours doublée d'un indicateur sur l'onglet.
+
+- **Commande finie** dans un onglet caché (ou dans une fenêtre qui n'est pas active) : l'onglet
+  reçoit ✓ (commande réussie) ou ✗ (commande en échec). Orca lit le nom de l'onglet suivi de
+  « , commande réussie » ou « , commande en échec ». Si aucune fenêtre de Pupitre n'est
+  active et que la commande a duré plus de 10 secondes, une bulle du bureau s'y ajoute.
+- **Notification d'un programme** (séquences OSC 9 et OSC 777, utilisées par certains outils) :
+  l'onglet reçoit ● (« , notification » pour Orca) et une bulle du bureau est envoyée, avec le
+  titre donné par le programme, sinon le nom de l'onglet. Cliquer sur la bulle montre la
+  fenêtre et l'onglet.
+- **Cloche** : ● sur l'onglet caché, sans bulle.
+- **Copie par un programme** (séquence OSC 52) : le texte est mis dans le presse-papiers et le
+  bandeau annonce, pendant 3 secondes, « Un programme a copié N caractères. » La lecture du
+  presse-papiers par un programme n'est jamais permise.
+- Un indicateur disparaît quand l'onglet devient actif (ou à la frappe suivante). Une même
+  bulle d'onglet ne se répète pas plus d'une fois toutes les 10 secondes, et le mode « Ne pas
+  déranger » du bureau est toujours respecté.
+- Chaque case se règle dans la section `[notifications]` de `pupitre.toml` (voir section 11).
+- **Claude Code** : sur un terminal qu'il ne connaît pas, Claude Code n'envoie de notification
+  que si l'on choisit, dans son réglage du canal de notification, `iterm2` ou `ghostty`. Pupitre
+  comprend ces deux canaux (OSC 9) ; ce choix se fait dans Claude Code, pas dans Pupitre.
 
 ## 8. Connexions SSH, phrases de passe et trousseau
 
@@ -371,7 +396,19 @@ un message avec le chemin complet du fichier, à ouvrir vous-même.
 | `invite` | `"starship"` | `"starship"` ou `"shell"` |
 | `annonce_fin_commande` | `"longues"` | `"longues"`, `"toutes"`, `"aucune"` |
 | `copie_selection` | `true` | `true` ou `false` |
+| `[notifications]` | tout à `true` | voir ci-dessous |
 | `langue` (à venir) | `""` (langue du système) | `"fr"`, `"en"`, `"es"`, `"it"`, `"de"`, `"nl"` ; appliqué au prochain lancement |
+
+La section `[notifications]` a six cases, chacune `true` (oui, par défaut) ou `false` (non) :
+
+| Clé | Effet |
+|---|---|
+| `fin_commande_onglet` | ✓ ou ✗ sur l'onglet quand une commande finit dans un onglet non affiché |
+| `fin_commande_bulle` | bulle du bureau pour une commande de plus de 10 s finie quand aucune fenêtre n'est active |
+| `programme_onglet` | ● sur l'onglet pour la notification d'un programme |
+| `programme_bulle` | bulle du bureau pour la notification d'un programme |
+| `presse_papiers` | accepter (et signaler) les copies demandées par un programme ; à `false`, elles sont refusées |
+| `cloche_onglet` | ● sur l'onglet non affiché où la cloche a sonné |
 
 Exemple de shells déclarés (le premier élément de `commande` est le programme, sans `-` au
 début) :
@@ -485,13 +522,8 @@ l'enregistrement ne laisse jamais un fichier à moitié écrit.
 
 ## 18. Prévu plus tard
 
-- Coche ✓ ou ✗ sur l'onglet et notification du bureau quand une commande se termine dans un
-  onglet caché.
 - Bandeau indiquant la disposition du clavier, avec annonce de chaque changement.
 - Thèmes à contraste élevé (7:1), sombre et clair.
-- Copie dans le presse-papiers par un programme (avec message « Un programme a copié N
-  caractères »).
-- Notifications envoyées par les programmes.
 - Raccourcis modifiables.
 - Fenêtre de réglages (police, taille, thème, shell, invite, annonces), accessible au
   clavier et avec Orca.

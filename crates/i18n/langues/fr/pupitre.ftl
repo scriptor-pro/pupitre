@@ -207,12 +207,24 @@ fenetre-titre = { $titre } — Pupitre
 onglet-titre-defaut = Terminal
 onglet-infobulle-cloche = { $titre } (cloche)
 onglet-nom-cloche = { $titre }, cloche
+onglet-infobulle-reussi = { $titre } (commande réussie)
+onglet-nom-reussi = { $titre }, commande réussie
+onglet-infobulle-echec = { $titre } (commande en échec)
+onglet-nom-echec = { $titre }, commande en échec
+onglet-infobulle-notification = { $titre } (notification)
+onglet-nom-notification = { $titre }, notification
 onglet-nom = Nom de l'onglet
 onglet-nom-aide = Nom de l'onglet (vide : titre automatique)
 onglets-nom = Onglets
 onglets-position = { $nom }, onglet { $i } sur { $n }
-onglets-autre-cloche = { $titre } (onglet { $i })
-onglets-cloche-dans = { $texte } ; cloche dans : { $liste }
+onglets-autre-signale = { $nom } (onglet { $i })
+onglets-signale-dans = { $texte } ; à voir dans : { $liste }
+
+presse-papiers-copie =
+    { $n ->
+        [one] Un programme a copié { $n } caractère.
+       *[other] Un programme a copié { $n } caractères.
+    }
 
 shell-termine = Le shell s'est terminé (code { $code }). Appuyez sur Entrée pour en ouvrir un nouveau.
 shell-termine-signal = Le shell s'est terminé (code signal). Appuyez sur Entrée pour en ouvrir un nouveau.

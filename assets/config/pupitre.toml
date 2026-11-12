@@ -59,3 +59,22 @@ copie_selection = true
 # [[shells]]
 # nom = "Serveur"
 # commande = ["ssh", "serveur"]
+
+# Notifications. Pupitre ne fait jamais de bruit ; chaque événement est signalé sur l'onglet
+# (✓ commande réussie, ✗ commande en échec, ● notification d'un programme ou cloche) et, pour
+# certains, par une bulle du bureau (le mode « Ne pas déranger » du bureau est respecté).
+# Chaque ligne : true (oui) ou false (non).
+[notifications]
+# Commande finie dans un onglet non affiché : ✓ ou ✗ sur l'onglet.
+fin_commande_onglet = true
+# Commande de plus de 10 s finie alors qu'aucune fenêtre de Pupitre n'est active : bulle.
+fin_commande_bulle = true
+# Notification envoyée par un programme (OSC 9 ou 777) : ● sur l'onglet.
+programme_onglet = true
+# La même notification, en bulle du bureau.
+programme_bulle = true
+# Un programme copie dans le presse-papiers (OSC 52) : accepté et signalé par un message.
+# À false, ces copies sont refusées.
+presse_papiers = true
+# La cloche sonne dans un onglet non affiché : ● sur l'onglet.
+cloche_onglet = true
