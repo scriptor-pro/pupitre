@@ -598,10 +598,12 @@ impl Pupitre {
             return;
         }
         let (cols, rows) = onglet.terminal.grille().unwrap_or(GRILLE_PAR_DEFAUT);
-        self.attentes
-            .borrow_mut()
-            .push_back(Attente::Remplacer(Rc::downgrade(onglet)));
-        self.ouvrir_session(&Choix::Defaut, cols, rows);
+        self.ouvrir_session(
+            &Choix::Defaut,
+            cols,
+            rows,
+            Attente::Remplacer(Rc::downgrade(onglet)),
+        );
     }
 
     fn connecter(self: &Rc<Self>) -> Result<(), String> {
@@ -614,6 +616,8 @@ impl Pupitre {
             (client.version() < 2).then(|| tr("fond-ancien")),
         );
         *self.client.borrow_mut() = Some(Rc::new(client));
+        // Les réponses attendues de l'ancienne connexion n'arriveront plus.
+        self.attentes.borrow_mut().clear();
         let faible = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             while let Ok(m) = recus.recv().await {
@@ -630,9 +634,12 @@ impl Pupitre {
     /// Demande l'ouverture d'une session pour `choix` : shell, intégration et variables
     /// viennent de [`shells::preparer`]. Un avertissement (shell ou Starship introuvable…) est
     /// montré une seule fois par lancement de Pupitre, dans le bandeau de messages.
-    fn ouvrir_session(&self, choix: &Choix, cols: u16, rows: u16) {
+    /// `attente` n'est mise en file que si la demande part : sans processus de fond, rien ne
+    /// doit rester en attente (le `Opened` suivant serait apparié à une demande périmée).
+    /// Faux si la demande n'a pas pu partir.
+    fn ouvrir_session(&self, choix: &Choix, cols: u16, rows: u16, attente: Attente) -> bool {
         if self.client.borrow().is_none() {
-            return;
+            return false;
         }
         let lancement = shells::preparer(choix, &self.config.borrow(), &shells::path_courant());
         if let Some(a) = lancement.avertissement {
@@ -640,10 +647,16 @@ impl Pupitre {
                 self.poser_message(&format!("lancement:{a}"), Some(a));
             }
         }
-        if let Some(c) = self.client.borrow().as_ref() {
-            // Échec = connexion perdue, signalée par ailleurs sur le canal.
-            let _ = c.ouvrir(Some(lancement.argv), None, cols, rows, lancement.env);
+        self.attentes.borrow_mut().push_back(attente);
+        let envoye = self.client.borrow().as_ref().is_some_and(|c| {
+            c.ouvrir(Some(lancement.argv), None, cols, rows, lancement.env)
+                .is_ok()
+        });
+        if !envoye {
+            // Connexion perdue (signalée par ailleurs sur le canal) : pas de réponse à attendre.
+            self.attentes.borrow_mut().pop_back();
         }
+        envoye
     }
 
     fn envoyer(&self, m: ClientMsg) {
@@ -1254,18 +1267,22 @@ impl FenetrePupitre {
         self.ouvrir(&Choix::Commande(argv), Some(titre));
     }
 
-    fn ouvrir(&self, choix: &Choix, titre: Option<String>) {
-        let Some(p) = self.pupitre() else { return };
+    /// Faux si rien n'a pu être demandé (processus de fond arrêté) : la panne est alors
+    /// réaffichée et réannoncée, avec son bouton « Ouvrir un nouveau terminal ».
+    fn ouvrir(&self, choix: &Choix, titre: Option<String>) -> bool {
+        let Some(p) = self.pupitre() else {
+            return false;
+        };
         let (cols, rows) = self
             .onglet_actif()
             .and_then(|o| o.terminal.grille())
             .unwrap_or(GRILLE_PAR_DEFAUT);
-        p.attentes.borrow_mut().push_back(Attente::NouvelOnglet(
-            Rc::downgrade(&self.0),
-            titre,
-            choix.clone(),
-        ));
-        p.ouvrir_session(choix, cols, rows);
+        let attente = Attente::NouvelOnglet(Rc::downgrade(&self.0), titre, choix.clone());
+        let demande = p.ouvrir_session(choix, cols, rows, attente);
+        if !demande {
+            self.signaler_panne(&tr("fond-arrete"));
+        }
+        demande
     }
 
     /// Déplace l'onglet de la session `id` dans une nouvelle fenêtre (s'il n'est pas seul).
@@ -1332,8 +1349,11 @@ impl FenetrePupitre {
             };
             editeur.push(chemin.to_string_lossy().into_owned());
             let titre = chemin.file_name().map(|n| n.to_string_lossy().into_owned());
-            FenetrePupitre(f).ouvrir(&Choix::Commande(editeur), titre);
-            fin(Ok(()))
+            if FenetrePupitre(f).ouvrir(&Choix::Commande(editeur), titre) {
+                fin(Ok(()))
+            } else {
+                fin(Err("processus de fond arrêté".into()))
+            }
         })
     }
 

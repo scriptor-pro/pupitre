@@ -575,6 +575,13 @@ fn connexion_perdue(p: &Rc<Pupitre>, socket: &Path) -> Resultat {
     verifier(ok, || {
         format!("message absent de l'arbre AT-SPI :\n{arbre}")
     })?;
+    // Demandes faites pendant la panne : rien ne doit rester en attente pour la suite.
+    f.ouvrir_connexion(
+        vec!["/bin/sh".into(), "-c".into(), "sleep 20".into()],
+        "orpheline".into(),
+    );
+    WidgetExt::activate_action(f.fenetre(), "win.nouvel-onglet", None)
+        .map_err(|e| e.to_string())?;
     f.activer_message();
     let ok = attendre(Duration::from_secs(10), || {
         f.message().is_none() && f.onglets().len() == 1 && f.onglets().iter().all(|o| !o.termine())
@@ -587,8 +594,22 @@ fn connexion_perdue(p: &Rc<Pupitre>, socket: &Path) -> Resultat {
         )
     })?;
     let o = f.onglets()[0].clone();
+    verifier(o.titre() != "orpheline", || {
+        "le nouveau terminal a reçu une demande faite pendant la panne".into()
+    })?;
     verifier(executer(&o, "echo neuf-$((4+4))", "neuf-8"), || {
         "le nouveau terminal ne répond pas".into()
+    })?;
+    WidgetExt::activate_action(f.fenetre(), "win.nouvel-onglet", None)
+        .map_err(|e| e.to_string())?;
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == 2);
+    patienter(Duration::from_millis(500));
+    verifier(ok && f.onglets().len() == 2, || {
+        format!("{} onglet(s) après Ctrl+Maj+T", f.onglets().len())
+    })?;
+    let n = f.onglet_actif().ok_or("aucun onglet actif")?;
+    verifier(n.titre() != "orpheline", || {
+        "le nouvel onglet a reçu une demande faite pendant la panne".into()
     })
 }
 
