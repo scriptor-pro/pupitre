@@ -80,7 +80,9 @@ Touches laissées volontairement aux programmes :
 
 ## 3. Onglets et fenêtres
 
-- **Ouvrir** : Ctrl+Maj+T ou menu ▸ « Nouvel onglet ».
+- **Ouvrir** : Ctrl+Maj+T ou menu ▸ « Nouvel onglet ». Le nouvel onglet reprend le shell de
+  l'onglet actif (fish depuis un onglet fish) ; depuis une connexion SSH, ou dans une nouvelle
+  fenêtre, il ouvre le shell des réglages.
 - **Ouvrir avec un autre shell** : menu ▸ « Nouvel onglet avec », puis le shell voulu (voir la
   section 9).
 - **Renommer** : double-clic sur le nom de l'onglet, ou clic droit ▸ « Renommer l'onglet »,
@@ -340,7 +342,9 @@ pour chaque réglage. Il se modifie avec n'importe quel éditeur de texte.
 
 **Menu ▸ Préférences** ouvre directement les fichiers dans votre éditeur de texte :
 « Modifier la configuration… » (`pupitre.toml`), « Modifier l'invite… » (`starship.toml`),
-« Modifier les connexions… » (`connexions.toml`). Un fichier absent est d'abord créé, avec des
+« Modifier les connexions… » (`connexions.toml`). Si aucune application n'est associée aux
+fichiers `.toml` sur votre système, Pupitre prend votre éditeur de texte par défaut (celui des
+fichiers `.txt`), sans vous demander lequel utiliser. Un fichier absent est d'abord créé, avec des
 commentaires en français ; un fichier existant n'est jamais modifié. Pupitre annonce « Les
 modifications s'appliquent dès l'enregistrement ». Si aucun éditeur ne s'ouvre, Pupitre affiche
 un message avec le chemin complet du fichier, à ouvrir vous-même.

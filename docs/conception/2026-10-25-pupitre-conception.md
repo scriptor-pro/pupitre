@@ -154,6 +154,9 @@ sauf la lecture OSC 52 qu'il supprime. Les événements extraits sont transmis *
   ; pour un shell absent, Pupitre **affiche la commande d'installation** adaptée à la distribution
   (`apt install fish`…), sans rien exécuter ni télécharger lui-même.
 - **Shell par défaut** : le shell de connexion de l'utilisateur ; modifiable.
+- **Nouvel onglet** (Ctrl+Maj+T) : reprend le shell de l'onglet actif ; depuis une connexion SSH,
+  une session reprise après plantage de l'interface ou une nouvelle fenêtre : shell par défaut
+  [décidé par le porteur, 2026-11-12].
 - **Niveaux de prise en charge** :
   1. *Complet* — bash, zsh, fish, nushell : invite Starship, intégration (OSC 133 et dossier
      courant), couleurs de Pupitre ; testés à chaque version.

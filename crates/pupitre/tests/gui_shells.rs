@@ -11,6 +11,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use pupitre::fenetre::{FenetrePupitre, Onglet, Pupitre};
 use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
+use pupitre::raccourcis::Raccourci;
 use pupitre::shells::{path_courant, shells_proposes};
 use pupitre_config::{Config, Invite, ShellDeclare};
 use std::rc::Rc;
@@ -47,6 +48,10 @@ fn main() {
     let mut ex = Executeur::new();
     ex.lancer("menu_nouvel_onglet_avec", || menu(&pupitre));
     ex.lancer("onglet_ouvert_avec_le_shell_choisi", || choisi(&pupitre));
+    ex.lancer("nouvel_onglet_reprend_le_shell_actif", || reprend(&pupitre));
+    ex.lancer("nouvel_onglet_apres_connexion_shell_par_defaut", || {
+        apres_connexion(&pupitre)
+    });
     ex.lancer("shell_declare_lance_tel_quel", || declare(&pupitre));
     ex.lancer("integration_transmise_au_shell", || integration(&pupitre));
     ex.lancer("shell_configure_absent_message", || absent(&pupitre));
@@ -158,6 +163,54 @@ fn choisi(p: &Rc<Pupitre>) -> Resultat {
     )
 }
 
+/// Ctrl+Maj+T depuis l'onglet sh (ouvert par `choisi`) : le nouvel onglet est aussi sh.
+fn reprend(p: &Rc<Pupitre>) -> Resultat {
+    let f = premiere_fenetre(p).ok_or("pas de fenêtre")?;
+    let o = ouvrir(&f, "win.nouvel-onglet", None)?;
+    verifier(
+        executer(&o, "echo \"[$(ps -p $$ -o comm=)]\"", "[sh]"),
+        || {
+            format!(
+                "le shell de l'onglet actif n'est pas repris : {:?}",
+                texte(&o)
+            )
+        },
+    )
+}
+
+/// Une connexion n'est pas un shell : un nouvel onglet ouvert depuis elle prend le shell
+/// des réglages.
+fn apres_connexion(p: &Rc<Pupitre>) -> Resultat {
+    p.appliquer_config(Ok(reglages("bash", declares())));
+    let f = premiere_fenetre(p).ok_or("pas de fenêtre")?;
+    let avant = f.onglets().len();
+    f.ouvrir_connexion(
+        vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "echo connexion-ok; sleep 20".into(),
+        ],
+        "serveur".into(),
+    );
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant + 1);
+    verifier(ok, || "connexion : pas de nouvel onglet".into())?;
+    let o = ouvrir(&f, "win.nouvel-onglet", None)?;
+    verifier(
+        executer(&o, "echo \"[$(ps -p $$ -o comm=)]\"", "[bash]"),
+        || {
+            format!(
+                "pas le shell des réglages après une connexion : {:?}",
+                texte(&o)
+            )
+        },
+    )
+}
+
+/// Revient au premier onglet (shell par défaut) : un nouvel onglet en reprend le shell.
+fn premier_onglet(f: &FenetrePupitre) {
+    f.executer(Raccourci::Onglet(1));
+}
+
 fn declare(p: &Rc<Pupitre>) -> Resultat {
     let f = premiere_fenetre(p).ok_or("pas de fenêtre")?;
     let (_, cible) = f
@@ -176,6 +229,7 @@ fn integration(p: &Rc<Pupitre>) -> Resultat {
     // Le shell des réglages reçoit ses variables par `Ouvrir` : bash avec l'intégration.
     p.appliquer_config(Ok(reglages("bash", Vec::new())));
     let f = premiere_fenetre(p).ok_or("pas de fenêtre")?;
+    premier_onglet(&f);
     let o = ouvrir(&f, "win.nouvel-onglet", None)?;
     verifier(
         executer(&o, "echo \"[$PUPITRE_INVITE]\"", "[shell]"),
@@ -193,6 +247,7 @@ fn messages_contenant(f: &FenetrePupitre, morceau: &str) -> Vec<String> {
 fn absent(p: &Rc<Pupitre>) -> Resultat {
     p.appliquer_config(Ok(reglages("nexistepas", Vec::new())));
     let f = premiere_fenetre(p).ok_or("pas de fenêtre")?;
+    premier_onglet(&f);
     let o = ouvrir(&f, "win.nouvel-onglet", None)?;
     verifier(executer(&o, "echo vivant-$((1+1))", "vivant-2"), || {
         "l'onglet n'a pas le shell de connexion".into()
@@ -208,6 +263,7 @@ fn absent(p: &Rc<Pupitre>) -> Resultat {
 fn fish_absent(p: &Rc<Pupitre>) -> Resultat {
     p.appliquer_config(Ok(reglages("fish", Vec::new())));
     let f = premiere_fenetre(p).ok_or("pas de fenêtre")?;
+    premier_onglet(&f);
     // PATH sans fish pendant l'ouverture seulement.
     let vide = tempfile::tempdir().unwrap();
     let ancien = std::env::var_os("PATH");

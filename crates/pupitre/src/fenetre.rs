@@ -81,12 +81,24 @@ pub struct Onglet {
     /// Dernières annonces de commandes faites au lecteur d'écran (les plus anciennes sont
     /// oubliées).
     annonces: RefCell<VecDeque<String>>,
+    /// Ce qui a été lancé dans l'onglet (`Defaut` pour une session reprise) : un nouvel
+    /// onglet ouvert depuis celui-ci en reprend le shell.
+    choix: RefCell<Choix>,
 }
 
 /// Annonces de commandes gardées par onglet (observées par les tests).
 const ANNONCES_GARDEES: usize = 32;
 
 impl Onglet {
+    /// Ce qu'ouvre un nouvel onglet demandé depuis celui-ci : le même shell, sauf pour une
+    /// connexion (pas un shell), qui donne le shell des réglages.
+    fn choix_a_reprendre(&self) -> Choix {
+        match &*self.choix.borrow() {
+            Choix::Commande(_) => Choix::Defaut,
+            c => c.clone(),
+        }
+    }
+
     pub fn terminal(&self) -> &TerminalOnglet {
         &self.terminal
     }
@@ -286,8 +298,8 @@ impl Onglet {
 }
 
 enum Attente {
-    /// `Open` envoyé pour un nouvel onglet de cette fenêtre.
-    NouvelOnglet(Weak<FenetreInterne>, Option<String>),
+    /// `Open` envoyé pour un nouvel onglet de cette fenêtre (titre provisoire, choix lancé).
+    NouvelOnglet(Weak<FenetreInterne>, Option<String>, Choix),
     /// `Open` envoyé pour remplacer le shell terminé de cet onglet.
     Remplacer(Weak<Onglet>),
 }
@@ -694,10 +706,11 @@ impl Pupitre {
             ServerMsg::Opened { id } => {
                 let attente = self.attentes.borrow_mut().pop_front();
                 match attente {
-                    Some(Attente::NouvelOnglet(f, titre)) => match f.upgrade() {
+                    Some(Attente::NouvelOnglet(f, titre, choix)) => match f.upgrade() {
                         Some(f) if !f.fermee.get() => {
                             if let Some(o) = FenetrePupitre(f).ajouter_onglet(id) {
                                 *o.provisoire.borrow_mut() = titre;
+                                *o.choix.borrow_mut() = choix;
                                 o.rafraichir_titre();
                             }
                         }
@@ -708,6 +721,8 @@ impl Pupitre {
                             o.terminal.relier(id);
                             o.termine.set(false);
                             o.occupe.set(false);
+                            // `rouvrir` lance le shell des réglages.
+                            *o.choix.borrow_mut() = Choix::Defaut;
                             // Le shell local n'est plus le serveur dont l'onglet portait le nom.
                             *o.provisoire.borrow_mut() = None;
                             o.rafraichir_titre();
@@ -726,7 +741,7 @@ impl Pupitre {
                 );
                 let attente = self.attentes.borrow_mut().pop_front();
                 match attente {
-                    Some(Attente::NouvelOnglet(f, _)) => {
+                    Some(Attente::NouvelOnglet(f, _, _)) => {
                         if let Some(f) = f.upgrade() {
                             FenetrePupitre(f).afficher_message(&message);
                         }
@@ -1146,7 +1161,10 @@ impl FenetrePupitre {
 
     /// Ouvre un nouveau shell dans un nouvel onglet de cette fenêtre.
     pub fn ouvrir_session(&self) {
-        self.ouvrir(&Choix::Defaut, None);
+        let choix = self
+            .onglet_actif()
+            .map_or(Choix::Defaut, |o| o.choix_a_reprendre());
+        self.ouvrir(&choix, None);
     }
 
     /// Ouvre un nouvel onglet pour une entrée du sous-menu « Nouvel onglet avec » (valeur
@@ -1206,9 +1224,11 @@ impl FenetrePupitre {
             .onglet_actif()
             .and_then(|o| o.terminal.grille())
             .unwrap_or(GRILLE_PAR_DEFAUT);
-        p.attentes
-            .borrow_mut()
-            .push_back(Attente::NouvelOnglet(Rc::downgrade(&self.0), titre));
+        p.attentes.borrow_mut().push_back(Attente::NouvelOnglet(
+            Rc::downgrade(&self.0),
+            titre,
+            choix.clone(),
+        ));
         p.ouvrir_session(choix, cols, rows);
     }
 
@@ -1701,6 +1721,7 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
         attend_relecture: Cell::new(false),
         signale: Cell::new(false),
         annonces: RefCell::new(VecDeque::new()),
+        choix: RefCell::new(Choix::Defaut),
     });
 
     // Fin d'une commande vue en direct : annoncée selon le réglage, seulement si l'onglet
