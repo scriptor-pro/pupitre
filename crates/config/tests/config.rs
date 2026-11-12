@@ -423,6 +423,27 @@ fn notifications_lues() -> R {
 }
 
 #[test]
+fn config_bandeau_clavier() -> R {
+    assert_eq!(Config::default().bandeau_clavier, BandeauClavier::Nom);
+    let d = tempfile::tempdir()?;
+    let chemin = d.path().join("pupitre.toml");
+    for (texte, attendu) in [
+        ("nom", BandeauClavier::Nom),
+        ("code", BandeauClavier::Code),
+        ("masque", BandeauClavier::Masque),
+    ] {
+        std::fs::write(&chemin, format!("bandeau_clavier = \"{texte}\"\n"))?;
+        let c = charger(&chemin).map_err(|e| e.message)?;
+        assert_eq!(c.bandeau_clavier, attendu);
+    }
+    let e = erreur("\nbandeau_clavier = \"gros\"\n");
+    assert_eq!(e.ligne, Some(2), "{e:?}");
+    assert!(e.message.contains("gros"), "{}", e.message);
+    assert!(e.message.contains("masque"), "{}", e.message);
+    Ok(())
+}
+
+#[test]
 fn cle_inconnue_refusee() -> R {
     let d = tempfile::tempdir()?;
     let chemin = d.path().join("pupitre.toml");

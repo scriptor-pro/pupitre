@@ -122,6 +122,11 @@ Tout Pupitre s'utilise au clavier.
 - **Orca** lit le texte du terminal, le nom des onglets, les menus, les dialogues et chaque
   message de Pupitre. Quand le focus arrive sur la barre d'onglets, Orca indique aussi les
   onglets qui signalent quelque chose (cloche, commande finie, notification).
+- **Disposition du clavier** : une ligne sous la barre d'onglets indique la disposition en
+  cours (par exemple « French (Dvorak) »). Chaque changement de disposition est annoncé :
+  « Disposition du clavier : French (Dvorak) », même si la ligne est masquée. Elle n'est
+  pas dans le tour de Ctrl+Tab ; le réglage `bandeau_clavier` choisit le nom complet, un
+  code court (« fr dvorak ») ou aucun affichage.
 - **Dialogues** : Échap annule toujours ; le bouton par défaut est le choix sans risque.
 - **Focus visible** : l'élément actif est toujours encadré.
 - Les informations ne passent jamais par un seul canal : une couleur ou un symbole est
@@ -399,6 +404,7 @@ un message avec le chemin complet du fichier, à ouvrir vous-même.
 | `invite` | `"starship"` | `"starship"` ou `"shell"` |
 | `annonce_fin_commande` | `"longues"` | `"longues"`, `"toutes"`, `"aucune"` |
 | `copie_selection` | `true` | `true` ou `false` |
+| `bandeau_clavier` | `"nom"` | `"nom"`, `"code"` ou `"masque"` |
 | `[notifications]` | tout à `true` | voir ci-dessous |
 | `langue` (à venir) | `""` (langue du système) | `"fr"`, `"en"`, `"es"`, `"it"`, `"de"`, `"nl"` ; appliqué au prochain lancement |
 
@@ -525,7 +531,6 @@ l'enregistrement ne laisse jamais un fichier à moitié écrit.
 
 ## 18. Prévu plus tard
 
-- Bandeau indiquant la disposition du clavier, avec annonce de chaque changement.
 - Thèmes à contraste élevé (7:1), sombre et clair.
 - Raccourcis modifiables.
 - Fenêtre de réglages (police, taille, thème, shell, invite, annonces), accessible au

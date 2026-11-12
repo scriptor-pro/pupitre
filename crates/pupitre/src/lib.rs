@@ -4,6 +4,7 @@
 pub mod aide;
 pub mod apparence;
 pub mod attenuation;
+pub mod clavier;
 pub mod client;
 pub mod commandes;
 pub mod connexions;

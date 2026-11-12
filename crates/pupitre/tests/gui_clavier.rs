@@ -14,6 +14,7 @@ use commun::*;
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
+use pupitre::clavier::BandeauClavier;
 use pupitre::fenetre::{FenetrePupitre, Onglet, Pupitre};
 use pupitre::polices::{dossier_polices, enregistrer_polices_embarquees};
 use pupitre_config::Config;
@@ -88,6 +89,12 @@ fn main() {
     ex.lancer("lien_non_ouvert_sans_ctrl", || lien(&f));
     ex.lancer("animations_reduites", || animations_reduites(&f));
     ex.lancer("plein_ecran", || plein_ecran(&f));
+    ex.lancer("bandeau_place_et_texte", || bandeau_place(&p, &f, x11));
+    ex.lancer("bandeau_masque", || bandeau_masque(&p, &f));
+    ex.lancer("une_annonce_par_changement", || annonce_unique(&p, &f));
+    ex.lancer("bandeau_non_focalisable", || {
+        bandeau_non_focalisable(&p, &f)
+    });
     fermer_sessions(&dossier.path().join("pupitre/fond.sock"));
     ex.conclure();
 }
@@ -597,4 +604,130 @@ fn plein_ecran(f: &FenetrePupitre) -> Resultat {
     touche(f, gdk::Key::F11, 95, gdk::ModifierType::empty());
     let ok = attendre(Duration::from_secs(3), || !f.fenetre().is_fullscreen());
     verifier(ok, || "F11 : plein écran non quitté".into())
+}
+
+const FR_DVORAK: &str = "French (Dvorak)";
+const EN_US: &str = "English (US)";
+
+/// Le bandeau de disposition est dans la fenêtre, juste après la barre d'onglets (le carnet
+/// qui porte aussi le terminal) ; sous X11 il porte un texte, sans clavier (Weston sans
+/// écran) il est caché sans erreur.
+fn bandeau_place(p: &Rc<Pupitre>, f: &FenetrePupitre, x11: bool) -> Resultat {
+    let b = f.bandeau_clavier();
+    let carnet = f.carnet();
+    verifier(
+        carnet.next_sibling().as_ref() == Some(b.upcast_ref()),
+        || "bandeau de disposition pas juste après la barre d'onglets".into(),
+    )?;
+    verifier(!b.is_focusable() && !b.can_focus(), || {
+        "bandeau focalisable".into()
+    })?;
+    verifier(b.accessible_role() == gtk::AccessibleRole::Status, || {
+        format!("rôle {:?} au lieu de Status", b.accessible_role())
+    })?;
+    let texte = b.label().to_string();
+    if x11 {
+        verifier(b.is_visible() && !texte.trim().is_empty(), || {
+            "bandeau vide ou caché sous X11".into()
+        })?;
+        verifier(
+            p.disposition().texte().as_deref() == Some(texte.as_str()),
+            || "texte du bandeau différent de celui du suivi".into(),
+        )?;
+    } else if b.is_visible() {
+        verifier(!texte.trim().is_empty(), || {
+            "bandeau visible mais vide".into()
+        })?;
+    }
+    // Disposition illisible : caché, aucune erreur.
+    p.disposition().changer_pour_tests(&[], -1);
+    verifier(!b.is_visible(), || {
+        "bandeau visible sans disposition".into()
+    })?;
+    p.disposition().changer_pour_tests(&[FR_DVORAK], 0);
+    verifier(b.is_visible() && b.label() == FR_DVORAK, || {
+        format!("texte {:?} après un changement", b.label())
+    })?;
+    p.disposition().definir_mode(BandeauClavier::Code);
+    verifier(b.label() == "fr dvorak", || {
+        format!("mode code : {:?}", b.label())
+    })?;
+    p.disposition().definir_mode(BandeauClavier::Nom);
+    Ok(())
+}
+
+/// Masqué : aucun bandeau, mais le changement est annoncé.
+fn bandeau_masque(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
+    let b = f.bandeau_clavier();
+    let s = p.disposition();
+    s.changer_pour_tests(&[FR_DVORAK, EN_US], 0);
+    s.definir_mode(BandeauClavier::Masque);
+    let res = (|| {
+        verifier(!b.is_visible(), || "bandeau visible en mode masqué".into())?;
+        let avant = s.annonces().len();
+        s.changer_pour_tests(&[FR_DVORAK, EN_US], 1);
+        verifier(!b.is_visible(), || "bandeau réapparu au changement".into())?;
+        verifier(s.annonces().len() == avant + 1, || {
+            "changement non annoncé en mode masqué".into()
+        })?;
+        verifier(
+            s.annonces().last().map(String::as_str)
+                == Some("Disposition du clavier : English (US)"),
+            || format!("annonce : {:?}", s.annonces().last()),
+        )
+    })();
+    s.definir_mode(BandeauClavier::Nom);
+    s.changer_pour_tests(&[FR_DVORAK], 0);
+    res?;
+    verifier(b.is_visible(), || "bandeau pas revenu en mode nom".into())
+}
+
+/// Deux fenêtres, un changement : une seule annonce, le bandeau des deux à jour ; une
+/// « notification » sans nouveau nom (rafale de GDK) n'annonce rien.
+fn annonce_unique(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
+    let f2 = p.nouvelle_fenetre();
+    patienter(Duration::from_millis(200));
+    let s = p.disposition();
+    s.changer_pour_tests(&[FR_DVORAK, EN_US], 0);
+    let avant = s.annonces().len();
+    s.changer_pour_tests(&[FR_DVORAK, EN_US], 1);
+    let res = (|| {
+        verifier(s.annonces().len() == avant + 1, || {
+            format!("{} annonces pour un changement", s.annonces().len() - avant)
+        })?;
+        for fen in [f, &f2] {
+            verifier(fen.bandeau_clavier().label() == EN_US, || {
+                "bandeau d'une fenêtre pas à jour".into()
+            })?;
+        }
+        s.changer_pour_tests(&[FR_DVORAK, EN_US], 1);
+        s.changer_pour_tests(&[FR_DVORAK, EN_US, "German"], 1);
+        verifier(s.annonces().len() == avant + 1, || {
+            "annonce sans changement réel".into()
+        })
+    })();
+    s.changer_pour_tests(&[FR_DVORAK], 0);
+    f2.fenetre().close();
+    patienter(Duration::from_millis(200));
+    res
+}
+
+/// Ctrl+Tab ne s'arrête jamais sur le bandeau de disposition.
+fn bandeau_non_focalisable(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
+    p.disposition().changer_pour_tests(&[FR_DVORAK], 0);
+    let b = f.bandeau_clavier();
+    verifier(b.is_visible(), || "bandeau caché".into())?;
+    actif(f).terminal().terminal().grab_focus();
+    patienter(Duration::from_millis(100));
+    for _ in 0..8 {
+        f.traiter_touche(gdk::Key::Tab, 23, CTRL);
+        patienter(Duration::from_millis(50));
+        let sur_bandeau = GtkWindowExt::focus(f.fenetre())
+            .is_some_and(|w| &w == b.upcast_ref::<gtk::Widget>() || w.is_ancestor(&b));
+        verifier(!sur_bandeau, || {
+            "focus sur le bandeau de disposition".into()
+        })?;
+    }
+    actif(f).terminal().terminal().grab_focus();
+    Ok(())
 }

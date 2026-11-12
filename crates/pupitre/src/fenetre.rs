@@ -7,6 +7,7 @@
 //! bureau) ; elles sont rattachées et leur tampon de relecture est rejoué.
 
 use crate::apparence::{suivre_preference_systeme, theme_systeme, Preference};
+use crate::clavier::SuiviDisposition;
 use crate::client::{connect_or_spawn_at, Client, CONNEXION_PERDUE};
 use crate::commandes::{doit_annoncer, texte_annonce, Sens};
 use crate::demande::{ouvrir_demande, DemandeAffichee};
@@ -395,6 +396,8 @@ pub struct Pupitre {
     avertis: RefCell<HashSet<String>>,
     /// Envoi des bulles de bureau (remplaçable par les tests).
     envoi_bulle: RefCell<EnvoiBulle>,
+    /// Disposition du clavier : un seul suivi pour toutes les fenêtres.
+    disposition: Rc<SuiviDisposition>,
 }
 
 impl Pupitre {
@@ -424,6 +427,7 @@ impl Pupitre {
             garde: RefCell::new(Some(app.hold())),
             avertis: RefCell::new(HashSet::new()),
             envoi_bulle: RefCell::new(crate::notifications::envoi_reel(app)),
+            disposition: SuiviDisposition::new(app, config.bandeau_clavier),
         });
         p.installer_action_montrer_onglet();
         p.appliquer_config(Ok(config));
@@ -473,6 +477,11 @@ impl Pupitre {
     }
 
     /// Remplace l'envoi des bulles de bureau (les tests y comptent les bulles).
+    /// Suivi de la disposition du clavier (un seul pour toute l'application).
+    pub fn disposition(&self) -> Rc<SuiviDisposition> {
+        self.disposition.clone()
+    }
+
     pub fn remplacer_envoi_bulle(&self, envoi: EnvoiBulle) {
         *self.envoi_bulle.borrow_mut() = envoi;
     }
@@ -620,6 +629,7 @@ impl Pupitre {
         match r {
             Ok(c) => {
                 self.poser_message(CLE_CONFIG, None);
+                self.disposition.definir_mode(c.bandeau_clavier);
                 *self.config.borrow_mut() = c;
             }
             Err(e) => {
@@ -1272,6 +1282,8 @@ impl Pupitre {
 pub struct FenetreInterne {
     fenetre: gtk::ApplicationWindow,
     carnet: gtk::Notebook,
+    /// Disposition du clavier, sous la barre d'onglets (indicateur seul).
+    disposition: gtk::Label,
     bandeau: Rc<BandeauMessages>,
     recherche: Rc<BarreRecherche>,
     menu: gtk::MenuButton,
@@ -1318,11 +1330,14 @@ impl FenetrePupitre {
         boite.append(bandeau.widget());
         boite.append(recherche.widget());
         boite.append(&carnet);
+        let disposition = pupitre.disposition.creer_bandeau();
+        boite.append(&disposition);
         fenetre.set_child(Some(&boite));
 
         let f = FenetrePupitre(Rc::new(FenetreInterne {
             fenetre,
             carnet,
+            disposition,
             bandeau,
             recherche,
             menu,
@@ -1356,6 +1371,16 @@ impl FenetrePupitre {
         pupitre.fenetres.borrow_mut().push(f.clone());
         pupitre.garde.borrow_mut().take();
         f
+    }
+
+    /// Bandeau de disposition du clavier (juste après la barre d'onglets).
+    pub fn bandeau_clavier(&self) -> gtk::Label {
+        self.0.disposition.clone()
+    }
+
+    /// Carnet d'onglets (barre d'onglets et terminaux).
+    pub fn carnet(&self) -> gtk::Notebook {
+        self.0.carnet.clone()
     }
 
     pub fn fenetre(&self) -> &gtk::ApplicationWindow {

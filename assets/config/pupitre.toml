@@ -48,6 +48,13 @@ invite = "starship"
 #   "aucune"   aucune annonce
 annonce_fin_commande = "longues"
 
+# Bandeau de disposition du clavier (sous les onglets) ; chaque changement de disposition est
+# annoncé au lecteur d'écran, quel que soit ce réglage :
+#   "nom"     nom complet, par exemple « French (Dvorak) » (par défaut)
+#   "code"    code court, par exemple « fr dvorak »
+#   "masque"  pas de bandeau
+bandeau_clavier = "nom"
+
 # Copie automatique : le texte sélectionné à la souris est copié dans le presse-papiers
 # dès que le bouton est relâché (Ctrl+Maj+V pour le coller). true (oui) ou false (non).
 copie_selection = true

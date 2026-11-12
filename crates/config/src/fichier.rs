@@ -63,6 +63,8 @@ pub struct Config {
     pub annonce_fin_commande: AnnonceFin,
     /// Texte sélectionné à la souris copié dans le presse-papiers au relâchement du bouton.
     pub copie_selection: bool,
+    /// Bandeau de disposition du clavier : nom complet, code court ou masqué.
+    pub bandeau_clavier: BandeauClavier,
     /// Commandes proposées dans « Nouvel onglet avec » (lancées telles quelles).
     pub shells: Vec<ShellDeclare>,
     /// Section `[notifications]` : ce qui signale un événement, et par quel canal.
@@ -118,6 +120,17 @@ pub enum AnnonceFin {
     Aucune,
 }
 
+/// Réglage `bandeau_clavier`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BandeauClavier {
+    /// Nom complet de la disposition, tel que donné par le système (« French (Dvorak) »).
+    Nom,
+    /// Code court (« fr dvorak »).
+    Code,
+    /// Pas de bandeau ; les changements restent annoncés.
+    Masque,
+}
+
 /// Entrée `[[shells]]` : un nom affiché et la commande (argv) à lancer.
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -141,6 +154,7 @@ impl Default for Config {
             invite: Invite::Starship,
             annonce_fin_commande: AnnonceFin::Longues,
             copie_selection: true,
+            bandeau_clavier: BandeauClavier::Nom,
             shells: Vec::new(),
             notifications: ReglagesNotifications::default(),
         }
@@ -193,7 +207,7 @@ pub(crate) fn lire_toml_avec<T: de::DeserializeOwned>(
 }
 
 const CLES_CONFIG: &str =
-    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue, shell, invite, annonce_fin_commande, copie_selection, shells, notifications";
+    "police, theme, curseur_clignote, historique_lignes, zoom_max_pourcent, langue, shell, invite, annonce_fin_commande, copie_selection, bandeau_clavier, shells, notifications";
 
 const CLES_NOTIFICATIONS: &str =
     "fin_commande_onglet, fin_commande_bulle, programme_onglet, programme_bulle, presse_papiers, cloche_onglet";
@@ -469,6 +483,21 @@ impl<'de> Deserialize<'de> for AnnonceFin {
             "aucune" => Ok(AnnonceFin::Aucune),
             _ => Err(notre(ta(
                 "config-annonce-inconnue",
+                &[("v", ArgI18n::from(v))],
+            ))),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BandeauClavier {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = String::deserialize(d)?;
+        match v.as_str() {
+            "nom" => Ok(BandeauClavier::Nom),
+            "code" => Ok(BandeauClavier::Code),
+            "masque" => Ok(BandeauClavier::Masque),
+            _ => Err(notre(ta(
+                "config-bandeau-clavier-inconnu",
                 &[("v", ArgI18n::from(v))],
             ))),
         }

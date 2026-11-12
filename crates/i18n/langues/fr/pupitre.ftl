@@ -26,6 +26,7 @@ config-historique-limites = historique de { $v } lignes hors limites (de 0 à { 
 config-zoom-limites = zoom maximum { $v } % hors limites (de { $min } à { $max })
 config-langue-inconnue = langue « { $v } » inconnue : valeurs possibles « » (langue du système), « fr », « en », « es », « it », « de », « nl »
 config-invite-inconnue = invite « { $v } » inconnue : valeurs possibles « starship » ou « shell »
+config-bandeau-clavier-inconnu = bandeau_clavier « { $v } » inconnu : valeurs possibles « nom », « code » ou « masque »
 config-annonce-inconnue = annonce_fin_commande « { $v } » inconnue : valeurs possibles « longues », « toutes » ou « aucune »
 config-shell-nom-vide = nom de shell vide : indiquer le nom affiché dans le menu
 config-shell-commande-vide = commande vide : le premier élément doit être un programme, ex. ["ssh", "serveur"]
@@ -367,3 +368,8 @@ commande-aucune-avant = Aucune commande avant.
 commande-aucune-apres = Aucune commande après.
 commande-navigation-indisponible = Navigation indisponible pendant un programme plein écran.
 commande-navigation-impossible = Navigation impossible pour l'instant.
+
+## Disposition du clavier
+
+disposition-annonce = Disposition du clavier : { $nom }
+disposition-aide = Disposition du clavier en cours
