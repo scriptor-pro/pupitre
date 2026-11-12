@@ -111,10 +111,67 @@ pub fn editeur_terminal(
     path: &OsStr,
 ) -> Option<Vec<String>> {
     [visual, editor].into_iter().flatten().find_map(|v| {
-        let argv: Vec<String> = v.split_whitespace().map(String::from).collect();
+        let argv = decouper_mots(v)?;
         crate::shells::trouver_shell(argv.first()?, path)?;
         Some(argv)
     })
+}
+
+/// Découpe une commande en mots comme le shell : espaces, guillemets simples (tout littéral),
+/// guillemets doubles (`\` n'y protège que `"`, `\`, `$`, `` ` ``), `\` hors guillemets.
+/// `None` si un guillemet n'est pas fermé ou si la commande finit par `\`. Aucune expansion.
+fn decouper_mots(s: &str) -> Option<Vec<String>> {
+    let mut mots = Vec::new();
+    let mut mot = String::new();
+    let mut dans_mot = false;
+    let mut car = s.chars();
+    while let Some(c) = car.next() {
+        match c {
+            c if c.is_whitespace() => {
+                if dans_mot {
+                    mots.push(std::mem::take(&mut mot));
+                    dans_mot = false;
+                }
+            }
+            '\'' => {
+                dans_mot = true;
+                loop {
+                    match car.next()? {
+                        '\'' => break,
+                        x => mot.push(x),
+                    }
+                }
+            }
+            '"' => {
+                dans_mot = true;
+                loop {
+                    match car.next()? {
+                        '"' => break,
+                        '\\' => match car.next()? {
+                            x @ ('"' | '\\' | '$' | '`') => mot.push(x),
+                            x => {
+                                mot.push('\\');
+                                mot.push(x);
+                            }
+                        },
+                        x => mot.push(x),
+                    }
+                }
+            }
+            '\\' => {
+                dans_mot = true;
+                mot.push(car.next()?);
+            }
+            x => {
+                dans_mot = true;
+                mot.push(x);
+            }
+        }
+    }
+    if dans_mot {
+        mots.push(mot);
+    }
+    Some(mots)
 }
 
 /// Application qui ouvrira `chemin` : celle associée à son type, sinon l'éditeur de texte
@@ -291,6 +348,32 @@ mod tests {
         assert_eq!(e(Some("  "), None), None);
         assert_eq!(e(Some("nexistepas"), None), None);
         assert_eq!(e(None, None), None);
+        // Guillemets compris ; guillemet non fermé : valeur ignorée, on passe à la suivante.
+        assert_eq!(
+            e(Some("sh -c ''"), None),
+            Some(vec!["sh".to_string(), "-c".to_string(), String::new()])
+        );
+        assert_eq!(e(Some("sh 'a"), Some("cat")), Some(vec!["cat".to_string()]));
+    }
+
+    #[test]
+    fn decoupage_comme_le_shell() {
+        let d = |s: &str| decouper_mots(s);
+        let v = |m: &[&str]| Some(m.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+        assert_eq!(
+            d("emacsclient -t -a ''"),
+            v(&["emacsclient", "-t", "-a", ""])
+        );
+        assert_eq!(
+            d("\"/opt/mon éditeur/ed\" -w"),
+            v(&["/opt/mon éditeur/ed", "-w"])
+        );
+        assert_eq!(d("vim\\ x  'a b'c"), v(&["vim x", "a bc"]));
+        assert_eq!(d("ed \"a\\\"b\""), v(&["ed", "a\"b"]));
+        assert_eq!(d("   "), v(&[]));
+        assert_eq!(d("ed 'non fermé"), None);
+        assert_eq!(d("ed \"non fermé"), None);
+        assert_eq!(d("ed \\"), None);
     }
 
     #[test]

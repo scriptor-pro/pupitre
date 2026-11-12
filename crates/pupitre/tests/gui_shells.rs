@@ -222,7 +222,24 @@ fn declare(p: &Rc<Pupitre>) -> Resultat {
     verifier(
         attendre(Duration::from_secs(10), || texte(&o).contains("declare-ok")),
         || format!("commande déclarée non lancée : {:?}", texte(&o)),
-    )
+    )?;
+    // Entrée d'un menu pas encore refait, pour un shell retiré de la configuration : rien ne
+    // s'ouvre, et c'est dit.
+    let avant = f.onglets().len();
+    let disparu = "declare:Disparu".to_variant();
+    WidgetExt::activate_action(f.fenetre(), "win.nouvel-onglet-avec", Some(&disparu))
+        .map_err(|e| e.to_string())?;
+    let attendu = "Ce shell n'est plus dans la configuration.";
+    let ok = attendre(Duration::from_secs(2), || {
+        f.messages().iter().any(|m| m == attendu)
+    });
+    verifier(ok && f.onglets().len() == avant, || {
+        format!(
+            "{} onglet(s), messages {:?}",
+            f.onglets().len(),
+            f.messages()
+        )
+    })
 }
 
 fn integration(p: &Rc<Pupitre>) -> Resultat {

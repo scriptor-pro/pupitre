@@ -98,7 +98,8 @@ Touches laissées volontairement aux programmes :
 - **Shell terminé** : `exit` (ou Ctrl+D) ferme l'onglet, même après une commande en échec ;
   le dernier onglet ferme la fenêtre. Si le shell s'arrête avant d'afficher son invite (erreur
   dans `.bashrc`…) ou s'il est tué, l'onglet reste ouvert avec le message « Le shell s'est
-  terminé (code N). Appuyez sur Entrée pour en ouvrir un nouveau. »
+  terminé (code N). Appuyez sur Entrée pour en ouvrir un nouveau. » Pour une connexion SSH ou
+  un éditeur, le message parle du programme, et Entrée ouvre un shell.
 - **Cloche** : quand un programme fait sonner la cloche, Pupitre ne fait aucun bruit. L'écran
   clignote brièvement (au plus 3 fois par seconde ; remplacé par un simple marqueur si le
   bureau demande de réduire les animations). Dans un onglet caché, le nom de l'onglet reçoit

@@ -45,8 +45,8 @@ const GROUPE_ONGLETS: &str = "pupitre-onglets";
 const MARQUE_CLOCHE: &str = "● ";
 /// Délai avant de refaire l'annonce du lancement (voir `reannoncer_au_lancement`).
 const DELAI_REANNONCE: Duration = Duration::from_millis(500);
-/// Durée d'affichage du message « Onglet … fermé : son shell s'est terminé. ».
-const DUREE_ANNONCE_FERMETURE: Duration = Duration::from_secs(5);
+/// Durée d'affichage des messages brefs (onglet fermé en arrière-plan, shell disparu).
+const DUREE_MESSAGE_BREF: Duration = Duration::from_secs(5);
 
 /// Clés des messages persistants (un seul message par clé).
 const CLE_PANNE: &str = "panne";
@@ -289,9 +289,16 @@ impl Onglet {
         self.termine.set(true);
         self.occupe.set(false);
         self.terminal.rendre_muet(true);
-        let message = match code {
-            Some(c) => ta("shell-termine", &[("code", ArgI18n::from(c.to_string()))]),
-            None => tr("shell-termine-signal"),
+        // Une connexion ou un éditeur n'est pas un shell (Entrée ouvre alors un shell).
+        let programme = matches!(*self.choix.borrow(), Choix::Commande(_));
+        let message = match (code, programme) {
+            (Some(c), false) => ta("shell-termine", &[("code", ArgI18n::from(c.to_string()))]),
+            (Some(c), true) => ta(
+                "programme-termine",
+                &[("code", ArgI18n::from(c.to_string()))],
+            ),
+            (None, false) => tr("shell-termine-signal"),
+            (None, true) => tr("programme-termine-signal"),
         };
         self.terminal
             .on_output(format!("\r\n\x1b[0m{message}\r\n").as_bytes());
@@ -1027,7 +1034,12 @@ impl Pupitre {
         let affiche = sa_fenetre.as_ref().is_some_and(|f| {
             f.fenetre().is_active() && f.onglet_actif().is_some_and(|a| Rc::ptr_eq(&a, o))
         });
-        let texte = ta("onglet-ferme-fin", &[("titre", ArgI18n::from(o.titre()))]);
+        let cle = if matches!(*o.choix.borrow(), Choix::Commande(_)) {
+            "onglet-ferme-fin-programme"
+        } else {
+            "onglet-ferme-fin"
+        };
+        let texte = ta(cle, &[("titre", ArgI18n::from(o.titre()))]);
         self.fermer_onglet(o);
         if affiche {
             return;
@@ -1038,7 +1050,7 @@ impl Pupitre {
                 .find(|f| !f.onglets().is_empty())
         });
         if let Some(f) = cible {
-            f.0.bandeau.afficher(&texte, Some(DUREE_ANNONCE_FERMETURE));
+            f.0.bandeau.afficher(&texte, Some(DUREE_MESSAGE_BREF));
         }
     }
 
@@ -1221,8 +1233,16 @@ impl FenetrePupitre {
     fn ouvrir_avec(&self, cible: &str) {
         let Some(p) = self.pupitre() else { return };
         let choix = shells::choix_de_cible(cible, &p.config.borrow());
-        if let Some(c) = choix {
-            self.ouvrir(&c, None);
+        match choix {
+            Some(c) => {
+                self.ouvrir(&c, None);
+            }
+            // Menu pas encore refait après une modification de la configuration.
+            None => {
+                self.0
+                    .bandeau
+                    .afficher(&tr("shell-declare-disparu"), Some(DUREE_MESSAGE_BREF));
+            }
         }
     }
 

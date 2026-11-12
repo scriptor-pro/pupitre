@@ -475,9 +475,13 @@ fn echec_au_demarrage(p: &Rc<Pupitre>) -> Resultat {
     verifier(f.onglets().len() == avant + 1, || {
         "l'onglet d'un programme en échec au démarrage a été fermé".into()
     })?;
-    verifier(texte(&o).contains("(code 3)"), || {
-        format!("code absent : {:?}", texte(&o))
-    })?;
+    // Pas un shell (connexion, éditeur) : le message parle du programme.
+    verifier(
+        texte(&o).contains(
+            "Le programme s'est terminé (code 3). Appuyez sur Entrée pour ouvrir un shell.",
+        ),
+        || format!("message absent : {:?}", texte(&o)),
+    )?;
     f.executer(Raccourci::FermerOnglet);
     let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant);
     verifier(ok, || "onglet de l'essai non refermé".into())
