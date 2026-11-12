@@ -1,0 +1,13 @@
+[package]
+name = "toml-edit-essai"
+version = "0.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+# ESSAI JETABLE (Task 0, étape 4) : aller-retour toml_edit. Ne pas réutiliser.
+
+[dependencies]
+toml_edit = "0.25"
+
+# Projet séparé de l'espace de travail.
+[workspace]

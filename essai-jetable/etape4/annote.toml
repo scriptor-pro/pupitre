@@ -1,0 +1,13 @@
+# Fichier annoté à la main par l'utilisateur  (accents : éàü, ♿)
+   police   =   "Iosevka 13"   # police perso, espaces bizarres
+
+# thème : on change juste la valeur
+theme = "sombre"      # commentaire de fin de ligne
+
+
+[ma_section]   # une table inconnue de Pupitre
+cle_inconnue = [ 1,2,   3 ]
+  indentee = 'littéral'
+
+curseur_clignote = true
+# commentaire final sans retour à la ligne
