@@ -259,6 +259,7 @@ impl Session {
             integration: Some(banc.integration.clone()),
             starship,
             config_starship: banc.config_starship.clone(),
+            cache_starship: banc.home.path().join(".local/state/pupitre/starship"),
         };
         let l = lancement(&chemin, mode, &r);
         assert!(
@@ -660,6 +661,7 @@ fn zsh_connexion_charge_zprofile_et_zlogin() {
         integration: Some(dossier_integration()),
         starship: None,
         config_starship: banc.config_starship.clone(),
+        cache_starship: banc.home.path().join(".local/state/pupitre/starship"),
     };
     let l = lancement(&chemin, ModeInvite::Shell, &r);
     assert_eq!(l.avertissement, None);

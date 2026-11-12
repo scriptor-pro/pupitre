@@ -36,12 +36,10 @@ TOLERES = (
     re.compile(r"^/memfd:"),
 )
 
-# Caches de bibliothèques chargées par GTK (pas par le code de Pupitre) et journal de Starship, dans
-# $XDG_CACHE_HOME : signalés à part, sans faire échouer la vérification.
-CACHES_BIBLIOTHEQUES = ("mesa_shader_cache", "mesa_shader_cache_db", "fontconfig",
-                        # Journal de session de Starship (~/.cache/starship/session_*.log) : écrit
-                        # par Starship lui-même, dans le seul dossier de cache de l'utilisateur.
-                        "starship")
+# Caches de bibliothèques chargées par GTK (pas par le code de Pupitre), dans $XDG_CACHE_HOME :
+# signalés à part, sans faire échouer la vérification. Le journal de Starship va dans
+# $XDG_STATE_HOME/pupitre/starship (STARSHIP_CACHE) : une écriture dans ~/.cache/starship échoue.
+CACHES_BIBLIOTHEQUES = ("mesa_shader_cache", "mesa_shader_cache_db", "fontconfig")
 
 # Phrase de passe de la clé de test (jamais utilisée ailleurs). La clé est créée AVANT le
 # démarrage de strace : `ssh-keygen -N` ne figure donc pas dans la trace.

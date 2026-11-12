@@ -17,6 +17,9 @@ pub struct Ressources {
     pub integration: Option<PathBuf>,
     pub starship: Option<PathBuf>,
     pub config_starship: PathBuf,
+    /// Cache de Starship (journaux de session), dans les dossiers de Pupitre plutôt que dans
+    /// `~/.cache/starship`.
+    pub cache_starship: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +146,7 @@ pub(crate) fn lancement_pour(
     if starship.is_some() {
         env.push(("PUPITRE_INVITE".into(), "starship".into()));
         env.push(("STARSHIP_CONFIG".into(), texte(&r.config_starship)));
+        env.push(("STARSHIP_CACHE".into(), texte(&r.cache_starship)));
     } else {
         env.push(("PUPITRE_INVITE".into(), "shell".into()));
     }
@@ -173,6 +177,7 @@ mod tests {
             integration: Some(t.path().to_path_buf()),
             starship: starship.then(|| PathBuf::from("/usr/bin/starship")),
             config_starship: PathBuf::from("/cfg/starship.toml"),
+            cache_starship: PathBuf::from("/etat/starship"),
         }
     }
 
@@ -197,6 +202,8 @@ mod tests {
         );
         assert_eq!(var(&l, "PUPITRE_INVITE"), Some("starship"));
         assert_eq!(var(&l, "STARSHIP_CONFIG"), Some("/cfg/starship.toml"));
+        // Journaux de Starship dans les dossiers de Pupitre, pas dans ~/.cache/starship.
+        assert_eq!(var(&l, "STARSHIP_CACHE"), Some("/etat/starship"));
         assert_eq!(var(&l, "PUPITRE_STARSHIP"), Some("/usr/bin/starship"));
         assert!(var(&l, "PUPITRE_INTEGRATION").is_some());
         assert_eq!(l.avertissement, None);
@@ -221,6 +228,7 @@ mod tests {
         );
         assert_eq!(var(&l, "PUPITRE_INVITE"), Some("shell"));
         assert_eq!(var(&l, "STARSHIP_CONFIG"), None);
+        assert_eq!(var(&l, "STARSHIP_CACHE"), None);
         assert_eq!(l.avertissement, None);
     }
 

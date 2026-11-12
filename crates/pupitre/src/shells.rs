@@ -63,6 +63,7 @@ pub fn ressources(path: &OsStr) -> Ressources {
         integration: dossier_integration(),
         starship: chercher_starship(std::env::var_os("PUPITRE_STARSHIP").as_deref(), path),
         config_starship: chemin_starship(),
+        cache_starship: pupitre_config::dossier_etat().join("starship"),
     }
 }
 

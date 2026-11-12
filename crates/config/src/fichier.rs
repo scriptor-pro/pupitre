@@ -284,6 +284,16 @@ pub fn chemin_config() -> PathBuf {
     dossier_pupitre().join("pupitre.toml")
 }
 
+/// `$XDG_STATE_HOME/pupitre`, sinon `~/.local/state/pupitre` : état et journaux (une valeur
+/// relative de `XDG_STATE_HOME` est ignorée).
+pub fn dossier_etat() -> PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| dossier_personnel().join(".local/state"));
+    base.join("pupitre")
+}
+
 /// `$XDG_CONFIG_HOME/pupitre`, sinon `~/.config/pupitre`.
 pub(crate) fn dossier_pupitre() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
