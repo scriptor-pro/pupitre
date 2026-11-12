@@ -7,3 +7,11 @@ essai-jetable/feed/sortie/
 !icone-st/png/*.png
 /.superpowers/
 __pycache__/
+
+# Fichiers personnels, non publiés
+suivi-tokens.md
+description.md
+reprendre-Claude-*
+
+# Vidages mémoire
+core*
