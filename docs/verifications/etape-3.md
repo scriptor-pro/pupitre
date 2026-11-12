@@ -102,3 +102,56 @@ ponctuels, tous réussis à la relance, sans lien avec les corrections :
 - Orca : vérifications 1, 2, 6, 7, 15.
 
 À relancer sur une machine calme avant la publication du paquet.
+
+## Relecture finale — 2026-11-12
+
+Relecture indépendante de toute l'étape (24e664b..74ece1d, paquet `.deb` compris) : « Approuvée
+avec corrections », aucun défaut critique. Aucun panic atteignable, aucune écriture dans les
+fichiers de l'utilisateur, aucun accès réseau ; lecture des marques, protocole v3, fichiers
+d'intégration, annonces et changements du 2026-11-12 jugés corrects.
+
+Passe de corrections (74ece1d..0e3acda), chacune avec un test qui échouait avant :
+
+- I1 : une demande d'ouverture faite pendant une panne du processus de fond restait en
+  attente ; après la relance, les onglets recevaient le titre ou le shell d'une demande
+  périmée, et Préférences annonçait une fausse confirmation. L'attente n'est mise en file que
+  si la demande part ; sinon la panne est réannoncée. File vidée à chaque connexion.
+- I2 : `exit` après une commande en échec (code de cette commande) gardait l'onglet ouvert.
+  Le critère proposé (« arrêté à l'invite ») ne marche pas : bash émet la marque C par `PS0`
+  avant d'exécuter `exit`. Critère retenu : pour un shell, tout code ferme l'onglet une fois
+  l'invite affichée (marque A, rejeu compris) ; arrêt avant la première invite ou par un
+  signal : l'onglet reste. `exit 3` tapé à la main ferme donc aussi l'onglet ; la
+  vérification Orca 8 passe à `kill -9 $$`.
+- I3 : un onglet d'arrière-plan qui se fermait n'était pas annoncé. Annonce « Onglet « titre »
+  fermé : son shell s'est terminé. ».
+- M1 : fish perdait `$pipestatus` pour l'invite de l'utilisateur ; rétabli (jusqu'à 8 étages).
+- M2 : Starship écrivait dans `~/.cache/starship` ; `STARSHIP_CACHE` dans
+  `$XDG_STATE_HOME/pupitre/starship`, plus toléré par la vérification d'isolement.
+- M3 : clic sur un shell déclaré retiré de la configuration : annoncé.
+- M4 : connexion ou éditeur terminé : « Le programme s'est terminé… ».
+- M6 : `$VISUAL` découpé comme le shell (guillemets).
+
+Relecture de ces corrections : « Approuvée avec corrections ». Suites (0e3acda) :
+
+- N1 (important) : le critère de I2 fermait aussi un onglet de connexion SSH vers un hôte
+  doté de l'intégration quand la connexion tombait (ssh rend 255) : message et historique
+  perdus. Le critère ne vaut plus que pour les shells ; une connexion ou un éditeur ne ferme
+  son onglet que sur le code 0. Test `connexion_coupee_garde_l_onglet`.
+- N2 : l'annonce de fermeture va d'abord dans la fenêtre active.
+
+Vérifications après corrections : clippy et `cargo fmt` propres ; X11 471 tests réussis (2
+échecs ponctuels réussis à la relance sur machine calme, avec le test de N1) ; Wayland 470/470 ;
+Orca 21/21 ; isolement conforme ; intégration réelle des shells 26/26.
+
+**Restes connus**
+
+- M5 : un binaire de développement prend les fichiers d'intégration de `/usr/share/pupitre/shell`
+  si le paquet est installé.
+- M7 : recherche des shells sur le fil GTK à chaque relecture de la configuration (un dossier
+  du `PATH` sur un montage réseau figé gèlerait l'interface ; plausible, non confirmé).
+- N3 : deux onglets de même titre fermés à moins de 5 s : une seule annonce.
+- N4 (antérieur à l'étape) : deux Entrée rapides sur un onglet terminé peuvent laisser un shell
+  orphelin dans le processus de fond.
+- Un shell en `set -e` qui meurt sur une commande en échec après son invite ferme son onglet
+  (comme `exit`).
+- fish : au-delà de 8 étages de pipeline, ou après `not`, seul `$status` est rétabli.
