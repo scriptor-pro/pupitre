@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Icône de Pupitre : un pupitre dont la silhouette forme la lettre π.
+     Le plateau incliné (avec son rebord qui retient la partition) est la barre du π,
+     les deux pieds sont ses jambages.
+     Couleurs : orange profond #B83D00, blanc cassé #F5EFE4.
+     Contraste entre les deux : 4,95:1 (WCAG 1.4.11 et RGAA 3.3 : 3:1 minimum).
+     Le liseré blanc cassé détache l'icône sur un fond sombre (orange seul : 2,5:1 sur #2B2B2B). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"
+     role="img" aria-labelledby="titre">
+  <title id="titre">Pupitre</title>
+  <!-- Fond et liseré -->
+  <rect x="10" y="10" width="236" height="236" rx="52" fill="#B83D00"
+        stroke="#F5EFE4" stroke-width="8"/>
+  <g fill="#F5EFE4" stroke="#F5EFE4" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Plateau incliné (barre du π), plus haut à droite -->
+    <polygon points="50,112 208,76 208,104 50,140" stroke-width="8"/>
+    <!-- Rebord du plateau, qui retient la partition -->
+    <polygon points="42,90 56,88 56,126 42,129" stroke-width="8"/>
+    <!-- Jambage gauche : pied légèrement courbé, comme dans le glyphe π -->
+    <path d="M 98,124 C 98,160 92,184 74,206" fill="none" stroke-width="28"/>
+    <!-- Jambage droit : pied droit qui se termine par un petit retour -->
+    <path d="M 162,110 L 162,188 Q 162,206 184,206" fill="none" stroke-width="28"/>
+  </g>
+</svg>

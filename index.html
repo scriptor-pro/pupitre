@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pupitre — terminal accessible pour Linux</title>
+  <meta name="description" content="Pupitre est un émulateur de terminal à onglets pour Linux, pensé d'abord pour l'accessibilité : clavier, lecteur d'écran Orca, contrastes vérifiés.">
+  <link rel="alternate" hreflang="fr" href="./">
+  <link rel="alternate" hreflang="en" href="en/">
+  <link rel="icon" href="icone.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="evitement" href="#contenu">Aller au contenu</a>
+
+  <header class="entete">
+    <div class="conteneur">
+      <div class="entete-haut">
+        <p class="marque"><img src="icone.svg" alt=""> Pupitre</p>
+        <p class="langue"><a href="en/" lang="en" hreflang="en">English version</a></p>
+      </div>
+      <nav aria-label="Sommaire de la page">
+        <ul>
+          <li><a href="#fonctions">Ce que fait Pupitre</a></li>
+          <li><a href="#installer">Installer</a></li>
+          <li><a href="#raccourcis">Raccourcis</a></li>
+          <li><a href="#compiler">Compiler</a></li>
+          <li><a href="#etat">État du projet</a></li>
+          <li><a href="#accessibilite">Accessibilité de cette page</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="contenu" tabindex="-1">
+    <div class="conteneur">
+      <h1>Un terminal pensé d'abord pour l'accessibilité</h1>
+      <p class="chapeau">Pupitre est un émulateur de terminal à onglets pour Linux, sous X11 comme sous
+        Wayland. Tout se fait au clavier, le lecteur d'écran Orca lit ce qui s'affiche, et chaque
+        thème de couleurs est vérifié pour rester lisible.</p>
+      <p>Logiciel libre sous licence GPL-3.0, écrit en Rust avec GTK 4 et VTE.</p>
+
+      <h2 id="fonctions">Ce que fait Pupitre</h2>
+      <h3>Accessibilité</h3>
+      <ul>
+        <li>Tout se fait au clavier, menus et fenêtres compris.</li>
+        <li>Orca lit la sortie des commandes, annonce la fin des commandes longues (5 secondes ou
+          plus) et permet d'aller d'une commande à l'autre.</li>
+        <li>Les thèmes clair et sombre respectent un contraste d'au moins 4,5:1 (WCAG AA). Pupitre
+          vérifie aussi vos propres thèmes.</li>
+        <li>Curseur fixe par défaut, texte agrandissable, polices lisibles fournies :
+          B612 Mono et Atkinson Hyperlegible Mono.</li>
+      </ul>
+      <h3>Robustesse</h3>
+      <ul>
+        <li>Les shells tournent dans un processus séparé de la fenêtre : si la fenêtre plante, vos
+          commandes continuent et les onglets reviennent.</li>
+        <li>Une erreur dans le fichier de configuration ne fait jamais planter Pupitre : il garde
+          les réglages précédents et indique la ligne fautive.</li>
+      </ul>
+      <h3>SSH et shells</h3>
+      <ul>
+        <li>Un agent SSH est toujours disponible pour vos shells ; la phrase de passe de votre clé
+          peut être mémorisée dans le trousseau du système.</li>
+        <li>Connexions SSH mémorisées, ouvertes dans un nouvel onglet.</li>
+        <li>Invite Starship prête à l'emploi pour bash, zsh, fish, nushell et elvish, sans toucher
+          à vos propres fichiers de configuration.</li>
+      </ul>
+      <h3>Vie privée</h3>
+      <ul>
+        <li>Aucune connexion à Internet : ni vérification de mise à jour, ni rapport de plantage,
+          ni téléchargement.</li>
+      </ul>
+
+      <h2 id="installer">Installer</h2>
+      <p>Pupitre demande Debian 13 (trixie) ou plus récent, ou une distribution qui en dérive :
+        GTK 4.18 et VTE 0.80 au minimum.</p>
+      <ol>
+        <li>
+          <p><a class="bouton" href="https://github.com/scriptor-pro/pupitre/releases/latest">Télécharger le paquet Debian (fichier .deb, 2,2 Mo)</a></p>
+        </li>
+        <li>
+          <p>Dans le dossier où se trouve le fichier, installez-le :</p>
+          <pre><code>sudo apt install ./pupitre_0.1.0-1_amd64.deb</code></pre>
+        </li>
+        <li>
+          <p>Lancez Pupitre depuis le menu des applications, ou tapez <code>pupitre</code>.</p>
+        </li>
+      </ol>
+      <p class="note">Recommandés : Starship, pour l'invite, et un trousseau (GNOME Keyring, KWallet
+        ou KeePassXC), pour mémoriser les phrases de passe SSH. Sans eux, Pupitre fonctionne : chaque
+        shell garde son invite habituelle et la phrase de passe est redemandée.</p>
+      <p>Désinstaller : <code>sudo apt remove pupitre</code>. Vos réglages, dans
+        <code>~/.config/pupitre/</code>, restent en place.</p>
+
+      <h2 id="raccourcis">Raccourcis essentiels</h2>
+      <p>Pupitre utilise <kbd>Ctrl</kbd>+<kbd>Maj</kbd> pour ses propres raccourcis :
+        <kbd>Ctrl</kbd> seul reste aux programmes. Les raccourcis suivent la lettre de votre
+        disposition de clavier (AZERTY, BÉPO, Dvorak…).</p>
+      <table>
+        <caption>Raccourcis clavier principaux de Pupitre</caption>
+        <thead>
+          <tr>
+            <th scope="col">Action</th>
+            <th scope="col">Raccourci</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Ouvrir l'aide intégrée</th><td><kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>H</kbd></td></tr>
+          <tr><th scope="row">Nouvel onglet</th><td><kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>T</kbd></td></tr>
+          <tr><th scope="row">Fermer l'onglet</th><td><kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>W</kbd></td></tr>
+          <tr><th scope="row">Copier, coller</th><td><kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>C</kbd>, <kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>V</kbd></td></tr>
+          <tr><th scope="row">Rechercher dans l'historique</th><td><kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>F</kbd></td></tr>
+          <tr><th scope="row">Commande précédente, suivante</th><td><kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>↑</kbd>, <kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>↓</kbd></td></tr>
+          <tr><th scope="row">Sortir du terminal vers les menus et onglets</th><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd></td></tr>
+          <tr><th scope="row">Connexions SSH</th><td><kbd>Ctrl</kbd>+<kbd>Maj</kbd>+<kbd>O</kbd></td></tr>
+          <tr><th scope="row">Agrandir, réduire le texte</th><td><kbd>Ctrl</kbd>+<kbd>+</kbd>, <kbd>Ctrl</kbd>+<kbd>-</kbd></td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="compiler">Compiler depuis les sources</h2>
+      <p>Sous Debian 13, installez les outils et bibliothèques :</p>
+      <pre><code>sudo apt install build-essential pkg-config libgtk-4-dev libvte-2.91-gtk4-dev cargo</code></pre>
+      <p>Puis, dans le dossier des sources :</p>
+      <pre><code>cargo build --release --locked</code></pre>
+      <p>Les exécutables sont dans <code>target/release/</code>. Pour construire le paquet
+        Debian : <code>scripts/construire-deb.sh</code>. Le détail est dans le
+        <a href="https://github.com/scriptor-pro/pupitre#readme">fichier README du dépôt</a>.</p>
+
+      <h2 id="etat">État du projet</h2>
+      <p>Version 0.1 : Pupitre est jeune. Prévus
+        ensuite : fenêtre de réglages, notifications, indicateur de disposition du clavier,
+        thème à contraste élevé. L'interface est en français ; anglais, espagnol, italien, allemand
+        et néerlandais suivront.</p>
+      <p>Code source, signalement de problèmes et suggestions :
+        <a href="https://github.com/scriptor-pro/pupitre">dépôt Pupitre sur GitHub</a>.</p>
+
+      <h2 id="accessibilite">Accessibilité de cette page</h2>
+      <p>Cette page vise la conformité au niveau AA des WCAG 2.2 et au RGAA 4.1.2. Elle n'a pas fait
+        l'objet d'un audit externe.</p>
+      <p>Vérifications faites : contrôle automatique (axe-core), navigation au clavier seul,
+        contrastes des deux thèmes, affichage à 200 % et sur un écran de 320 pixels de large,
+        espacement du texte agrandi.</p>
+      <p>Un problème d'accès ? Signalez-le dans les
+        <a href="https://github.com/scriptor-pro/pupitre/issues">tickets du dépôt GitHub</a>.</p>
+    </div>
+  </main>
+
+  <footer>
+    <div class="conteneur">
+      <p>Pupitre, logiciel libre sous licence GPL-3.0. Polices de cette page : Atkinson Hyperlegible
+        Next et Atkinson Hyperlegible Mono, sous licence SIL Open Font License 1.1.</p>
+    </div>
+  </footer>
+</body>
+</html>

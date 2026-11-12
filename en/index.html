@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pupitre — an accessible terminal for Linux</title>
+  <meta name="description" content="Pupitre is a tabbed terminal emulator for Linux, designed first for accessibility: keyboard, Orca screen reader, checked contrast.">
+  <link rel="alternate" hreflang="fr" href="../">
+  <link rel="alternate" hreflang="en" href="./">
+  <link rel="icon" href="../icone.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <a class="evitement" href="#content">Skip to content</a>
+
+  <header class="entete">
+    <div class="conteneur">
+      <div class="entete-haut">
+        <p class="marque"><img src="../icone.svg" alt=""> Pupitre</p>
+        <p class="langue"><a href="../" lang="fr" hreflang="fr">Version française</a></p>
+      </div>
+      <nav aria-label="Page contents">
+        <ul>
+          <li><a href="#features">What Pupitre does</a></li>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#shortcuts">Shortcuts</a></li>
+          <li><a href="#build">Build</a></li>
+          <li><a href="#status">Project status</a></li>
+          <li><a href="#accessibility">Accessibility of this page</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main id="content" tabindex="-1">
+    <div class="conteneur">
+      <h1>A terminal designed for accessibility first</h1>
+      <p class="chapeau">Pupitre is a tabbed terminal emulator for Linux, on X11 and Wayland.
+        Everything works from the keyboard, the Orca screen reader reads what is shown, and every
+        colour theme is checked to stay readable.</p>
+      <p>Free software under the GPL-3.0 licence, written in Rust with GTK 4 and VTE.</p>
+      <p class="note">The interface is in French for now; English and other languages are
+        planned.</p>
+
+      <h2 id="features">What Pupitre does</h2>
+      <h3>Accessibility</h3>
+      <ul>
+        <li>Everything works from the keyboard, menus and dialogs included.</li>
+        <li>Orca reads command output, announces when a long command (5 seconds or more) finishes,
+          and lets you jump from one command to the next.</li>
+        <li>The light and dark themes meet a contrast ratio of at least 4.5:1 (WCAG AA). Pupitre
+          also checks your own themes.</li>
+        <li>Steady cursor by default, zoomable text, readable fonts included:
+          B612 Mono and Atkinson Hyperlegible Mono.</li>
+      </ul>
+      <h3>Robustness</h3>
+      <ul>
+        <li>Shells run in a process separate from the window: if the window crashes, your commands
+          keep running and your tabs come back.</li>
+        <li>A mistake in the configuration file never crashes Pupitre: it keeps the previous
+          settings and points to the faulty line.</li>
+      </ul>
+      <h3>SSH and shells</h3>
+      <ul>
+        <li>An SSH agent is always available to your shells; your key passphrase can be remembered
+          in the system keyring.</li>
+        <li>Saved SSH connections, opened in a new tab.</li>
+        <li>A ready-to-use Starship prompt for bash, zsh, fish, nushell and elvish, without touching
+          your own configuration files.</li>
+      </ul>
+      <h3>Privacy</h3>
+      <ul>
+        <li>No Internet connection: no update check, no crash report, no download.</li>
+      </ul>
+
+      <h2 id="install">Install</h2>
+      <p>Pupitre needs Debian 13 (trixie) or later, or a distribution based on it: GTK 4.18 and
+        VTE 0.80 at least.</p>
+      <ol>
+        <li>
+          <p><a class="bouton" href="https://github.com/scriptor-pro/pupitre/releases/latest">Download the Debian package (.deb file, 2.2 MB)</a></p>
+        </li>
+        <li>
+          <p>In the folder that contains the file, install it:</p>
+          <pre><code>sudo apt install ./pupitre_0.1.0-1_amd64.deb</code></pre>
+        </li>
+        <li>
+          <p>Start Pupitre from the applications menu, or type <code>pupitre</code>.</p>
+        </li>
+      </ol>
+      <p class="note">Recommended: Starship, for the prompt, and a keyring (GNOME Keyring, KWallet
+        or KeePassXC), to remember SSH passphrases. Pupitre works without them: each shell keeps its
+        usual prompt and the passphrase is asked again.</p>
+      <p>Uninstall: <code>sudo apt remove pupitre</code>. Your settings, in
+        <code>~/.config/pupitre/</code>, are kept.</p>
+
+      <h2 id="shortcuts">Essential shortcuts</h2>
+      <p>Pupitre uses <kbd>Ctrl</kbd>+<kbd>Shift</kbd> for its own shortcuts: <kbd>Ctrl</kbd>
+        alone is left to programs. Shortcuts follow the letters of your keyboard layout (QWERTY,
+        AZERTY, Dvorak…).</p>
+      <table>
+        <caption>Main Pupitre keyboard shortcuts</caption>
+        <thead>
+          <tr>
+            <th scope="col">Action</th>
+            <th scope="col">Shortcut</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Open the built-in help</th><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td></tr>
+          <tr><th scope="row">New tab</th><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td></tr>
+          <tr><th scope="row">Close tab</th><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></td></tr>
+          <tr><th scope="row">Copy, paste</th><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></td></tr>
+          <tr><th scope="row">Search the scrollback</th><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td></tr>
+          <tr><th scope="row">Previous, next command</th><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>↑</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>↓</kbd></td></tr>
+          <tr><th scope="row">Leave the terminal for menus and tabs</th><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd></td></tr>
+          <tr><th scope="row">SSH connections</th><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td></tr>
+          <tr><th scope="row">Bigger, smaller text</th><td><kbd>Ctrl</kbd>+<kbd>+</kbd>, <kbd>Ctrl</kbd>+<kbd>-</kbd></td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="build">Build from source</h2>
+      <p>On Debian 13, install the tools and libraries:</p>
+      <pre><code>sudo apt install build-essential pkg-config libgtk-4-dev libvte-2.91-gtk4-dev cargo</code></pre>
+      <p>Then, in the source folder:</p>
+      <pre><code>cargo build --release --locked</code></pre>
+      <p>The programs are in <code>target/release/</code>. To build the Debian package:
+        <code>scripts/construire-deb.sh</code>. Details are in the
+        <a href="https://github.com/scriptor-pro/pupitre#readme">repository README file</a>
+        (<span lang="fr">en français</span>).</p>
+
+      <h2 id="status">Project status</h2>
+      <p>Version 0.1: Pupitre is young. Coming next: a settings window, notifications, a keyboard
+        layout indicator, a high-contrast theme, and translations into English, Spanish, Italian,
+        German and Dutch.</p>
+      <p>Source code, bug reports and suggestions:
+        <a href="https://github.com/scriptor-pro/pupitre">Pupitre repository on GitHub</a>.</p>
+
+      <h2 id="accessibility">Accessibility of this page</h2>
+      <p>This page aims to conform to WCAG 2.2 level AA and to the French RGAA 4.1.2. It has not
+        been audited externally.</p>
+      <p>Checks done: automated testing (axe-core), keyboard-only navigation, contrast of both
+        themes, display at 200% zoom and on a 320-pixel-wide screen, increased text spacing.</p>
+      <p>Trouble accessing something? Report it in the
+        <a href="https://github.com/scriptor-pro/pupitre/issues">GitHub repository issues</a>.</p>
+    </div>
+  </main>
+
+  <footer>
+    <div class="conteneur">
+      <p>Pupitre, free software under the GPL-3.0 licence. Fonts on this page: Atkinson Hyperlegible
+        Next and Atkinson Hyperlegible Mono, under the SIL Open Font License 1.1.</p>
+    </div>
+  </footer>
+</body>
+</html>

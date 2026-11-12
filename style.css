@@ -1,0 +1,295 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Page de présentation de Pupitre. Couleurs : thèmes clair et sombre de Pupitre
+   (Catppuccin Latte et Mocha ajustés), contrastes vérifiés (WCAG 2.2 AA). */
+
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("polices/AtkinsonHyperlegibleNext-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("polices/AtkinsonHyperlegibleNext-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("polices/AtkinsonHyperlegibleNext-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Mono";
+  src: url("polices/AtkinsonHyperlegibleMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light dark;
+  /* Thème clair (Latte ajusté). */
+  --fond: #eff1f5;
+  --surface: #dce0e8;
+  --texte: #4c4f69;
+  --texte-secondaire: #5c5f77;
+  --lien: #0a54e7;
+  --lien-visite: #b31b8a;
+  --focus: #c30e35;
+  --bordure: #5c5f77;
+  --code-fond: #dce0e8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Thème sombre (Mocha ajusté). */
+    --fond: #1e1e2e;
+    --surface: #252630;
+    --texte: #cdd6f4;
+    --texte-secondaire: #b2b8cf;
+    --lien: #89b4fa;
+    --lien-visite: #f5c2e7;
+    --focus: #f9e2af;
+    --bordure: #8a8ea6;
+    --code-fond: #252630;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* Taille de base laissée au réglage du navigateur. */
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--fond);
+  color: var(--texte);
+  font-family: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.6;
+}
+
+/* Lien d'évitement : visible dès qu'il reçoit le focus. */
+.evitement {
+  position: absolute;
+  left: 1rem;
+  top: -100rem;
+  z-index: 10;
+  padding: 0.75rem 1rem;
+  background: var(--fond);
+  color: var(--lien);
+  font-weight: 700;
+}
+.evitement:focus {
+  top: 1rem;
+}
+
+.conteneur {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+
+.entete {
+  border-bottom: 1px solid var(--bordure);
+  padding: 1.5rem 0 1rem;
+}
+
+.entete-haut {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.marque {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.marque img {
+  width: 3rem;
+  height: 3rem;
+}
+
+nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: var(--lien);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+a:visited {
+  color: var(--lien-visite);
+}
+a:hover {
+  text-decoration-thickness: 0.15em;
+}
+
+/* Cibles d'au moins 24 × 24 px (WCAG 2.5.8) pour les liens hors texte courant. */
+nav a,
+.langue a,
+.bouton {
+  display: inline-block;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.25rem;
+}
+
+/* Focus toujours visible, épais et contrasté (WCAG 2.4.7, 2.4.11, 2.4.13). */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+main {
+  padding: 1rem 0 3rem;
+}
+
+h1 {
+  font-size: 2.25rem;
+  line-height: 1.25;
+  margin: 1.5rem 0 1rem;
+}
+h2 {
+  font-size: 1.6rem;
+  line-height: 1.3;
+  margin: 2.75rem 0 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--bordure);
+}
+h3 {
+  font-size: 1.25rem;
+  margin: 1.75rem 0 0.5rem;
+}
+
+.chapeau {
+  font-size: 1.3rem;
+}
+
+main li + li {
+  margin-top: 0.4rem;
+}
+
+code,
+kbd,
+pre {
+  font-family: "Atkinson Hyperlegible Mono", "B612 Mono", ui-monospace, monospace;
+  font-size: 1rem;
+}
+code,
+kbd {
+  background: var(--code-fond);
+  padding: 0.1em 0.35em;
+  border-radius: 0.25em;
+}
+kbd {
+  border: 1px solid var(--bordure);
+}
+pre {
+  background: var(--code-fond);
+  border: 1px solid var(--bordure);
+  border-radius: 0.4rem;
+  padding: 0.9rem 1rem;
+  /* Les longues commandes passent à la ligne au lieu de forcer un défilement horizontal
+     (WCAG 1.4.10, affichage sur 320 px). */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+pre code {
+  background: none;
+  padding: 0;
+}
+
+.bouton {
+  border: 2px solid var(--lien);
+  border-radius: 0.4rem;
+  padding: 0.6rem 1rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+.bouton:hover {
+  text-decoration: underline;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+caption {
+  text-align: left;
+  font-weight: 700;
+  padding-bottom: 0.5rem;
+}
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--bordure);
+}
+th {
+  font-weight: 700;
+}
+
+/* Petits écrans : marges réduites et retour à la ligne permis dans les cellules, pour éviter le
+   défilement horizontal (WCAG 1.4.10) sans toucher à la structure du tableau. */
+@media (max-width: 30em) {
+  th,
+  td {
+    padding: 0.5rem 0.4rem;
+    overflow-wrap: anywhere;
+  }
+  th:first-child,
+  td:first-child {
+    padding-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .bouton,
+  kbd,
+  pre {
+    border-color: CanvasText;
+  }
+}
+
+@media print {
+  nav,
+  .evitement,
+  .langue {
+    display: none;
+  }
+}
