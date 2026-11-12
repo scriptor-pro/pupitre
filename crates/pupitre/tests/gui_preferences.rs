@@ -15,6 +15,7 @@ use pupitre::preferences::{chemin, FichierPrefs, Lanceur};
 use pupitre_config::Config;
 use std::rc::Rc;
 use std::time::Duration;
+use vte4::prelude::*;
 
 fn main() {
     if !actives() {
@@ -44,6 +45,9 @@ fn main() {
         ouverture_impossible(&pupitre)
     });
     ex.lancer("ouverture_reussie_message", || ouverture_reussie(&pupitre));
+    ex.lancer("editeur_du_terminal_dans_un_onglet", || {
+        editeur_terminal(&pupitre)
+    });
     drop(pupitre);
     fermer_sessions(&socket);
     drop(perso);
@@ -150,6 +154,43 @@ fn ouverture_impossible(p: &Rc<Pupitre>) -> Resultat {
         || format!("le chemin {c:?} devrait figurer dans {msgs:?}"),
     )?;
     verifier(c.exists(), || "le fichier devrait avoir été créé".into())
+}
+
+/// `$VISUAL` défini : le fichier s'ouvre avec lui dans un nouvel onglet de Pupitre (ici `cat`,
+/// qui affiche le fichier et se termine), nommé d'après le fichier.
+fn editeur_terminal(p: &Rc<Pupitre>) -> Resultat {
+    let f = premiere_fenetre(p)?;
+    let ok = attendre(Duration::from_secs(10), || !f.onglets().is_empty());
+    verifier(ok, || "pas d'onglet au démarrage".into())?;
+    let avant = f.onglets().len();
+    let (visual, editor) = (std::env::var_os("VISUAL"), std::env::var_os("EDITOR"));
+    std::env::set_var("VISUAL", "cat");
+    std::env::remove_var("EDITOR");
+    f.ouvrir_preference(FichierPrefs::Configuration);
+    for (v, a) in [("VISUAL", visual), ("EDITOR", editor)] {
+        match a {
+            Some(a) => std::env::set_var(v, a),
+            None => std::env::remove_var(v),
+        }
+    }
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant + 1);
+    verifier(ok, || "pas de nouvel onglet pour l'éditeur".into())?;
+    let o = f.onglet_actif().ok_or("aucun onglet actif")?;
+    let texte = || {
+        o.terminal()
+            .terminal()
+            .text_format(vte4::Format::Text)
+            .map(|s| s.to_string())
+            .unwrap_or_default()
+    };
+    // La fin du pupitre.toml par défaut (le début a défilé hors de la vue).
+    let ok = attendre(Duration::from_secs(10), || {
+        texte().contains("# commande = [\"ssh\", \"serveur\"]")
+    });
+    verifier(ok, || format!("fichier non affiché : {:?}", texte()))?;
+    verifier(o.titre() == "pupitre.toml", || {
+        format!("titre de l'onglet : {:?}", o.titre())
+    })
 }
 
 fn ouverture_reussie(p: &Rc<Pupitre>) -> Resultat {

@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use pupitre_config::{chemin_config, chemin_connexions, creer_defaut_si_absent, ecrire_atomique};
 use pupitre_i18n::{t, ta, ArgI18n};
 use pupitre_shell::creer_config_starship_si_absente;
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -100,6 +101,20 @@ pub fn ouvrir_avec(f: FichierPrefs, lanceur: Lanceur, signaler: Rc<dyn Fn(String
             Err(_) => s(message_echec(&c2)),
         }),
     );
+}
+
+/// Éditeur en terminal choisi par l'utilisateur : `$VISUAL`, sinon `$EDITOR` (convention des
+/// terminaux), découpé en mots, si son programme existe (`path` : dossiers de recherche).
+pub fn editeur_terminal(
+    visual: Option<&str>,
+    editor: Option<&str>,
+    path: &OsStr,
+) -> Option<Vec<String>> {
+    [visual, editor].into_iter().flatten().find_map(|v| {
+        let argv: Vec<String> = v.split_whitespace().map(String::from).collect();
+        crate::shells::trouver_shell(argv.first()?, path)?;
+        Some(argv)
+    })
 }
 
 /// Application qui ouvrira `chemin` : celle associée à son type, sinon l'éditeur de texte
@@ -260,6 +275,22 @@ mod tests {
             appli.and_then(|a| a.id()).as_deref(),
             Some("editeur-essai.desktop")
         );
+    }
+
+    #[test]
+    fn editeur_du_terminal_visual_puis_editor() {
+        let path = std::ffi::OsString::from("/usr/bin:/bin");
+        let e = |v: Option<&str>, ed: Option<&str>| editeur_terminal(v, ed, &path);
+        assert_eq!(e(Some("cat"), Some("sh")), Some(vec!["cat".to_string()]));
+        // Arguments gardés ; programme introuvable : on passe au suivant.
+        assert_eq!(
+            e(Some("nexistepas -w"), Some("sh -e")),
+            Some(vec!["sh".to_string(), "-e".to_string()])
+        );
+        assert_eq!(e(None, Some("/bin/sh")), Some(vec!["/bin/sh".to_string()]));
+        assert_eq!(e(Some("  "), None), None);
+        assert_eq!(e(Some("nexistepas"), None), None);
+        assert_eq!(e(None, None), None);
     }
 
     #[test]

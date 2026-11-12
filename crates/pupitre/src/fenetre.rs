@@ -1271,9 +1271,34 @@ impl FenetrePupitre {
 
     /// Ouvre un fichier de configuration dans l'éditeur par défaut ; le résultat s'affiche
     /// (et s'annonce) dans le bandeau de la fenêtre.
-    fn ouvrir_preference(&self, fichier: FichierPrefs) {
-        let lanceur = crate::preferences::lanceur_gtk(self.fenetre().clone().upcast());
+    /// Avec `$VISUAL` (sinon `$EDITOR`) dans un nouvel onglet s'il est défini et installé,
+    /// sinon avec l'éditeur graphique du bureau.
+    pub fn ouvrir_preference(&self, fichier: FichierPrefs) {
+        let (visual, editor) = (std::env::var("VISUAL").ok(), std::env::var("EDITOR").ok());
+        let lanceur = match crate::preferences::editeur_terminal(
+            visual.as_deref(),
+            editor.as_deref(),
+            &shells::path_courant(),
+        ) {
+            Some(editeur) => self.lanceur_onglet(editeur),
+            None => crate::preferences::lanceur_gtk(self.fenetre().clone().upcast()),
+        };
         self.ouvrir_preference_avec(fichier, lanceur);
+    }
+
+    /// Ouvre le fichier avec `editeur` dans un nouvel onglet de cette fenêtre, nommé d'après
+    /// le fichier.
+    fn lanceur_onglet(&self, mut editeur: Vec<String>) -> Lanceur {
+        let faible = self.faible();
+        Box::new(move |chemin, fin| {
+            let Some(f) = faible.upgrade() else {
+                return fin(Err("fenêtre fermée".into()));
+            };
+            editeur.push(chemin.to_string_lossy().into_owned());
+            let titre = chemin.file_name().map(|n| n.to_string_lossy().into_owned());
+            FenetrePupitre(f).ouvrir(&Choix::Commande(editeur), titre);
+            fin(Ok(()))
+        })
     }
 
     /// Comme `ouvrir_preference`, avec un lanceur au choix (tests : échec simulé).
