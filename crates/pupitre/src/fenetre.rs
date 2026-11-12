@@ -791,7 +791,8 @@ impl Pupitre {
             }
             ServerMsg::Exited { id, code } => {
                 if let Some(o) = self.onglet(id) {
-                    if crate::terminal::fin_voulue(code, o.terminal.invite_vue()) {
+                    let shell = !matches!(*o.choix.borrow(), Choix::Commande(_));
+                    if crate::terminal::fin_voulue(code, o.terminal.invite_vue(), shell) {
                         // Fin voulue (exit, Ctrl+D) : l'onglet se ferme. Avant la première
                         // invite ou par un signal, il reste, avec le code et le moyen d'ouvrir
                         // un nouveau shell.
@@ -1025,7 +1026,8 @@ impl Pupitre {
 
     /// Ferme l'onglet dont le shell s'est terminé. S'il n'était pas l'onglet affiché de la
     /// fenêtre active, la fermeture est annoncée (sinon le nombre d'onglets changerait en
-    /// silence) : dans sa fenêtre si elle reste ouverte, sinon dans une autre.
+    /// silence) : dans la fenêtre active, sinon dans la sienne si elle reste ouverte, sinon
+    /// dans une autre.
     fn fermer_onglet_fini(&self, o: &Rc<Onglet>) {
         let sa_fenetre = self
             .fenetres()
@@ -1044,11 +1046,18 @@ impl Pupitre {
         if affiche {
             return;
         }
-        let cible = sa_fenetre.filter(|f| !f.onglets().is_empty()).or_else(|| {
-            self.fenetres()
-                .into_iter()
-                .find(|f| !f.onglets().is_empty())
-        });
+        // La fenêtre active d'abord : c'est là que le lecteur d'écran lit les annonces.
+        let ouvertes: Vec<FenetrePupitre> = self
+            .fenetres()
+            .into_iter()
+            .filter(|f| !f.onglets().is_empty())
+            .collect();
+        let cible = ouvertes
+            .iter()
+            .find(|f| f.fenetre().is_active())
+            .cloned()
+            .or_else(|| sa_fenetre.filter(|f| !f.onglets().is_empty()))
+            .or_else(|| ouvertes.first().cloned());
         if let Some(f) = cible {
             f.0.bandeau.afficher(&texte, Some(DUREE_MESSAGE_BREF));
         }

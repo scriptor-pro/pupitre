@@ -99,7 +99,8 @@ Touches laissées volontairement aux programmes :
   le dernier onglet ferme la fenêtre. Si le shell s'arrête avant d'afficher son invite (erreur
   dans `.bashrc`…) ou s'il est tué, l'onglet reste ouvert avec le message « Le shell s'est
   terminé (code N). Appuyez sur Entrée pour en ouvrir un nouveau. » Pour une connexion SSH ou
-  un éditeur, le message parle du programme, et Entrée ouvre un shell.
+  un éditeur, le message parle du programme, et Entrée ouvre un shell ; son onglet ne se ferme
+  seul que si le programme se termine sans erreur (une connexion coupée garde son onglet).
 - **Cloche** : quand un programme fait sonner la cloche, Pupitre ne fait aucun bruit. L'écran
   clignote brièvement (au plus 3 fois par seconde ; remplacé par un simple marqueur si le
   bureau demande de réduire les animations). Dans un onglet caché, le nom de l'onglet reçoit

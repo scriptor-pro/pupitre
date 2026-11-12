@@ -69,6 +69,9 @@ fn main() {
     ex.lancer("fermeture_en_arriere_plan_annoncee", || {
         fermeture_en_arriere_plan(&pupitre)
     });
+    ex.lancer("connexion_coupee_garde_l_onglet", || {
+        connexion_coupee(&pupitre)
+    });
     ex.lancer("echec_au_demarrage_garde_l_onglet", || {
         echec_au_demarrage(&pupitre)
     });
@@ -481,6 +484,39 @@ fn echec_au_demarrage(p: &Rc<Pupitre>) -> Resultat {
             "Le programme s'est terminé (code 3). Appuyez sur Entrée pour ouvrir un shell.",
         ),
         || format!("message absent : {:?}", texte(&o)),
+    )?;
+    f.executer(Raccourci::FermerOnglet);
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant);
+    verifier(ok, || "onglet de l'essai non refermé".into())
+}
+
+/// Connexion SSH coupée (ssh rend 255) vers un hôte qui a affiché son invite (marque A) :
+/// l'onglet reste, avec le message d'erreur et l'historique.
+fn connexion_coupee(p: &Rc<Pupitre>) -> Resultat {
+    let f = fenetres_visibles(p)[0].clone();
+    let avant = f.onglets().len();
+    f.ouvrir_connexion(
+        vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "printf '\\033]133;A\\007distant$ '; sleep 1; echo coupure; exit 255".into(),
+        ],
+        "serveur".into(),
+    );
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant + 1);
+    verifier(ok, || "pas de nouvel onglet".into())?;
+    let o = f.onglet_actif().ok_or("aucun onglet actif")?;
+    let ok = attendre(Duration::from_secs(10), || o.termine());
+    patienter(Duration::from_millis(300));
+    verifier(ok && f.onglets().len() == avant + 1, || {
+        format!(
+            "onglet de connexion coupée fermé ({} onglet(s))",
+            f.onglets().len()
+        )
+    })?;
+    verifier(
+        texte(&o).contains("coupure") && texte(&o).contains("(code 255)"),
+        || format!("historique ou code absent : {:?}", texte(&o)),
     )?;
     f.executer(Raccourci::FermerOnglet);
     let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant);

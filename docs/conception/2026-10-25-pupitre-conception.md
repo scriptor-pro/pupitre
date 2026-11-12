@@ -144,7 +144,9 @@ sauf la lecture OSC 52 qu'il supprime. Les événements extraits sont transmis *
   porteur, 2026-11-12 ; avant : jamais de fermeture automatique]. Fin voulue = code 0, ou tout
   code une fois l'invite affichée (marque A reçue ; `exit` rend le code de la dernière
   commande). Arrêt avant la première invite, ou par un signal : l'onglet reste avec le code et
-  « Entrée pour en ouvrir un nouveau » (relecture finale, I2).
+  « Entrée pour en ouvrir un nouveau » (relecture finale, I2). Connexion SSH ou éditeur :
+  seul le code 0 ferme l'onglet (ssh rend 255 quand la connexion tombe, même après l'invite
+  d'un hôte qui a l'intégration ; relecture des corrections, N1).
 - **Plusieurs fenêtres** : oui. **Panneaux divisés** : non (v1).
 - **Menu « nouveau terminal avec… »** listant les shells détectés.
 - **Bandeau de disposition clavier** [Décidé] : entre la barre d'onglets et la zone de texte ;

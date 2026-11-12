@@ -749,14 +749,15 @@ fn rgba(c: Rgb) -> gdk::RGBA {
     )
 }
 
-/// Fin voulue d'une session (l'onglet se ferme) : code 0, ou tout code une fois l'invite
-/// affichée (`exit` après une commande en échec rend le code de cette commande). Un arrêt
-/// avant la première invite (`.bashrc` en erreur, programme sans intégration) ou par un
-/// signal garde l'onglet, avec le code, pour le diagnostic.
-pub fn fin_voulue(code: Option<i32>, invite_vue: bool) -> bool {
+/// Fin voulue d'une session (l'onglet se ferme) : code 0 ; pour un shell (`shell`), tout code
+/// une fois l'invite affichée (`exit` après une commande en échec rend le code de cette
+/// commande). Un arrêt avant la première invite (`.bashrc` en erreur), par un signal, ou d'une
+/// connexion/d'un éditeur avec un code non nul (ssh rend 255 quand la connexion tombe, même
+/// si l'hôte distant a affiché son invite) garde l'onglet, avec le code, pour le diagnostic.
+pub fn fin_voulue(code: Option<i32>, invite_vue: bool, shell: bool) -> bool {
     match code {
         Some(0) => true,
-        Some(_) => invite_vue,
+        Some(_) => shell && invite_vue,
         None => false,
     }
 }
@@ -767,17 +768,22 @@ mod tests {
 
     #[test]
     fn fin_voulue_selon_code_et_invite() {
-        assert!(fin_voulue(Some(0), false));
-        assert!(fin_voulue(Some(0), true));
+        assert!(fin_voulue(Some(0), false, true));
+        assert!(fin_voulue(Some(0), true, true));
         assert!(
-            fin_voulue(Some(1), true),
+            fin_voulue(Some(1), true, true),
             "exit après une commande en échec"
         );
         assert!(
-            !fin_voulue(Some(3), false),
+            !fin_voulue(Some(3), false, true),
             "échec avant la première invite"
         );
-        assert!(!fin_voulue(None, true), "tué par un signal");
-        assert!(!fin_voulue(None, false));
+        assert!(!fin_voulue(None, true, true), "tué par un signal");
+        assert!(!fin_voulue(None, false, true));
+        // Connexion ou éditeur : seul le code 0 ferme (ssh rend 255 quand la connexion tombe,
+        // même si l'hôte distant a affiché son invite).
+        assert!(fin_voulue(Some(0), true, false));
+        assert!(!fin_voulue(Some(255), true, false), "connexion SSH coupée");
+        assert!(!fin_voulue(Some(1), false, false));
     }
 }
