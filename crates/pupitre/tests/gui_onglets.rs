@@ -66,6 +66,9 @@ fn main() {
         fermeture_occupee(&pupitre, &temoin)
     });
     ex.lancer("exit_ferme_l_onglet", || exit_ferme(&pupitre));
+    ex.lancer("fermeture_en_arriere_plan_annoncee", || {
+        fermeture_en_arriere_plan(&pupitre)
+    });
     ex.lancer("echec_au_demarrage_garde_l_onglet", || {
         echec_au_demarrage(&pupitre)
     });
@@ -420,6 +423,33 @@ fn exit_ferme(p: &Rc<Pupitre>) -> Resultat {
     verifier(ok, || format!("{} onglet(s) après exit", f.onglets().len()))?;
     verifier(!f.onglets().iter().any(|x| Rc::ptr_eq(x, &o)), || {
         "l'onglet fermé est encore là".into()
+    })
+}
+
+/// Un onglet non affiché dont le shell se termine : il se ferme, et c'est annoncé (le nombre
+/// d'onglets ne change pas en silence).
+fn fermeture_en_arriere_plan(p: &Rc<Pupitre>) -> Resultat {
+    let f = fenetres_visibles(p)[0].clone();
+    let avant = f.onglets().len();
+    WidgetExt::activate_action(f.fenetre(), "win.nouvel-onglet", None)
+        .map_err(|e| e.to_string())?;
+    let ok = attendre(Duration::from_secs(10), || f.onglets().len() == avant + 1);
+    verifier(ok, || "pas de nouvel onglet".into())?;
+    let o = f.onglet_actif().ok_or("aucun onglet actif")?;
+    verifier(executer(&o, "echo pret-$((2+1))", "pret-3"), || {
+        "le shell ne répond pas".into()
+    })?;
+    o.terminal().terminal().feed_child(b"sleep 2; exit\n");
+    f.executer(Raccourci::Onglet(1));
+    let ok = attendre(Duration::from_secs(15), || f.onglets().len() == avant);
+    verifier(ok, || "l'onglet d'arrière-plan ne s'est pas fermé".into())?;
+    let ok = attendre(Duration::from_secs(2), || {
+        f.messages()
+            .iter()
+            .any(|m| m.contains("fermé : son shell s'est terminé."))
+    });
+    verifier(ok, || {
+        format!("fermeture non annoncée : {:?}", f.messages())
     })
 }
 

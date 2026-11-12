@@ -45,6 +45,8 @@ const GROUPE_ONGLETS: &str = "pupitre-onglets";
 const MARQUE_CLOCHE: &str = "● ";
 /// Délai avant de refaire l'annonce du lancement (voir `reannoncer_au_lancement`).
 const DELAI_REANNONCE: Duration = Duration::from_millis(500);
+/// Durée d'affichage du message « Onglet … fermé : son shell s'est terminé. ».
+const DUREE_ANNONCE_FERMETURE: Duration = Duration::from_secs(5);
 
 /// Clés des messages persistants (un seul message par clé).
 const CLE_PANNE: &str = "panne";
@@ -774,7 +776,7 @@ impl Pupitre {
                         // invite ou par un signal, il reste, avec le code et le moyen d'ouvrir
                         // un nouveau shell.
                         o.termine.set(true);
-                        self.fermer_onglet(&o);
+                        self.fermer_onglet_fini(&o);
                     } else {
                         o.marquer_termine(code);
                     }
@@ -998,6 +1000,32 @@ impl Pupitre {
             if let Some(n) = c.page_num(&o.widget()) {
                 c.remove_page(Some(n));
             }
+        }
+    }
+
+    /// Ferme l'onglet dont le shell s'est terminé. S'il n'était pas l'onglet affiché de la
+    /// fenêtre active, la fermeture est annoncée (sinon le nombre d'onglets changerait en
+    /// silence) : dans sa fenêtre si elle reste ouverte, sinon dans une autre.
+    fn fermer_onglet_fini(&self, o: &Rc<Onglet>) {
+        let sa_fenetre = self
+            .fenetres()
+            .into_iter()
+            .find(|f| f.onglets().iter().any(|x| Rc::ptr_eq(x, o)));
+        let affiche = sa_fenetre.as_ref().is_some_and(|f| {
+            f.fenetre().is_active() && f.onglet_actif().is_some_and(|a| Rc::ptr_eq(&a, o))
+        });
+        let texte = ta("onglet-ferme-fin", &[("titre", ArgI18n::from(o.titre()))]);
+        self.fermer_onglet(o);
+        if affiche {
+            return;
+        }
+        let cible = sa_fenetre.filter(|f| !f.onglets().is_empty()).or_else(|| {
+            self.fenetres()
+                .into_iter()
+                .find(|f| !f.onglets().is_empty())
+        });
+        if let Some(f) = cible {
+            f.0.bandeau.afficher(&texte, Some(DUREE_ANNONCE_FERMETURE));
         }
     }
 

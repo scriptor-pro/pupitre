@@ -216,6 +216,7 @@ onglets-cloche-dans = { $texte } ; cloche dans : { $liste }
 
 shell-termine = Le shell s'est terminé (code { $code }). Appuyez sur Entrée pour en ouvrir un nouveau.
 shell-termine-signal = Le shell s'est terminé (code signal). Appuyez sur Entrée pour en ouvrir un nouveau.
+onglet-ferme-fin = Onglet « { $titre } » fermé : son shell s'est terminé.
 shell-lancement-impossible = Le shell n'a pas pu être lancé : { $erreur }
 
 fond-injoignable = Pupitre ne peut pas joindre le processus de fond : { $erreur }
