@@ -844,6 +844,8 @@ impl Pupitre {
                     f.afficher_message(&t);
                 }
             }
+            // Copie OSC 52 et notification de programme : traitées plus tard (étape 4).
+            ServerMsg::PressePapiers { .. } | ServerMsg::Notification { .. } => {}
             ServerMsg::Welcome { .. } | ServerMsg::Sessions(_) | ServerMsg::Reponse { .. } => {}
         }
     }

@@ -521,7 +521,7 @@ fn client_v2_negocie_2() {
     assert_eq!(c.recevoir(), ServerMsg::Welcome { version: 2 });
     // Hors de la plage acceptée (trop récent, ou nul) : refus.
     let mut c = Client::brut(&s.socket);
-    c.envoyer(ClientMsg::Hello { version: 4 });
+    c.envoyer(ClientMsg::Hello { version: 5 });
     assert!(
         matches!(c.recevoir(), ServerMsg::Error(e) if e.contains("version du protocole incompatible"))
     );
@@ -1618,6 +1618,110 @@ fn client_v2_flux_sans_marque() {
         matches!(m, ServerMsg::Replay { .. }).then_some(())
     });
     assert!(c.silence(Duration::from_millis(300)));
+}
+
+/// Octets, copie dans le presse-papiers et notification arrivent dans l'ordre du flux ; un
+/// client en version 3 ne reçoit ni l'une ni l'autre ; la reprise ne les rejoue pas.
+#[test]
+fn ordre_octets_puis_presse_papiers() {
+    let s = demarrer(Duration::from_secs(30));
+    let mut c = Client::connecter(&s.socket);
+    let id = ouvrir_script(
+        &mut c,
+        "printf 'a\\033]52;c;QUJD\\007b\\033]9;Claude: fini\\007c\\033]777;notify;T;C\\007d\\n'; sleep 3",
+    );
+    let mut ordre = Vec::new();
+    let mut octets = Vec::new();
+    let vider = |ordre: &mut Vec<String>, octets: &mut Vec<u8>| {
+        ordre.push(format!("o:{}", String::from_utf8_lossy(octets)));
+        octets.clear();
+    };
+    c.attendre(|m| {
+        match m {
+            ServerMsg::Output { id: i, data } if *i == id => octets.extend(data),
+            ServerMsg::PressePapiers { id: i, texte } if *i == id => {
+                vider(&mut ordre, &mut octets);
+                ordre.push(format!("p:{texte}"));
+            }
+            ServerMsg::Notification {
+                id: i,
+                titre,
+                corps,
+            } if *i == id => {
+                vider(&mut ordre, &mut octets);
+                ordre.push(format!("n:{titre:?}:{corps}"));
+            }
+            _ => {}
+        }
+        octets.ends_with(b"d\r\n").then_some(())
+    });
+    vider(&mut ordre, &mut octets);
+    assert_eq!(
+        ordre,
+        vec![
+            "o:a\x1b]52;c;QUJD\x07".to_string(),
+            "p:ABC".into(),
+            "o:b\x1b]9;Claude: fini\x07".into(),
+            "n:None:Claude: fini".into(),
+            "o:c\x1b]777;notify;T;C\x07".into(),
+            "n:Some(\"T\"):C".into(),
+            "o:d\r\n".into(),
+        ]
+    );
+    // Reprise : le rejeu rend les octets, sans copie ni notification.
+    let mut c2 = Client::connecter(&s.socket);
+    c2.envoyer(ClientMsg::Attach { id });
+    c2.attendre(|m| {
+        assert!(!m.est_v4(), "rejoué : {m:?}");
+        matches!(m, ServerMsg::ReplayMarque { .. }).then_some(())
+    });
+    assert!(c2.silence(Duration::from_millis(300)));
+    // Un client v3 ne reçoit ni l'une ni l'autre, seulement les octets.
+    let mut c3 = Client::brut(&s.socket);
+    c3.envoyer(ClientMsg::Hello { version: 3 });
+    assert_eq!(c3.recevoir(), ServerMsg::Welcome { version: 3 });
+    let id3 = c3.ouvrir(&[
+        "/bin/sh",
+        "-c",
+        "printf 'a\\033]52;c;QUJD\\007b\\033]9;x\\007c\\n'; sleep 2",
+    ]);
+    let mut tout = Vec::new();
+    c3.attendre(|m| {
+        assert!(!m.est_v4(), "message v4 reçu par un client v3 : {m:?}");
+        if let ServerMsg::Output { id: i, data } = m {
+            if *i == id3 {
+                tout.extend(data);
+            }
+        }
+        tout.ends_with(b"c\r\n").then_some(())
+    });
+}
+
+/// Un client en version 3 ne reçoit jamais les messages de la version 4.
+#[test]
+fn adapter_pour_v3_retire_v4() {
+    use pupitre_fond::serveur::adapter_pour;
+    let copie = ServerMsg::PressePapiers {
+        id: 1,
+        texte: "x".into(),
+    };
+    let notif = ServerMsg::Notification {
+        id: 1,
+        titre: None,
+        corps: "x".into(),
+    };
+    for v in [1, 2, 3] {
+        assert_eq!(adapter_pour(copie.clone(), v), None);
+        assert_eq!(adapter_pour(notif.clone(), v), None);
+    }
+    assert_eq!(adapter_pour(copie.clone(), 4), Some(copie));
+    assert_eq!(adapter_pour(notif.clone(), 4), Some(notif));
+    // Ce qui est plus ancien passe toujours.
+    let sortie = ServerMsg::Output {
+        id: 1,
+        data: vec![1],
+    };
+    assert_eq!(adapter_pour(sortie.clone(), 1), Some(sortie));
 }
 
 /// Flot de fausses marques (un fichier piégé, un `cat`) : le client reste connecté, reçoit

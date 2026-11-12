@@ -379,6 +379,23 @@ impl Etat {
                         // pour la relecture), les octets continuent de passer.
                         Morceau::Marque(marque)
                             if !s.limite_marques.admettre(&marque, maintenant) => {}
+                        // Copie ou notification : transmises en direct seulement (jamais
+                        // gardées pour la relecture, une reprise ne recopie ni ne renotifie),
+                        // dans la même limite de débit que les marques.
+                        Morceau::PressePapiers(_) | Morceau::Notification { .. }
+                            if !s.limite_marques.admettre_evenement(maintenant) => {}
+                        Morceau::PressePapiers(texte) => {
+                            envoyer_octets(&mut messages, sid, &mut octets);
+                            messages.push(ServerMsg::PressePapiers { id: sid, texte });
+                        }
+                        Morceau::Notification { titre, corps } => {
+                            envoyer_octets(&mut messages, sid, &mut octets);
+                            messages.push(ServerMsg::Notification {
+                                id: sid,
+                                titre,
+                                corps,
+                            });
+                        }
                         Morceau::Marque(marque) => {
                             if !octets.is_empty() {
                                 let data = std::mem::take(&mut octets);
@@ -909,9 +926,20 @@ impl Etat {
     }
 }
 
+/// Met en message les octets en attente (s'il y en a), avant un événement du flux.
+fn envoyer_octets(messages: &mut Vec<ServerMsg>, id: SessionId, octets: &mut Vec<u8>) {
+    if !octets.is_empty() {
+        messages.push(ServerMsg::Output {
+            id,
+            data: std::mem::take(octets),
+        });
+    }
+}
+
 /// Message tel qu'un client en `version` peut le recevoir, ou `None` s'il ne doit rien
 /// recevoir : un message de la version 2 n'est jamais envoyé à un client en version 1, ni
-/// une marque de commande (version 3) à un client en version 1 ou 2 ; l'état « trousseau
+/// une marque de commande (version 3) à un client en version 1 ou 2, ni une copie ou une
+/// notification de programme (version 4) à un client en version 1 à 3 ; l'état « trousseau
 /// lent » (version 3) devient « absent » pour un client en version 2.
 pub fn adapter_pour(m: ServerMsg, version: u32) -> Option<ServerMsg> {
     // Un rejeu avec marques n'arrive jamais à un client en version 1 ou 2 : il devient un
@@ -920,7 +948,7 @@ pub fn adapter_pour(m: ServerMsg, version: u32) -> Option<ServerMsg> {
         ServerMsg::ReplayMarque { id, data, .. } if version < 3 => ServerMsg::Replay { id, data },
         m => m,
     };
-    if (m.est_v2() && version < 2) || (m.est_v3() && version < 3) {
+    if (m.est_v2() && version < 2) || (m.est_v3() && version < 3) || (m.est_v4() && version < 4) {
         return None;
     }
     match m {

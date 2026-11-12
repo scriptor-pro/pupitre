@@ -7,7 +7,7 @@
 use crate::invite::classer_invite;
 use crate::trousseau::{Coffre, EtatTrousseau};
 use pupitre_i18n::{t, ta, ArgI18n};
-use pupitre_proto::{read_frame, write_frame, ClientMsg, Genre, ServerMsg, VERSION};
+use pupitre_proto::{read_frame, write_frame, ClientMsg, Genre, ServerMsg};
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use zeroize::Zeroizing;
@@ -96,9 +96,9 @@ fn mode_normal(
     };
     // Poignée de main : un fond plus ancien (qui tourne encore avec des onglets après une
     // mise à jour) refuse la version courante ; on retente alors en version 2.
-    let (mut flux, version) = match poignee(&socket, VERSION) {
+    let (mut flux, version) = match poignee(&socket, VERSION_ASKPASS) {
         Ok(r) => r,
-        Err(Poignee::Refus) if VERSION > VERSION_PRECEDENTE => {
+        Err(Poignee::Refus) if VERSION_ASKPASS > VERSION_PRECEDENTE => {
             match poignee(&socket, VERSION_PRECEDENTE) {
                 Ok(r) => r,
                 Err(e) => return e.dire(),
@@ -177,7 +177,10 @@ fn mode_normal(
     }
 }
 
-/// Dernière version du protocole avant la courante, où l'askpass sait encore parler.
+/// Version du protocole que parle l'askpass (la 3 : demandes et état « trousseau lent » ; il
+/// n'a que faire des messages de la version 4, qu'un fond en version 3 refuserait donc à tort).
+const VERSION_ASKPASS: u32 = 3;
+/// Version précédente, où l'askpass sait encore parler.
 const VERSION_PRECEDENTE: u32 = 2;
 
 /// Échec de la poignée de main avec le processus de fond.
@@ -258,7 +261,13 @@ mod tests {
             let (mut s, _) = l.accept().unwrap();
             let mut recus = Vec::new();
             recus.push(read_frame::<_, ClientMsg>(&mut s).unwrap()); // Hello
-            write_frame(&mut s, &ServerMsg::Welcome { version: VERSION }).unwrap();
+            write_frame(
+                &mut s,
+                &ServerMsg::Welcome {
+                    version: VERSION_ASKPASS,
+                },
+            )
+            .unwrap();
             recus.push(read_frame::<_, ClientMsg>(&mut s).unwrap()); // Demander
             write_frame(&mut s, &ServerMsg::Message("à ignorer".into())).unwrap();
             write_frame(&mut s, &ServerMsg::DemandeClose { demande: 77 }).unwrap();
@@ -456,7 +465,12 @@ mod tests {
             Some("s3cret")
         );
         let recus = h.join().unwrap();
-        assert_eq!(recus[0], ClientMsg::Hello { version: VERSION });
+        assert_eq!(
+            recus[0],
+            ClientMsg::Hello {
+                version: VERSION_ASKPASS
+            }
+        );
         assert_eq!(
             recus[1],
             ClientMsg::Demander {

@@ -16,8 +16,9 @@ pub use trame::{read_frame, write_frame, FrameError, MAX_FRAME};
 /// Version courante du protocole ; échangée dans `Hello`/`Welcome`.
 /// La version 2 ajoute les demandes de l'askpass SSH ; la version 3 l'ouverture d'un onglet
 /// avec des variables d'environnement, les marques de commandes et l'état « trousseau
-/// lent ». Chacune reste compatible avec les précédentes.
-pub const VERSION: u32 = 3;
+/// lent » ; la version 4 la copie dans le presse-papiers (OSC 52) et les notifications
+/// demandées par un programme (OSC 9, OSC 777). Chacune reste compatible avec les précédentes.
+pub const VERSION: u32 = 4;
 /// Plus ancienne version encore acceptée par le processus de fond.
 pub const VERSION_MIN: u32 = 1;
 
@@ -155,6 +156,20 @@ pub enum ServerMsg {
         id: SessionId,
         data: Vec<u8>,
         marques: Vec<(u32, MarqueCommande)>,
+    },
+    /// Version 4 : un programme a demandé de copier `texte` dans le presse-papiers (OSC 52,
+    /// écriture seulement), vu en direct ; jamais rejoué à la reprise. Variante ajoutée en fin
+    /// d'énumération.
+    PressePapiers {
+        id: SessionId,
+        texte: String,
+    },
+    /// Version 4 : un programme demande une notification (OSC 9, OSC 777), vue en direct ;
+    /// jamais rejouée à la reprise. Variante ajoutée en fin d'énumération.
+    Notification {
+        id: SessionId,
+        titre: Option<String>,
+        corps: String,
     },
 }
 
@@ -340,6 +355,18 @@ impl std::fmt::Debug for ServerMsg {
                 .field("marque", marque)
                 .field("rejouee", rejouee)
                 .finish(),
+            // Le texte copié peut être un secret : jamais montré par `Debug`.
+            ServerMsg::PressePapiers { id, texte } => f
+                .debug_struct("PressePapiers")
+                .field("id", id)
+                .field("caracteres", &texte.chars().count())
+                .finish(),
+            ServerMsg::Notification { id, titre, corps } => f
+                .debug_struct("Notification")
+                .field("id", id)
+                .field("titre", titre)
+                .field("corps", corps)
+                .finish(),
         }
     }
 }
@@ -363,7 +390,18 @@ impl ServerMsg {
             ServerMsg::Message(_) => "Message",
             ServerMsg::Marque { .. } => "Marque",
             ServerMsg::ReplayMarque { .. } => "ReplayMarque",
+            ServerMsg::PressePapiers { .. } => "PressePapiers",
+            ServerMsg::Notification { .. } => "Notification",
         }
+    }
+
+    /// Vrai pour les variantes introduites par la version 4, qu'un client en version 1 à 3
+    /// ne sait pas décoder.
+    pub fn est_v4(&self) -> bool {
+        matches!(
+            self,
+            ServerMsg::PressePapiers { .. } | ServerMsg::Notification { .. }
+        )
     }
 
     /// Vrai pour les variantes introduites par la version 3, qu'un client en version 1 ou 2
@@ -630,6 +668,22 @@ mod tests {
         assert_eq!(postcard::to_stdvec(&rejeu).unwrap()[0], 14);
         assert!(rejeu.est_v3() && !rejeu.est_v2());
         assert_eq!(rejeu.nom(), "ReplayMarque");
+        let copie = ServerMsg::PressePapiers {
+            id: 1,
+            texte: "secret".into(),
+        };
+        assert_eq!(postcard::to_stdvec(&copie).unwrap()[0], 15);
+        assert!(copie.est_v4() && !copie.est_v3());
+        assert!(!format!("{copie:?}").contains("secret"));
+        let notif = ServerMsg::Notification {
+            id: 1,
+            titre: Some("t".into()),
+            corps: "c".into(),
+        };
+        assert_eq!(postcard::to_stdvec(&notif).unwrap()[0], 16);
+        assert!(notif.est_v4() && !notif.est_v3());
+        ar(copie);
+        ar(notif);
         assert_eq!(postcard::to_stdvec(&EtatTrousseau::Lent).unwrap(), [3]);
         // Les valeurs v2 de l'état ne bougent pas.
         assert_eq!(postcard::to_stdvec(&EtatTrousseau::Absent).unwrap(), [2]);
