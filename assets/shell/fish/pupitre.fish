@@ -18,12 +18,36 @@ end
 if functions -q fish_prompt; and not functions -q __pupitre_fish_prompt_origine
     functions -c fish_prompt __pupitre_fish_prompt_origine
     function fish_prompt --description "Invite avec la marque de fin d'invite de Pupitre"
-        # $status est celui de la dernière commande : on le garde en premier, on le publie pour
-        # l'invite Starship (symbole rouge après un échec), puis on le rétablit pour l'invite
-        # d'origine (qui le lit à son tour).
-        set -l c $status
-        set -gx PUPITRE_CODE $c
-        __pupitre_rendre $c
+        # $status et $pipestatus sont ceux de la dernière commande : on les lit ensemble, en
+        # premier ; on publie le code pour l'invite Starship (symbole rouge après un échec),
+        # puis on les rétablit pour l'invite d'origine (qui les lit à son tour).
+        set -l s $status $pipestatus
+        set -gx PUPITRE_CODE $s[1]
+        # $pipestatus ne traverse ni une fonction ni `eval` : le pipeline qui le rétablit (un
+        # étage par code) est écrit ici. Au-delà de 8 étages, ou si $status n'est pas le dernier
+        # code (commande niée par `not`), seul $status est rétabli.
+        set -l p $s[2..-1]
+        if test "$s[1]" != "$p[-1]"
+            set p $s[1]
+        end
+        switch (count $p)
+            case 2
+                __pupitre_rendre $p[1] | __pupitre_rendre $p[2]
+            case 3
+                __pupitre_rendre $p[1] | __pupitre_rendre $p[2] | __pupitre_rendre $p[3]
+            case 4
+                __pupitre_rendre $p[1] | __pupitre_rendre $p[2] | __pupitre_rendre $p[3] | __pupitre_rendre $p[4]
+            case 5
+                __pupitre_rendre $p[1] | __pupitre_rendre $p[2] | __pupitre_rendre $p[3] | __pupitre_rendre $p[4] | __pupitre_rendre $p[5]
+            case 6
+                __pupitre_rendre $p[1] | __pupitre_rendre $p[2] | __pupitre_rendre $p[3] | __pupitre_rendre $p[4] | __pupitre_rendre $p[5] | __pupitre_rendre $p[6]
+            case 7
+                __pupitre_rendre $p[1] | __pupitre_rendre $p[2] | __pupitre_rendre $p[3] | __pupitre_rendre $p[4] | __pupitre_rendre $p[5] | __pupitre_rendre $p[6] | __pupitre_rendre $p[7]
+            case 8
+                __pupitre_rendre $p[1] | __pupitre_rendre $p[2] | __pupitre_rendre $p[3] | __pupitre_rendre $p[4] | __pupitre_rendre $p[5] | __pupitre_rendre $p[6] | __pupitre_rendre $p[7] | __pupitre_rendre $p[8]
+            case '*'
+                __pupitre_rendre $s[1]
+        end
         __pupitre_fish_prompt_origine
         printf '\e]133;B\a'
     end

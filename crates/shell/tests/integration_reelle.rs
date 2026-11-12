@@ -590,6 +590,27 @@ fn fish_sans_double_marque() {
     }
 }
 
+/// fish : l'invite de l'utilisateur voit `$status` et `$pipestatus` de la dernière commande,
+/// malgré l'enveloppe de Pupitre (l'invite par défaut de fish affiche `[1|0|1]`).
+#[test]
+fn fish_invite_voit_pipestatus() {
+    let banc = Banc::nouveau();
+    banc.ecrire(
+        ".config/fish/config.fish",
+        "function fish_prompt\n    echo -n \"[ps=$pipestatus st=$status]> \"\nend\n",
+    );
+    let Some(s) = Session::lancer(&banc, "fish", ModeInvite::Shell) else {
+        return;
+    };
+    s.attendre_marques(2);
+    s.envoyer("false | true | false\n");
+    s.attendre_marques(6);
+    s.stabiliser();
+    let flux = String::from_utf8_lossy(&s.flux()).into_owned();
+    assert!(flux.contains("[ps=1 0 1 st=1]> "), "{flux:?}");
+    s.fermer();
+}
+
 #[test]
 fn mode_shell_garde_l_invite_native() {
     for shell in ["bash", "zsh", "fish", "nu"] {
