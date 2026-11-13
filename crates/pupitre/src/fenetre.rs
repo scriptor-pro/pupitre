@@ -100,6 +100,9 @@ pub struct Onglet {
     /// Ce qui a été lancé dans l'onglet (`Defaut` pour une session reprise) : un nouvel
     /// onglet ouvert depuis celui-ci en reprend le shell.
     choix: RefCell<Choix>,
+    /// Une réouverture du shell est demandée au fond et pas encore répondue : une seconde
+    /// Entrée est ignorée (sinon le second shell resterait orphelin dans le fond).
+    reouverture_en_cours: Cell<bool>,
 }
 
 /// Annonces de commandes gardées par onglet (observées par les tests).
@@ -391,6 +394,11 @@ pub struct Pupitre {
     generation: Cell<u64>,
     attend_liste: Cell<bool>,
     attentes: RefCell<VecDeque<Attente>>,
+    /// Numéro de la dernière recherche des shells installés (une par relecture de la
+    /// configuration) : seule la plus récente est appliquée.
+    recherche_shells: Cell<u64>,
+    /// Dernier résultat de la recherche : `(libellé, valeur de l'action)` du sous-menu.
+    entrees_shells: RefCell<Option<Vec<(String, String)>>>,
     onglets: RefCell<Vec<Rc<Onglet>>>,
     fenetres: RefCell<Vec<FenetrePupitre>>,
     /// Fenêtres des demandes SSH en attente de réponse.
@@ -432,6 +440,8 @@ impl Pupitre {
             generation: Cell::new(0),
             attend_liste: Cell::new(false),
             attentes: RefCell::new(VecDeque::new()),
+            recherche_shells: Cell::new(0),
+            entrees_shells: RefCell::new(None),
             onglets: RefCell::new(Vec::new()),
             fenetres: RefCell::new(Vec::new()),
             demandes: RefCell::new(HashMap::new()),
@@ -755,10 +765,47 @@ impl Pupitre {
             }),
         );
         self.changer_theme(theme);
+        self.chercher_shells();
         for f in self.fenetres() {
-            f.rafraichir_shells();
             f.rafraichir_menu();
         }
+    }
+
+    /// Nombre de recherches des shells lancées depuis le démarrage (observé par les tests).
+    pub fn recherches_shells(&self) -> u64 {
+        self.recherche_shells.get()
+    }
+
+    /// Cherche les shells installés sur un fil à part (un dossier du `PATH` sur un montage
+    /// réseau figé ne doit pas geler l'interface), une seule fois pour toutes les fenêtres.
+    /// Les menus gardent leurs entrées en attendant ; le fil ne touche à aucun objet GTK.
+    fn chercher_shells(self: &Rc<Self>) {
+        let numero = self.recherche_shells.get() + 1;
+        self.recherche_shells.set(numero);
+        let config = self.config.borrow().clone();
+        let path = shells::path_courant();
+        let (tx, rx) = async_channel::bounded(1);
+        let lance = std::thread::Builder::new()
+            .name("recherche-shells".into())
+            .spawn(move || {
+                let _ = tx.send_blocking(shells::entrees_menu(&config, &path));
+            });
+        if let Err(e) = lance {
+            eprintln!("pupitre: recherche des shells impossible : {e}");
+            return;
+        }
+        let faible = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Ok(entrees) = rx.recv().await else { return };
+            let Some(p) = faible.upgrade() else { return };
+            if p.recherche_shells.get() != numero {
+                return; // une relecture plus récente est en route
+            }
+            *p.entrees_shells.borrow_mut() = Some(entrees);
+            for f in p.fenetres() {
+                f.rafraichir_shells();
+            }
+        });
     }
 
     /// Surveille le fichier de thème choisi (et lui seul).
@@ -822,16 +869,18 @@ impl Pupitre {
 
     /// Ouvre un nouveau shell dans l'onglet `onglet`, dont le shell s'est terminé.
     pub fn rouvrir(self: &Rc<Self>, onglet: &Rc<Onglet>) {
-        if !onglet.termine() || self.client.borrow().is_none() {
+        if !onglet.termine() || onglet.reouverture_en_cours.get() || self.client.borrow().is_none()
+        {
             return;
         }
         let (cols, rows) = onglet.terminal.grille().unwrap_or(GRILLE_PAR_DEFAUT);
-        self.ouvrir_session(
+        let parti = self.ouvrir_session(
             &Choix::Defaut,
             cols,
             rows,
             Attente::Remplacer(Rc::downgrade(onglet)),
         );
+        onglet.reouverture_en_cours.set(parti);
     }
 
     fn connecter(self: &Rc<Self>) -> Result<(), String> {
@@ -845,7 +894,7 @@ impl Pupitre {
         );
         *self.client.borrow_mut() = Some(Rc::new(client));
         // Les réponses attendues de l'ancienne connexion n'arriveront plus.
-        self.attentes.borrow_mut().clear();
+        self.vider_attentes();
         let faible = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             while let Ok(m) = recus.recv().await {
@@ -959,7 +1008,9 @@ impl Pupitre {
                         }
                         _ => self.envoyer(ClientMsg::Close { id }),
                     },
-                    Some(Attente::Remplacer(o)) => match o.upgrade() {
+                    Some(Attente::Remplacer(o)) => match o.upgrade().inspect(|o| {
+                        o.reouverture_en_cours.set(false);
+                    }) {
                         Some(o) if o.carnet().is_some() => {
                             o.terminal.relier(id);
                             o.termine.set(false);
@@ -991,6 +1042,7 @@ impl Pupitre {
                     }
                     Some(Attente::Remplacer(o)) => {
                         if let Some(o) = o.upgrade() {
+                            o.reouverture_en_cours.set(false);
                             o.terminal
                                 .on_output(format!("\r\n{message}\r\n").as_bytes());
                         }
@@ -1178,11 +1230,19 @@ impl Pupitre {
         }
     }
 
+    /// Les réponses attendues n'arriveront plus : aucune réouverture n'est plus en cours.
+    fn vider_attentes(&self) {
+        self.attentes.borrow_mut().clear();
+        for o in self.onglets.borrow().iter() {
+            o.reouverture_en_cours.set(false);
+        }
+    }
+
     fn connexion_perdue(self: &Rc<Self>) {
         *self.client.borrow_mut() = None;
         self.generation.set(self.generation.get() + 1);
         self.attend_liste.set(false);
-        self.attentes.borrow_mut().clear();
+        self.vider_attentes();
         // Plus personne à qui répondre.
         let demandes: Vec<gtk::Window> =
             self.demandes.borrow_mut().drain().map(|(_, w)| w).collect();
@@ -1530,7 +1590,10 @@ impl FenetrePupitre {
     /// le clic en cours).
     fn rafraichir_shells(&self) {
         let Some(p) = self.pupitre() else { return };
-        let entrees = shells::entrees_menu(&p.config.borrow(), &shells::path_courant());
+        // Pas encore de résultat : le sous-menu garde ses entrées.
+        let Some(entrees) = p.entrees_shells.borrow().clone() else {
+            return;
+        };
         if entrees == self.entrees_nouvel_onglet_avec() {
             return;
         }
@@ -2162,6 +2225,7 @@ fn creer_onglet(p: &Rc<Pupitre>, client: Rc<Client>, id: SessionId) -> Rc<Onglet
         derniere_bulle: Cell::new(None),
         annonces: RefCell::new(VecDeque::new()),
         choix: RefCell::new(Choix::Defaut),
+        reouverture_en_cours: Cell::new(false),
     });
 
     // Fin d'une commande vue en direct : annonce, indicateur, bulle (voir `fin_commande`).

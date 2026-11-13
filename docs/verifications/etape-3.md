@@ -147,10 +147,10 @@ Orca 21/21 ; isolement conforme ; intégration réelle des shells 26/26.
 
 - M5 : un binaire de développement prend les fichiers d'intégration de `/usr/share/pupitre/shell`
   si le paquet est installé.
-- M7 : recherche des shells sur le fil GTK à chaque relecture de la configuration (un dossier
+- M7 (réglé à l'étape 4, commit COMMIT) : recherche des shells sur le fil GTK à chaque relecture de la configuration (un dossier
   du `PATH` sur un montage réseau figé gèlerait l'interface ; plausible, non confirmé).
 - N3 : deux onglets de même titre fermés à moins de 5 s : une seule annonce.
-- N4 (antérieur à l'étape) : deux Entrée rapides sur un onglet terminé peuvent laisser un shell
+- N4 (réglé à l'étape 4, commit COMMIT ; antérieur à l'étape 3) : deux Entrée rapides sur un onglet terminé peuvent laisser un shell
   orphelin dans le processus de fond.
 - Un shell en `set -e` qui meurt sur une commande en échec après son invite ferme son onglet
   (comme `exit`).

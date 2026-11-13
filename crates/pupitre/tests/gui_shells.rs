@@ -47,6 +47,9 @@ fn main() {
 
     let mut ex = Executeur::new();
     ex.lancer("menu_nouvel_onglet_avec", || menu(&pupitre));
+    ex.lancer("menu_refait_une_fois_par_relecture", || {
+        menu_refait_une_fois_par_relecture(&pupitre)
+    });
     ex.lancer("onglet_ouvert_avec_le_shell_choisi", || choisi(&pupitre));
     ex.lancer("nouvel_onglet_reprend_le_shell_actif", || reprend(&pupitre));
     ex.lancer("nouvel_onglet_apres_connexion_shell_par_defaut", || {
@@ -123,6 +126,13 @@ fn declares() -> Vec<ShellDeclare> {
 fn menu(p: &Rc<Pupitre>) -> Resultat {
     p.appliquer_config(Ok(reglages("", declares())));
     let f = premiere_fenetre(p).ok_or("pas de fenêtre")?;
+    // La recherche des shells se fait sur un fil à part : le menu est refait au retour.
+    let ok = attendre(Duration::from_secs(10), || {
+        f.entrees_nouvel_onglet_avec()
+            .iter()
+            .any(|(l, _)| l == "Serveur")
+    });
+    verifier(ok, || "sous-menu non mis à jour".into())?;
     let libelles: Vec<String> = f
         .entrees_nouvel_onglet_avec()
         .into_iter()
@@ -299,4 +309,37 @@ fn fish_absent(p: &Rc<Pupitre>) -> Resultat {
         })?;
     }
     Ok(())
+}
+
+/// Une relecture de la configuration lance une seule recherche des shells, quel que soit le
+/// nombre de fenêtres ; toutes les fenêtres reçoivent le résultat.
+fn menu_refait_une_fois_par_relecture(p: &Rc<Pupitre>) -> Resultat {
+    let f1 = premiere_fenetre(p).ok_or("pas de fenêtre")?;
+    let f2 = p.nouvelle_fenetre();
+    let avant = p.recherches_shells();
+    p.appliquer_config(Ok(reglages("", vec![declare_nomme("Unique")])));
+    verifier(p.recherches_shells() == avant + 1, || {
+        format!(
+            "{} recherches pour une relecture",
+            p.recherches_shells() - avant
+        )
+    })?;
+    let ok = attendre(Duration::from_secs(10), || {
+        [&f1, &f2].iter().all(|f| {
+            f.entrees_nouvel_onglet_avec()
+                .iter()
+                .any(|(l, _)| l == "Unique")
+        })
+    });
+    verifier(ok, || "une fenêtre n'a pas reçu le sous-menu".into())?;
+    verifier(p.recherches_shells() == avant + 1, || {
+        "recherche supplémentaire".into()
+    })
+}
+
+fn declare_nomme(nom: &str) -> ShellDeclare {
+    ShellDeclare {
+        nom: nom.into(),
+        commande: vec!["/bin/sh".into()],
+    }
 }

@@ -90,6 +90,9 @@ fn main() {
     ex.lancer("focus_apres_reprise", || {
         focus_apres_reprise(&pupitre, &socket)
     });
+    ex.lancer("deux_entrees_un_seul_shell", || {
+        deux_entrees(&pupitre, &temoin)
+    });
     ex.lancer("connexion_perdue_affiche_un_message", || {
         connexion_perdue(&pupitre, &socket)
     });
@@ -764,4 +767,31 @@ fn reprise_apres_plantage() -> Resultat {
     let _ = appli.wait();
     fermer_sessions(&socket);
     res
+}
+
+/// Deux Entrée rapides sur un onglet terminé : un seul nouveau shell dans le fond.
+fn deux_entrees(p: &Rc<Pupitre>, temoin: &Temoin) -> Resultat {
+    let f = fenetres_visibles(p)[0].clone();
+    let o = f.onglet_actif().ok_or("aucun onglet actif")?;
+    let ancien = o.terminal().id();
+    o.terminal().terminal().feed_child(b"kill -9 $$\n");
+    let ok = attendre(Duration::from_secs(10), || o.termine());
+    verifier(ok, || "fin du shell non signalée".into())?;
+    let avant: Vec<_> = temoin.sessions().iter().map(|s| s.id).collect();
+    p.rouvrir(&o);
+    p.rouvrir(&o);
+    let ok = attendre(Duration::from_secs(10), || {
+        !o.termine() && o.terminal().id() != ancien
+    });
+    verifier(ok, || "pas de nouveau shell".into())?;
+    // Laisse le temps à un éventuel second shell d'arriver.
+    attendre(Duration::from_millis(800), || false);
+    let nouvelles = temoin
+        .sessions()
+        .iter()
+        .filter(|s| !avant.contains(&s.id))
+        .count();
+    verifier(nouvelles == 1, || {
+        format!("{nouvelles} sessions nouvelles dans le fond (une attendue)")
+    })
 }
