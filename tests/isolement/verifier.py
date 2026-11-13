@@ -85,6 +85,23 @@ def session_type(env, perso):
     touches(env, "ctrl+shift+f")
     taper(env, "bonjour")
     touches(env, "Escape", "ctrl+plus", "ctrl+plus", "ctrl+0")
+    # Copie demandée par un programme (OSC 52) : signalée dans la fenêtre, aucun fichier.
+    taper(env, "printf '\\e]52;c;QUJD\\a'")
+    time.sleep(1)
+    # Fenêtre de réglages : un champ change (taille de la police), pupitre.toml est réécrit
+    # (avec sa sauvegarde pupitre.toml.bak, dans le dossier de Pupitre). Le raccourci est
+    # donné par pupitre.toml (relu à chaud) ; la fenêtre s'ouvre et se referme au clavier.
+    chemin = os.path.join(env["XDG_CONFIG_HOME"], "pupitre", "pupitre.toml")
+    if os.path.exists(chemin):
+        with open(chemin, "a", encoding="utf-8") as f:
+            f.write('\n[raccourcis]\nreglages = "Ctrl+Maj+R"\n')
+        time.sleep(3)
+        touches(env, "ctrl+shift+r")
+        time.sleep(2)
+        touches(env, "Tab", "Up", "Tab")  # Police, puis Taille (+1), validée en quittant
+        time.sleep(2)
+        touches(env, "Escape")
+        time.sleep(1)
     touches(env, "ctrl+shift+n")  # seconde fenêtre
     time.sleep(1)
     chemin = os.path.join(env["XDG_CONFIG_HOME"], "pupitre", "pupitre.toml")
@@ -309,6 +326,9 @@ def main():
     lignes.append("~/.config/starship.toml personnel ouvert ou consulté : "
                   + ("jamais" if not perso_ouvert else ""))
     lignes += [f"  {o}" for o in perso_ouvert]
+    sauvegarde = os.path.exists(os.path.join(env["XDG_CONFIG_HOME"], "pupitre", "pupitre.toml.bak"))
+    lignes.append("Réglage changé dans la fenêtre (pupitre.toml.bak créé, dans le dossier de Pupitre) : "
+                  + ("oui" if sauvegarde else "NON"))
     lignes.append("Invite Starship de Pupitre (pupitre/starship.toml créé) : "
                   + ("oui" if config_pupitre else "NON"))
     lignes.append("Phrase de passe de test dans un fichier sous HOME ou XDG_RUNTIME_DIR "
@@ -327,7 +347,7 @@ def main():
     print(rapport)
     shutil.rmtree(perso, ignore_errors=True)
     return 1 if (reseau or ecritures or fichiers or phrase_argv or manquants
-                 or not cle_chargee or perso_ouvert or not config_pupitre or arret != "propre") else 0
+                 or not cle_chargee or perso_ouvert or not config_pupitre or not sauvegarde or arret != "propre") else 0
 
 
 sys.exit(main())

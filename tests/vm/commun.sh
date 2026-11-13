@@ -124,6 +124,40 @@ PY
   kill "$ecoute" 2>/dev/null
   verdict "fin de commande annoncée (événement d'annonce AT-SPI après sleep 6)" '^annonce.Commande terminée en 6 s\.$' "$R/annonces"
 
+  # Disposition lue : le bandeau de disposition du clavier (étiquette dont l'aide est
+  # « Disposition du clavier en cours ») n'est pas vide dans l'arbre d'accessibilité.
+  python3 - > "$R/disposition" 2>&1 <<'PY'
+import pyatspi
+def voir(n, prof=0):
+    if n is None or prof > 12:
+        return
+    try:
+        if n.getRoleName() == "label" and "Disposition du clavier" in (n.description or ""):
+            print(f"bandeau « {n.name} »")
+    except Exception:
+        pass
+    for i in range(min(n.childCount, 30)):
+        voir(n.getChildAtIndex(i), prof + 1)
+for app in pyatspi.Registry.getDesktop(0):
+    if app and app.name and "upitre" in app.name:
+        voir(app)
+PY
+  verdict "disposition lue : bandeau du clavier non vide" '^bandeau « [^ »]' "$R/disposition"
+
+  # Bulle de fin de commande : fenêtre non active (une fenêtre de Pupitre prend le focus),
+  # `sleep 11` finit : le démon de notifications du bureau reçoit l'appel Notify.
+  dbus-monitor --session "type='method_call',interface='org.freedesktop.Notifications',member='Notify'" \
+    > "$R/bulles" 2>&1 &
+  moniteur=$!
+  sleep 1
+  ecrire "sleep 11"; touches return
+  touches ctrl+shift+o
+  sleep 1.5
+  for _ in $(seq 40); do grep -q 'member=Notify' "$R/bulles" 2>/dev/null && break; sleep 0.5; done
+  kill "$moniteur" 2>/dev/null
+  verdict "bulle de fin de commande reçue par le démon du bureau (fenêtre non active, sleep 11)" 'member=Notify' "$R/bulles"
+  touches escape
+
   systemctl --user stop pupitre
   echo "BILAN : $REUSSIS réussi(s), $ECHECS échec(s)"
   [ "$ECHECS" -eq 0 ]

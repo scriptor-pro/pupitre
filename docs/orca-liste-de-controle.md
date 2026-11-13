@@ -49,6 +49,11 @@ passe à l'invite Starship par défaut pour la ligne 20.
 | 19 | Ctrl+Maj+H. Flèche bas, Ctrl+Tab, Échap. | Orca annonce « Aide de Pupitre, boîte de dialogue », la liste « Sections de l'aide » et la première section ; flèche bas lit « Sommaire » ; Ctrl+Tab lit le texte de la section ; Échap rend le clavier au terminal. | [ ] | |
 | 20 | Avec l'invite par défaut de Pupitre (sans `invite = "shell"` dans `pupitre.toml`, Starship installé) : ouvrir un onglet, Ctrl+C, puis `sleep 6`. | Orca lit une ligne d'invite qui contient « λ » (heure, charge, branche git sur la première ligne ; utilisateur@machine, dossier et « λ » sur la seconde) ; la vérification 17 donne le même résultat. | [ ] | |
 | 21 | Pupitre ouvert avec un onglet : le tuer (`kill -9` de l'interface seulement, pas du fond), le relancer. Puis taper `echo reprise` et `sleep 6`. | Les onglets sont restaurés ; Orca lit la sortie de `echo reprise` et annonce « Commande terminée en 6 s. » dans l'onglet restauré. | [ ] | |
+| 22 | Taper `printf '\e]52;c;QUJD\a'` puis Entrée (un programme demande une copie dans le presse-papiers). | Orca dit « Un programme a copié 3 caractères. » ; le texte « ABC » est dans le presse-papiers. | [ ] | |
+| 23 | Dans l'onglet 1 : `sleep 2; printf '\e]9;fini\a'` puis Entrée, et passer tout de suite à l'onglet 2 (Alt+2). Attendre 3 s, puis Ctrl+Tab jusqu'aux onglets. | L'onglet 1 est lu « …, notification ». Aucun son, et pas plus de 3 flashs par seconde. | [ ] | |
+| 24 | Ctrl+Tab jusqu'au bouton « Menu », Entrée ; flèche bas jusqu'à « Préférences », flèche droite, flèche bas jusqu'à « Réglages… », Entrée. Puis Tab. Puis Échap. | Orca dit « Réglages de Pupitre », puis le premier champ avec son étiquette (« Police ») ; Tab lit le champ suivant (« Taille de la police ») ; Échap ferme la fenêtre et rend le clavier au terminal. | [ ] | |
+| 25 | Ctrl+Tab jusqu'au bouton « Menu », Entrée ; flèche bas jusqu'à « À propos de Pupitre », Entrée. Échap. | Orca dit « À propos de Pupitre » ; la version (« 0.1.0 ») est lue en se déplaçant dans la fenêtre ; Échap ferme la fenêtre. | [ ] | |
+| 26 | Ctrl+Tab depuis le terminal jusqu'au bouton « + » (après les onglets). | Orca dit « Nouvel onglet bouton » (puis l'aide « Nouvel onglet (Ctrl+Maj+T) »). | [ ] | |
 
 ## Résultat
 

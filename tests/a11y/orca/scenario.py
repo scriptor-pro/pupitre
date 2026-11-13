@@ -304,6 +304,29 @@ class Session:
         r = subprocess.run(["python3", "-c", code], capture_output=True, text=True, timeout=30)
         return r.stdout.strip() == "True"
 
+    def texte_visible(self, motif, delai=5.0):
+        """Vrai si un objet AT-SPI de Pupitre a un nom ou un texte qui correspond à `motif`."""
+        code = (
+            "import re,sys,gi\ngi.require_version('Atspi','2.0')\nfrom gi.repository import Atspi\n"
+            "r=re.compile(sys.argv[1])\n"
+            "def t(o,p=0):\n"
+            "  if o is None or p>16: return False\n"
+            "  try:\n"
+            "    if r.search(o.get_name() or ''): return True\n"
+            "    if o.get_role_name()=='label':\n"
+            "      x=o.get_text_iface() if hasattr(o,'get_text_iface') else None\n"
+            "  except Exception: pass\n"
+            "  return any(t(o.get_child_at_index(i),p+1) for i in range(min(o.get_child_count(),60)))\n"
+            "d=Atspi.get_desktop(0)\n"
+            "print(any(t(d.get_child_at_index(i)) for i in range(d.get_child_count())\n"
+            "          if (d.get_child_at_index(i).get_name() or '').lower()=='pupitre'))\n")
+        limite = time.time() + delai
+        while True:
+            r = subprocess.run(["python3", "-c", code, motif], capture_output=True, text=True, timeout=30)
+            if r.stdout.strip() == "True" or time.time() > limite:
+                return r.stdout.strip() == "True"
+            time.sleep(0.5)
+
     def ctrl_tab_jusqu_au_terminal(self, max_essais=6):
         """Ctrl+Tab jusqu'à ce que le terminal ait le focus (rien si c'est déjà le cas)."""
         for _ in range(max_essais):
@@ -744,6 +767,91 @@ def v19_aide(s):
     exiger(s.attendre(r"aide-42", 8), "après Échap, le terminal n'a pas le clavier")
 
 
+def menu_jusqu_a(s, motif, max_essais=30):
+    """Ouvre le menu (Ctrl+Tab jusqu'au bouton « Menu », Entrée) puis flèche bas jusqu'à ce
+    qu'Orca lise `motif` ; l'entrée est alors prête à être activée."""
+    exiger(s.ctrl_tab_jusqu_a(r"Menu"), "le bouton « Menu » n'est pas atteint par Ctrl+Tab")
+    s.calme()
+    s.touches("Return")
+    s.calme(1.0, 5)
+    for _ in range(max_essais):
+        s.marquer()
+        s.touches("Down")
+        if s.attendre(motif, 1.5):
+            return
+    raise Echec(f"le menu n'atteint pas « {motif} » à la flèche bas")
+
+
+def v22_copie_osc52(s):
+    s.revenir_au_terminal()
+    s.calme(1.0, 5)
+    s.marquer()
+    s.commande("printf '\\e]52;c;QUJD\\a'")
+    exiger(s.attendre(r"Un programme a copié 3 caractères", 8),
+           "« Un programme a copié 3 caractères. » n'est pas annoncé")
+
+
+def v23_notification_programme(s):
+    s.revenir_au_terminal()
+    s.touches("ctrl+shift+t")  # au moins deux onglets
+    s.calme(1.5, 15)
+    s.touches("alt+1")
+    s.calme()
+    s.commande("sleep 2; printf '\\e]9;fini\\a'")
+    s.touches("alt+2")
+    time.sleep(3.5)
+    s.calme()
+    exiger(s.ctrl_tab_jusqu_a(r"notification"), "l'onglet n'est pas lu « …, notification »")
+    s.revenir_au_terminal()
+
+
+def v24_reglages(s):
+    s.revenir_au_terminal()
+    menu_jusqu_a(s, r"Préférences")
+    s.calme()
+    s.marquer()
+    s.touches("Right")  # ouvre le sous-menu (Entrée ne l'ouvre pas) ; 
+    s.calme(1.0, 5)
+    s.touches("Down")  # entre dans le sous-menu : première entrée, « Réglages… »
+    s.calme(1.0, 5)
+    s.calme()
+    s.marquer()
+    s.touches("Return")
+    exiger(s.attendre(r"Réglages de Pupitre", 6), "« Réglages de Pupitre » n'est pas annoncé")
+    exiger(s.attendre(r"Police", 4), "le premier champ « Police » n'est pas lu avec son étiquette")
+    s.calme()
+    s.marquer()
+    s.touches("Tab")
+    exiger(s.attendre(r"Taille de la police", 4), "Tab : le champ suivant n'est pas lu")
+    s.calme()
+    s.touches("Escape")
+    s.calme(1.5, 8)
+    s.revenir_au_terminal()
+
+
+def v25_a_propos(s):
+    s.revenir_au_terminal()
+    menu_jusqu_a(s, r"propos de Pupitre")
+    s.calme()
+    s.marquer()
+    s.touches("Return")
+    exiger(s.attendre(r"propos de Pupitre", 6), "« À propos de Pupitre » n'est pas annoncé")
+    # La version est un texte de la fenêtre (Orca ne la dit que si on s'y déplace) : on la
+    # cherche dans l'arbre AT-SPI, comme le ferait la revue d'Orca.
+    exiger(s.texte_visible(r"^\d+\.\d+\.\d+"), "la version n'est pas dans la fenêtre À propos")
+    s.calme()
+    s.touches("Escape")
+    s.calme(1.5, 8)
+    s.revenir_au_terminal()
+
+
+def v26_bouton_plus(s):
+    s.revenir_au_terminal()
+    exiger(s.ctrl_tab_jusqu_a(r"Nouvel onglet.*bouton"),
+           "le bouton « + » n'est pas lu « Nouvel onglet, bouton »")
+    s.revenir_au_terminal()
+
+
 VERIFICATIONS = [
     (1, "Lancement : fenêtre et invite annoncées", v01_lancement),
     (2, "Sortie d'une commande lue ligne par ligne, accents compris", v02_sortie),
@@ -766,6 +874,11 @@ VERIFICATIONS = [
     (19, "Aide : Ctrl+Maj+H, sections lues, Ctrl+Tab, Échap", v19_aide),
     (20, "Invite Starship par défaut : ligne contenant λ, fin de commande annoncée", v20_invite_starship),
     (21, "Reprise après plantage de l'interface : sortie lue, fin de commande annoncée", v21_reprise),
+    (22, "Copie OSC 52 : « Un programme a copié 3 caractères. »", v22_copie_osc52),
+    (23, "Notification d'un programme : onglet lu « …, notification »", v23_notification_programme),
+    (24, "Menu, Préférences, Réglages… : fenêtre et premiers champs lus", v24_reglages),
+    (25, "Menu, À propos de Pupitre : fenêtre et version lues", v25_a_propos),
+    (26, "Bouton « + » lu « Nouvel onglet, bouton »", v26_bouton_plus),
 ]
 
 
