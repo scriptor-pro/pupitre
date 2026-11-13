@@ -8,6 +8,7 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 rust-version = "1.85"
 publish = false
+repository = "https://github.com/scriptor-pro/pupitre"
 
 [workspace.dependencies]
 # Paire gtk4/vte4 vérifiée compatible (voir docs/plans, Task 1).

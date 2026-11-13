@@ -1305,6 +1305,8 @@ pub struct FenetreInterne {
     bandeau: Rc<BandeauMessages>,
     recherche: Rc<BarreRecherche>,
     menu: gtk::MenuButton,
+    /// Bouton « + » (même action que `win.nouvel-onglet`), à gauche du menu.
+    bouton_plus: gtk::Button,
     /// Sous-menu « Nouvel onglet avec » (refait quand les réglages changent).
     sous_menu_shells: gio::Menu,
     /// Raccourcis affichés dans le menu (refait quand ils changent).
@@ -1342,7 +1344,11 @@ impl FenetrePupitre {
         carnet.update_property(&[gtk::accessible::Property::Label(&tr("onglets-nom"))]);
         let table = pupitre.raccourcis.borrow().clone();
         let (menu, sous_menu_shells) = bouton_menu(&table);
-        carnet.set_action_widget(&menu, gtk::PackType::End);
+        let bouton_plus = bouton_nouvel_onglet(&table);
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        actions.append(&bouton_plus);
+        actions.append(&menu);
+        carnet.set_action_widget(&actions, gtk::PackType::End);
 
         let bandeau = BandeauMessages::new();
 
@@ -1359,6 +1365,7 @@ impl FenetrePupitre {
             bandeau,
             recherche,
             menu,
+            bouton_plus,
             sous_menu_shells,
             raccourcis_du_menu: RefCell::new(table),
             garder_ouverte: Cell::new(false),
@@ -1550,6 +1557,9 @@ impl FenetrePupitre {
         self.0
             .menu
             .set_menu_model(Some(&construire_menu(&table, &self.0.sous_menu_shells)));
+        self.0
+            .bouton_plus
+            .set_tooltip_text(Some(&infobulle_nouvel_onglet(&table)));
         *self.0.raccourcis_du_menu.borrow_mut() = table;
     }
 
@@ -1816,7 +1826,11 @@ impl FenetrePupitre {
     }
 
     /// Éléments que Ctrl+Tab / Ctrl+Maj+Tab parcourent, dans l'ordre visuel : boutons des
-    /// messages, saisie de recherche (si ouverte), onglets, menu, terminal actif.
+    /// messages, saisie de recherche (si ouverte), onglets, bouton « + », menu, terminal actif.
+    pub fn elements_du_cycle(&self) -> Vec<gtk::Widget> {
+        self.cycle_de_focus()
+    }
+
     fn cycle_de_focus(&self) -> Vec<gtk::Widget> {
         let mut v: Vec<gtk::Widget> = self.0.bandeau.boutons();
         if self.0.recherche.ouverte() {
@@ -1825,6 +1839,7 @@ impl FenetrePupitre {
         if self.0.carnet.n_pages() > 0 {
             v.push(self.0.carnet.clone().upcast());
         }
+        v.push(self.0.bouton_plus.clone().upcast());
         v.push(self.0.menu.clone().upcast());
         if let Some(o) = self.onglet_actif() {
             v.push(o.terminal.terminal().clone().upcast());
@@ -1859,6 +1874,11 @@ impl FenetrePupitre {
             (None, _) => n - 1, // focus perdu : retour au terminal
         };
         cycle[suivant].grab_focus();
+    }
+
+    /// Bouton « + » de la barre d'onglets.
+    pub fn bouton_nouvel_onglet(&self) -> gtk::Button {
+        self.0.bouton_plus.clone()
     }
 
     /// Bouton du menu principal.
@@ -1912,6 +1932,10 @@ impl FenetrePupitre {
             self.0.fenetre.add_action(&action);
         };
         ajouter("nouvel-onglet", Box::new(|f| f.ouvrir_session()));
+        ajouter(
+            "a-propos",
+            Box::new(|f| crate::apropos::ouvrir_apropos(f.fenetre().upcast_ref())),
+        );
         let avec = gio::SimpleAction::new("nouvel-onglet-avec", Some(glib::VariantTy::STRING));
         let faible = Rc::downgrade(&self.0);
         avec.connect_activate(move |_, cible| {
@@ -2391,8 +2415,34 @@ fn construire_menu(table: &TableRaccourcis, sous_menu_shells: &gio::Menu) -> gio
         "win.aide",
         Some(Raccourci::Aide),
     ));
+    aide.append_item(&item(&tr("menu-a-propos"), "win.a-propos", None));
     m.append_section(None, &aide);
     m
+}
+
+/// Infobulle du bouton « + » : le raccourci de `nouvel_onglet` en vigueur, s'il y en a un.
+fn infobulle_nouvel_onglet(table: &TableRaccourcis) -> String {
+    match table.combinaison(Raccourci::NouvelOnglet) {
+        Some(c) => ta(
+            "bouton-nouvel-onglet-aide",
+            &[("raccourci", ArgI18n::from(c.texte()))],
+        ),
+        None => tr("bouton-nouvel-onglet"),
+    }
+}
+
+/// Bouton « + » de la barre d'onglets, à gauche du menu : active `win.nouvel-onglet`.
+fn bouton_nouvel_onglet(table: &TableRaccourcis) -> gtk::Button {
+    let b = gtk::Button::builder()
+        .icon_name("list-add-symbolic")
+        .action_name("win.nouvel-onglet")
+        .tooltip_text(infobulle_nouvel_onglet(table))
+        .build();
+    b.add_css_class("flat");
+    b.update_property(&[gtk::accessible::Property::Label(&tr(
+        "bouton-nouvel-onglet",
+    ))]);
+    b
 }
 
 /// Bouton du menu principal, à droite de la barre d'onglets.

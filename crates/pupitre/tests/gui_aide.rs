@@ -345,7 +345,7 @@ fn menu_aide(p: &Rc<Pupitre>) -> Resultat {
     let mut items = Vec::new();
     parcourir(&modele, &mut items);
     verifier(
-        items.last() == Some(&("Aide".into(), "win.aide".into())),
-        || format!("« Aide » devrait finir le menu : {items:?}"),
+        items.iter().rev().nth(1) == Some(&("Aide".into(), "win.aide".into())),
+        || format!("« Aide » devrait précéder « À propos » en fin de menu : {items:?}"),
     )
 }

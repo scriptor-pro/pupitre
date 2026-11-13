@@ -3,6 +3,7 @@
 
 pub mod aide;
 pub mod apparence;
+pub mod apropos;
 pub mod attenuation;
 pub mod clavier;
 pub mod client;

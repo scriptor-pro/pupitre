@@ -220,3 +220,14 @@ fn pupitre_polices_refuse_un_argument() {
     let (code, _) = pupitre(d.path(), &["polices", "x"]);
     assert_eq!(code, 2);
 }
+
+/// `pupitre -v` et `--version` : « pupitre 0.1.0 » sur une ligne, code 0, sans affichage.
+#[test]
+fn version_courte_et_longue() {
+    let d = tempfile::tempdir().unwrap();
+    for option in ["-v", "--version"] {
+        let (code, sortie) = pupitre(d.path(), &[option]);
+        assert_eq!(code, 0, "{sortie}");
+        assert_eq!(sortie, "pupitre 0.1.0\n");
+    }
+}

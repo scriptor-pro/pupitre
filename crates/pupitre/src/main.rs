@@ -63,6 +63,10 @@ fn main() -> glib::ExitCode {
             print!("{}", pupitre::aide::texte_brut(pupitre_i18n::aide()));
             return glib::ExitCode::SUCCESS;
         }
+        Some("-v" | "--version") if args.len() == 1 => {
+            println!("pupitre {}", pupitre::apropos::VERSION);
+            return glib::ExitCode::SUCCESS;
+        }
         Some("-h" | "--help") => {
             print!("{}", verification::usage());
             return glib::ExitCode::SUCCESS;

@@ -271,6 +271,13 @@ menu-renommer-onglet = Renommer l'onglet
 menu-detacher-onglet = Détacher dans une nouvelle fenêtre
 menu-fermer-onglet = Fermer l'onglet
 menu-aide-pupitre = Aide
+menu-a-propos = À propos de Pupitre
+bouton-nouvel-onglet = Nouvel onglet
+bouton-nouvel-onglet-aide = Nouvel onglet ({ $raccourci })
+apropos-titre = À propos de Pupitre
+apropos-commentaire = Terminal à onglets accessible
+apropos-polices = Polices
+apropos-licence-polices = { $famille } : SIL Open Font License 1.1
 menu-preferences = Préférences
 menu-modifier-config = Modifier la configuration…
 menu-modifier-invite = Modifier l'invite…
@@ -306,6 +313,7 @@ usage =
       pupitre shells                 lister les shells installés et leur prise en charge
       pupitre polices                lister les polices à chasse fixe utilisables
       pupitre aide                   afficher l'aide complète (Ctrl+Maj+H dans la fenêtre)
+      pupitre -v                     afficher la version (aussi --version)
       pupitre --help                 afficher ce résumé
 arguments-incorrects = Arguments incorrects.
 argument-inconnu = Argument inconnu « { $argument } ».

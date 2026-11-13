@@ -114,7 +114,8 @@ aide = ""
 
 ## 3. Onglets et fenêtres
 
-- **Ouvrir** : Ctrl+Maj+T ou menu ▸ « Nouvel onglet ». Le nouvel onglet reprend le shell de
+- **Ouvrir** : Ctrl+Maj+T, le bouton « + » à droite de la barre d'onglets (infobulle « Nouvel
+  onglet », avec le raccourci en vigueur) ou menu ▸ « Nouvel onglet ». Le nouvel onglet reprend le shell de
   l'onglet actif (fish depuis un onglet fish) ; depuis une connexion SSH, ou dans une nouvelle
   fenêtre, il ouvre le shell des réglages.
 - **Ouvrir avec un autre shell** : menu ▸ « Nouvel onglet avec », puis le shell voulu (voir la
@@ -146,13 +147,18 @@ Tout Pupitre s'utilise au clavier.
 
 - **Sortir du terminal** : Ctrl+Tab passe à l'élément suivant, Ctrl+Maj+Tab au précédent. Le
   tour comprend, selon ce qui est affiché : le bandeau de messages, la barre de recherche, la
-  barre d'onglets, le bouton de menu, puis le terminal.
+  barre d'onglets, le bouton « Nouvel onglet » (+), le bouton de menu, puis le terminal.
 - **Ouvrir le menu** : Ctrl+Tab jusqu'au bouton « Menu », puis Entrée.
 - **Aide** : Ctrl+Maj+H, ou menu ▸ « Aide », ouvre cette aide dans une fenêtre « Aide de
   Pupitre » ; elle est comprise dans Pupitre et marche sans réseau. À gauche, la liste des
   sections et le champ « Rechercher dans l'aide » ; à droite, le texte de la section choisie,
   que vous lisez avec le curseur comme n'importe quel texte. Ctrl+Tab passe d'une zone à
   l'autre, Échap ferme la fenêtre. `pupitre aide` affiche la même aide dans le terminal.
+- **À propos** : menu ▸ « À propos de Pupitre » (après « Aide ») affiche la version, le site du
+  projet, la licence (GNU GPL version 3 ou toute version ultérieure) et, dans « Crédits », les
+  polices fournies avec leur licence (SIL Open Font License 1.1). Une seule fenêtre ; Échap la
+  ferme. `pupitre -v` (ou `--version`) affiche la version dans le terminal, par exemple
+  « pupitre 0.1.0 ».
 - **Orca** lit le texte du terminal, le nom des onglets, les menus, les dialogues et chaque
   message de Pupitre. Quand le focus arrive sur la barre d'onglets, Orca indique aussi les
   onglets qui signalent quelque chose (cloche, commande finie, notification).
@@ -525,6 +531,7 @@ appliqué. `pupitre check --theme CHEMIN` fait la même vérification sans ouvri
 | `pupitre check --theme CHEMIN` | vérifie un fichier de thème |
 | `pupitre aide`, `pupitre help` | affiche cette aide complète dans le terminal |
 | `pupitre --help`, `pupitre -h` | affiche le résumé des commandes |
+| `pupitre -v`, `pupitre --version` | affiche la version (« pupitre 0.1.0 ») |
 | `pupitre polices` | liste les polices à chasse fixe utilisables, celles fournies avec Pupitre étant marquées |
 | `pupitre shells` | liste les shells installés, leur niveau de prise en charge, et la commande d'installation de ceux qui manquent |
 
