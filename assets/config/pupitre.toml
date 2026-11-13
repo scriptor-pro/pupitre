@@ -119,3 +119,4 @@ cloche_onglet = true
 # commande_precedente = "Ctrl+Maj+↑"
 # commande_suivante = "Ctrl+Maj+↓"
 # aide = "Ctrl+Maj+H"
+# reglages = ""    (fenêtre de réglages : pas de raccourci par défaut)

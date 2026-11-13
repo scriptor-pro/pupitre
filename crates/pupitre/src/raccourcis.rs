@@ -45,6 +45,8 @@ pub enum Raccourci {
     CommandeSuivante,
     /// Ctrl+Maj+H : l'aide de Pupitre (F1 reste aux programmes).
     Aide,
+    /// Fenêtre de réglages (pas de raccourci par défaut).
+    Reglages,
 }
 
 /// Une combinaison de touches : modificateurs (Ctrl, Maj, Alt, Super) et une touche, écrite
@@ -467,6 +469,7 @@ const DEFAUTS: &[(&str, Raccourci, &str)] = &[
         "Ctrl+Maj+↓",
     ),
     ("aide", Raccourci::Aide, "Ctrl+Maj+H"),
+    ("reglages", Raccourci::Reglages, ""),
 ];
 
 /// Raccourcis en vigueur : ceux par défaut, avec les remplacements de `[raccourcis]`.
@@ -1054,7 +1057,7 @@ mod tests {
         assert_eq!(t, TableRaccourcis::defaut());
         let mut vues = Vec::new();
         for (_, _, c) in &t.entrees {
-            let c = c.as_ref().unwrap();
+            let Some(c) = c.as_ref() else { continue };
             assert!(!vues.contains(c), "doublon : {}", c.texte());
             vues.push(*c);
         }

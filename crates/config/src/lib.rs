@@ -4,6 +4,7 @@
 mod atomique;
 mod connexions;
 mod couleur;
+mod edition;
 mod fichier;
 mod theme;
 mod theme_fichier;
@@ -14,6 +15,7 @@ pub use connexions::{
     valider_connexions, ChampConnexion, Connexion, ErreurValidation,
 };
 pub use couleur::{contrast_ratio, ErreurCouleur, Rgb};
+pub use edition::{enregistrer_reglage, enregistrer_reglage_dans, modifier_cle, ErreurEdition};
 pub use fichier::{
     charger, chemin_config, config_defaut, creer_defaut_si_absent, dossier_etat, langue_configuree,
     AnnonceFin, BandeauClavier, Config, ErreurConfig, Invite, ReglageRaccourci,

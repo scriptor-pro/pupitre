@@ -1756,6 +1756,11 @@ impl FenetrePupitre {
                     crate::aide::ouvrir_aide(&app, Some(self.fenetre().upcast_ref()), None);
                 }
             }
+            Raccourci::Reglages => {
+                if let Some(app) = self.fenetre().application() {
+                    crate::reglages::ouvrir_reglages(&app, self.fenetre().upcast_ref());
+                }
+            }
             Raccourci::FermerOnglet => {
                 if let Some(o) = actif {
                     self.demander_fermeture_onglet(&o);
@@ -1973,6 +1978,7 @@ impl FenetrePupitre {
         for (nom, r) in [
             ("connexions", Raccourci::Connexions),
             ("aide", Raccourci::Aide),
+            ("reglages", Raccourci::Reglages),
             ("copier", Raccourci::Copier),
             ("coller", Raccourci::Coller),
             ("rechercher", Raccourci::Rechercher),
@@ -2400,6 +2406,11 @@ fn construire_menu(table: &TableRaccourcis, sous_menu_shells: &gio::Menu) -> gio
     m.append_section(None, &onglet);
     let preferences = gio::Menu::new();
     let prefs = gio::Menu::new();
+    prefs.append_item(&item(
+        &tr("menu-reglages"),
+        "win.reglages",
+        Some(Raccourci::Reglages),
+    ));
     for (libelle, action) in [
         ("menu-modifier-config", "win.prefs-configuration"),
         ("menu-modifier-invite", "win.prefs-invite"),

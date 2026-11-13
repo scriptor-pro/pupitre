@@ -101,6 +101,7 @@ fn menu_preferences(p: &Rc<Pupitre>) -> Resultat {
         entrees.push((a("label"), a("action")));
     }
     let attendu: Vec<(String, String)> = [
+        ("Réglages…", "win.reglages"),
         ("Modifier la configuration…", "win.prefs-configuration"),
         ("Modifier l'invite…", "win.prefs-invite"),
         ("Modifier les connexions…", "win.prefs-connexions"),

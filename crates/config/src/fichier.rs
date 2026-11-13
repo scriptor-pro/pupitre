@@ -93,6 +93,7 @@ pub const ACTIONS_RACCOURCIS: &[&str] = &[
     "commande_precedente",
     "commande_suivante",
     "aide",
+    "reglages",
 ];
 
 /// Une ligne de `[raccourcis]` : l'action, la combinaison écrite (vide : aucun raccourci) et

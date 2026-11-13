@@ -18,6 +18,7 @@ pub mod preferences;
 pub mod raccourcis;
 pub mod rechargement;
 pub mod recherche;
+pub mod reglages;
 pub mod shells;
 pub mod taille;
 pub mod terminal;

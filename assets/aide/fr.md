@@ -97,7 +97,8 @@ aide = ""
 - **Supprimer un raccourci** : une valeur vide, `""`. L'action reste dans le menu.
 - **Les clés** : `nouvel_onglet`, `fermer_onglet`, `nouvelle_fenetre`, `connexions`, `copier`,
   `coller`, `rechercher`, `onglet_suivant`, `onglet_precedent`, `plein_ecran`, `zoom_plus`,
-  `zoom_moins`, `zoom_normal`, `commande_precedente`, `commande_suivante` et `aide`.
+  `zoom_moins`, `zoom_normal`, `commande_precedente`, `commande_suivante`, `aide` et `reglages` (la fenêtre de réglages, sans
+  raccourci par défaut).
 - **Toujours disponibles** (non modifiables, pour que le clavier mène partout) : Ctrl+Tab et
   Ctrl+Maj+Tab, Alt+1 à Alt+9, Ctrl+Page suivante et Ctrl+Page précédente.
 - **Réservées aux programmes** : Tab, F1 et F10 ne peuvent pas être prises. Ctrl+lettre
@@ -417,7 +418,17 @@ lire.
 Le fichier `~/.config/pupitre/pupitre.toml` est créé au premier lancement, avec un commentaire
 pour chaque réglage. Il se modifie avec n'importe quel éditeur de texte.
 
-**Menu ▸ Préférences** ouvre directement les fichiers dans votre éditeur de texte :
+**Menu ▸ Préférences ▸ « Réglages… »** ouvre la fenêtre « Réglages de Pupitre » : police et
+taille, thème, shell, invite, annonce de fin de commande, copie à la sélection, bandeau du
+clavier et les six cases de notifications. Chaque champ a son étiquette ; Tab suit l'ordre de
+l'écran ; Échap ferme la fenêtre. Chaque changement est enregistré aussitôt dans `pupitre.toml`
+(message « Enregistré. ») et appliqué à toutes les fenêtres, sans toucher à vos commentaires, à
+l'ordre des clés ni aux clés que la fenêtre ne connaît pas ; l'ancien contenu est gardé dans
+`pupitre.toml.bak`. Si le fichier contient une erreur, la fenêtre s'ouvre en lecture seule et
+vous demande de la corriger d'abord : elle n'écrase jamais un fichier invalide. Les raccourcis
+se changent dans le fichier (section `[raccourcis]`, clé `reglages` pour ouvrir cette fenêtre).
+
+**Menu ▸ Préférences** ouvre aussi directement les fichiers dans votre éditeur de texte :
 « Modifier la configuration… » (`pupitre.toml`), « Modifier l'invite… » (`starship.toml`),
 « Modifier les connexions… » (`connexions.toml`). Si aucune application n'est associée aux
 fichiers `.toml` sur votre système, Pupitre prend votre éditeur de texte par défaut (celui des
@@ -580,7 +591,5 @@ l'enregistrement ne laisse jamais un fichier à moitié écrit.
 ## 18. Prévu plus tard
 
 - Thèmes à contraste élevé (7:1), sombre et clair.
-- Fenêtre de réglages (police, taille, thème, shell, invite, annonces), accessible au
-  clavier et avec Orca.
 - Paquet `.deb`.
 - Pupitre en anglais, espagnol, italien, allemand et néerlandais, selon la langue du système.
