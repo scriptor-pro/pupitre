@@ -66,6 +66,9 @@ pub enum ErreurRaccourci {
     /// Combinaison toujours disponible ou laissée aux programmes (texte de la combinaison).
     Reservee(String),
     SansModificateur,
+    /// Ctrl seul, Alt seul ou Ctrl+Alt sur une lettre (ou un signe de contrôle avec Ctrl) :
+    /// la frappe reste au shell et aux programmes (texte de la combinaison).
+    LaisseeAuxProgrammes(String),
 }
 
 impl std::fmt::Display for ErreurRaccourci {
@@ -80,6 +83,9 @@ impl std::fmt::Display for ErreurRaccourci {
             ErreurRaccourci::ToucheInconnue(n) => avec("raccourci-err-touche-inconnue", n),
             ErreurRaccourci::Reservee(c) => avec("raccourci-err-reservee", c),
             ErreurRaccourci::SansModificateur => t("raccourci-err-sans-modificateur"),
+            ErreurRaccourci::LaisseeAuxProgrammes(c) => {
+                avec("raccourci-err-laissee-aux-programmes", c)
+            }
         })
     }
 }
@@ -149,9 +155,10 @@ fn normaliser(touche: gdk::Key) -> gdk::Key {
 
 /// Touche qui produit ce caractère (touche « = » pour `=`, « é » pour `é`).
 fn touche_du_caractere(c: char) -> Option<gdk::Key> {
-    use gtk::glib::translate::FromGlib;
-    // SAFETY : `Key` n'est qu'un entier ; GDK ne vérifie pas la valeur (VoidSymbol si inconnue).
-    let touche = unsafe { gdk::Key::from_glib(gdk::unicode_to_keyval(c as u32)) };
+    // Conversion sûre : une valeur `u32` rangée dans une `Value` se relit comme `Key`.
+    let touche = gtk::glib::Value::from(gdk::unicode_to_keyval(c as u32))
+        .get::<gdk::Key>()
+        .ok()?;
     (touche != gdk::Key::VoidSymbol && touche.name().is_some()).then_some(touche)
 }
 
@@ -409,6 +416,19 @@ fn verifier(c: &Combinaison) -> Result<(), ErreurRaccourci> {
         && !est_touche_de_fonction(c.touche)
     {
         return Err(ErreurRaccourci::SansModificateur);
+    }
+    // Ctrl+lettre (Ctrl+C, Ctrl+D, Ctrl+Z, Ctrl+L…), Alt+lettre (readline : Alt+B, Alt+F…)
+    // et Ctrl+Alt+lettre restent au shell et aux programmes ; Ctrl seul garde aussi
+    // `[ \ ] ^ _ @` et Espace (caractères de contrôle).
+    let lettre = c.touche.to_unicode().is_some_and(char::is_alphabetic);
+    let controle = c
+        .touche
+        .to_unicode()
+        .is_some_and(|k| matches!(k, '[' | '\\' | ']' | '^' | '_' | '@' | ' '));
+    let ctrl_seul = c.mods == M::CONTROL_MASK;
+    let seul = ctrl_seul || c.mods == M::ALT_MASK || c.mods == M::CONTROL_MASK | M::ALT_MASK;
+    if (lettre && seul) || (ctrl_seul && controle) {
+        return Err(ErreurRaccourci::LaisseeAuxProgrammes(c.texte()));
     }
     Ok(())
 }
@@ -872,8 +892,11 @@ mod tests {
         assert_eq!(analyser_raccourci("CTRL+MAJ+T").unwrap(), ctrl_maj_t);
         let f11 = analyser_raccourci("F11").unwrap();
         assert_eq!((f11.mods(), f11.touche()), (M::empty(), gdk::Key::F11));
-        let alt_q = analyser_raccourci("Alt+Q").unwrap();
-        assert_eq!((alt_q.mods(), alt_q.touche()), (M::ALT_MASK, gdk::Key::q));
+        let alt_q = analyser_raccourci("Maj+Alt+Q").unwrap();
+        assert_eq!(
+            (alt_q.mods(), alt_q.touche()),
+            (M::ALT_MASK | M::SHIFT_MASK, gdk::Key::q)
+        );
         let s = analyser_raccourci("Super+Alt+k").unwrap();
         assert_eq!(s.mods(), M::SUPER_MASK | M::ALT_MASK);
         // Noms de touches de l'aide.
@@ -909,7 +932,7 @@ mod tests {
             "Alt+Page suivante",
             "Ctrl+plus",
             "Ctrl+Maj+↓",
-            "Alt+Q",
+            "Maj+Alt+Q",
         ] {
             assert_eq!(analyser_raccourci(t).unwrap().texte(), t);
         }
@@ -941,6 +964,61 @@ mod tests {
         );
         assert!(analyser_raccourci("F5").is_ok());
         assert!(analyser_raccourci("Maj+F5").is_ok());
+    }
+
+    #[test]
+    fn touches_des_programmes_refusees() {
+        for t in [
+            "Ctrl+C",
+            "Ctrl+D",
+            "Ctrl+Z",
+            "Ctrl+L",
+            "Alt+B",
+            "Alt+f",
+            "Ctrl+Alt+L",
+            "Ctrl+Espace",
+            "Ctrl+[",
+            "Ctrl+]",
+            "Ctrl+^",
+            "Ctrl+_",
+            "Ctrl+@",
+            "Ctrl+\\",
+        ] {
+            assert!(
+                matches!(
+                    analyser_raccourci(t),
+                    Err(ErreurRaccourci::LaisseeAuxProgrammes(_))
+                ),
+                "{t} : {:?}",
+                analyser_raccourci(t)
+            );
+        }
+        for t in [
+            "Ctrl+Maj+C",
+            "Maj+Alt+B",
+            "Ctrl+0",
+            "Ctrl+5",
+            "Ctrl+plus",
+            "Ctrl+moins",
+            "Super+T",
+            "Ctrl+Alt+3",
+            "Alt+Maj+Ctrl+L",
+            "F2",
+            "F9",
+            "F11",
+            "F12",
+            "Ctrl+F5",
+            "Alt+F4",
+        ] {
+            assert!(
+                analyser_raccourci(t).is_ok(),
+                "{t} : {:?}",
+                analyser_raccourci(t)
+            );
+        }
+        // Message affiché, avec sa ligne.
+        let (_, m) = table(&[reglage("copier", "Ctrl+C", 6)]);
+        assert!(m[0].contains("ligne 6") && m[0].contains("Ctrl+C"), "{m:?}");
     }
 
     #[test]

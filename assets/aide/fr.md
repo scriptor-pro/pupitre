@@ -100,9 +100,12 @@ aide = ""
   `zoom_moins`, `zoom_normal`, `commande_precedente`, `commande_suivante` et `aide`.
 - **Toujours disponibles** (non modifiables, pour que le clavier mène partout) : Ctrl+Tab et
   Ctrl+Maj+Tab, Alt+1 à Alt+9, Ctrl+Page suivante et Ctrl+Page précédente.
-- **Réservées aux programmes** : Tab, F1 et F10 ne peuvent pas être prises. Sans Ctrl, Alt ni
-  Super, seules les touches de fonction (F2 à F24) sont acceptées, pour ne pas voler la
-  frappe au shell.
+- **Réservées aux programmes** : Tab, F1 et F10 ne peuvent pas être prises. Ctrl+lettre
+  (Ctrl+C, Ctrl+D, Ctrl+Z, Ctrl+L…), Alt+lettre (Alt+B, Alt+F… de l'édition de ligne),
+  Ctrl+Alt+lettre, ainsi que Ctrl+Espace et Ctrl+`[ \ ] ^ _ @`, restent au shell et aux
+  programmes : Pupitre les refuse. Ajoutez Maj (Ctrl+Maj+K, Alt+Maj+B) ou utilisez Super.
+  Sans Ctrl, Alt ni Super, seules les touches de fonction (F2 à F24) sont acceptées, pour ne
+  pas voler la frappe au shell.
 - Les raccourcis suivent la touche, comme ci-dessus : ils marchent avec votre disposition.
 - **En cas d'erreur** (touche inconnue, combinaison refusée, même combinaison donnée à deux
   actions), Pupitre affiche un message avec la ligne fautive ; les actions concernées gardent

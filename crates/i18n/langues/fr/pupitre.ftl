@@ -388,3 +388,4 @@ raccourci-err-modificateur-repete = modificateur « { $nom } » répété
 raccourci-err-touche-inconnue = touche « { $nom } » inconnue
 raccourci-err-reservee = « { $nom } » est réservé : Tab, F1 et F10 restent aux programmes, et Ctrl+Tab, Ctrl+Maj+Tab, Alt+1 à Alt+9, Ctrl+Page suivante et Ctrl+Page précédente sont toujours disponibles
 raccourci-err-sans-modificateur = sans Ctrl, Alt ni Super, la touche resterait au shell ; seules les touches de fonction (F2 à F24) se passent de modificateur
+raccourci-err-laissee-aux-programmes = « { $nom } » reste au shell et aux programmes (Ctrl+lettre, Alt+lettre, Ctrl+Alt+lettre, Ctrl+Espace, Ctrl+crochets, barre oblique inverse, accent circonflexe, tiret bas, arobase) ; ajoutez Maj ou utilisez Super

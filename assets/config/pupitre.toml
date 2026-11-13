@@ -97,8 +97,11 @@ cloche_onglet = true
 # Un raccourci invalide, ou donné à deux actions, est signalé avec sa ligne et l'action garde
 # son raccourci par défaut. Non modifiables, toujours disponibles : Ctrl+Tab et Ctrl+Maj+Tab
 # (sortir du terminal), Alt+1 à Alt+9 (onglets), Ctrl+Page suivante et Ctrl+Page précédente.
-# Tab, F1 et F10 restent aux programmes et ne peuvent pas être pris. Sans Ctrl, Alt ni Super,
-# seules les touches de fonction (F2 à F24, sauf F10) sont acceptées.
+# Tab, F1 et F10 restent aux programmes et ne peuvent pas être pris. Ctrl+lettre, Alt+lettre
+# et Ctrl+Alt+lettre (Ctrl+C, Ctrl+D, Alt+B…), ainsi que Ctrl+Espace et Ctrl+[ \ ] ^ _ @,
+# restent au shell et aux programmes : ils sont refusés ; ajoutez Maj (Ctrl+Maj+K) ou prenez
+# Super. Sans Ctrl, Alt ni Super, seules les touches de fonction (F2 à F24, sauf F10) sont
+# acceptées.
 [raccourcis]
 # nouvel_onglet = "Ctrl+Maj+T"
 # fermer_onglet = "Ctrl+Maj+W"
