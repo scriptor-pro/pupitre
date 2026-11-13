@@ -375,3 +375,16 @@ commande-navigation-impossible = Navigation impossible pour l'instant.
 
 disposition-annonce = Disposition du clavier : { $nom }
 disposition-aide = Disposition du clavier en cours
+
+## Raccourcis clavier modifiables ([raccourcis])
+
+raccourci-refuse = [raccourcis] « { $cle } » : « { $valeur } » refusé, { $raison } ; le raccourci par défaut est gardé.
+raccourci-cle-inconnue = [raccourcis] clé inconnue « { $cle } » ; clés possibles : { $cles }. Cette ligne est ignorée.
+raccourci-conflit = [raccourcis] « { $combinaison } » est demandé par plusieurs actions ({ $actions }) ; elles gardent leur raccourci par défaut.
+raccourci-membre-ligne = { $cle } (ligne { $ligne })
+raccourci-err-touche-manquante = il manque la touche (exemple : « Ctrl+Maj+T »)
+raccourci-err-modificateur-inconnu = modificateur « { $nom } » inconnu (Ctrl, Maj, Alt ou Super)
+raccourci-err-modificateur-repete = modificateur « { $nom } » répété
+raccourci-err-touche-inconnue = touche « { $nom } » inconnue
+raccourci-err-reservee = « { $nom } » est réservé : Tab, F1 et F10 restent aux programmes, et Ctrl+Tab, Ctrl+Maj+Tab, Alt+1 à Alt+9, Ctrl+Page suivante et Ctrl+Page précédente sont toujours disponibles
+raccourci-err-sans-modificateur = sans Ctrl, Alt ni Super, la touche resterait au shell ; seules les touches de fonction (F2 à F24) se passent de modificateur

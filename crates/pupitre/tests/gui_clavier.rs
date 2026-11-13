@@ -99,6 +99,7 @@ fn main() {
     ex.lancer("bandeau_non_focalisable", || {
         bandeau_non_focalisable(&p, &f)
     });
+    ex.lancer("raccourcis_modifiables", || raccourcis_modifiables(&p, &f));
     fermer_sessions(&dossier.path().join("pupitre/fond.sock"));
     ex.conclure();
 }
@@ -818,4 +819,76 @@ fn bandeau_par_onglet(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
     patienter(Duration::from_millis(300));
     s.changer_pour_tests(&[FR_DVORAK], 0);
     res
+}
+
+/// `[raccourcis]` : le nouveau raccourci agit (et l'ancien non), le menu l'affiche, une ligne
+/// refusée donne un message persistant avec sa ligne sans rien changer d'autre, et le retour
+/// à la configuration par défaut remet tout.
+fn raccourcis_modifiables(p: &Rc<Pupitre>, f: &FenetrePupitre) -> Resultat {
+    use pupitre_config::ReglageRaccourci;
+    let reglage = |cle: &str, valeur: &str, ligne| ReglageRaccourci {
+        cle: cle.into(),
+        valeur: valeur.into(),
+        ligne: Some(ligne),
+    };
+    let t = actif(f).terminal().terminal().clone();
+    let agrandir = || {
+        f.raccourcis_affiches_du_menu()
+            .into_iter()
+            .find(|(l, _)| l == &pupitre_i18n::t("menu-agrandir"))
+            .and_then(|(_, a)| a)
+    };
+    verifier(agrandir().as_deref() == Some("<Control>plus"), || {
+        format!("menu au départ : {:?}", agrandir())
+    })?;
+    p.appliquer_config(Ok(Config {
+        raccourcis: vec![
+            reglage("zoom_plus", "Ctrl+Maj+X", 3),
+            reglage("copier", "Ctrl+Truc", 4),
+        ],
+        ..Config::default()
+    }));
+    let res = (|| {
+        let ancien = t.font_scale();
+        verifier(!touche(f, gdk::Key::plus, 21, CTRL), || {
+            "l'ancien raccourci Ctrl+plus agit encore".into()
+        })?;
+        verifier((t.font_scale() - ancien).abs() < 1e-9, || {
+            "Ctrl+plus a zoomé".into()
+        })?;
+        verifier(touche(f, gdk::Key::X, 53, CTRL_MAJ), || {
+            "Ctrl+Maj+X non reconnu".into()
+        })?;
+        verifier(t.font_scale() > ancien, || {
+            "Ctrl+Maj+X n'a pas zoomé".into()
+        })?;
+        verifier(agrandir().as_deref() == Some("<Control><Shift>x"), || {
+            format!("menu après configuration : {:?}", agrandir())
+        })?;
+        let msg = f.messages().join(" ");
+        verifier(msg.contains("ligne 4") && msg.contains("Truc"), || {
+            format!("pas de message pour la ligne 4 : {msg:?}")
+        })?;
+        // Copier garde son défaut malgré la valeur refusée.
+        verifier(touche(f, gdk::Key::C, 54, CTRL_MAJ), || {
+            "Ctrl+Maj+C ne copie plus".into()
+        })
+    })();
+    p.appliquer_config(Ok(Config::default()));
+    touche(f, gdk::Key::_0, 19, CTRL);
+    res?;
+    verifier(agrandir().as_deref() == Some("<Control>plus"), || {
+        format!("menu après retour au défaut : {:?}", agrandir())
+    })?;
+    verifier(
+        !f.messages().iter().any(|m| m.contains("[raccourcis]")),
+        || "message de raccourcis resté".into(),
+    )?;
+    let avant = t.font_scale();
+    touche(f, gdk::Key::plus, 21, CTRL);
+    let r = t.font_scale() > avant;
+    touche(f, gdk::Key::_0, 19, CTRL);
+    verifier(r, || {
+        "Ctrl+plus ne marche plus après retour au défaut".into()
+    })
 }

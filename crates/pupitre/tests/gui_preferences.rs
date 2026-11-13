@@ -186,7 +186,7 @@ fn editeur_terminal(p: &Rc<Pupitre>) -> Resultat {
     };
     // La fin du pupitre.toml par défaut (le début a défilé hors de la vue).
     let ok = attendre(Duration::from_secs(10), || {
-        texte().contains("# commande = [\"ssh\", \"serveur\"]")
+        texte().contains("# aide = \"Ctrl+Maj+H\"")
     });
     verifier(ok, || format!("fichier non affiché : {:?}", texte()))?;
     verifier(o.titre() == "pupitre.toml", || {

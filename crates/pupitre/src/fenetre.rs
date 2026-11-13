@@ -18,7 +18,7 @@ use crate::notifications::{
     bulle_permise, id_bulle, Bulle, EnvoiBulle, Indicateur, SEUIL_BULLE_COMMANDE_MS,
 };
 use crate::preferences::{FichierPrefs, Lanceur};
-use crate::raccourcis::{raccourci, Raccourci};
+use crate::raccourcis::{raccourci, raccourci_dans, Raccourci, TableRaccourcis};
 use crate::rechargement::{surveiller, surveiller_fichiers, Surveillance};
 use crate::recherche::BarreRecherche;
 use crate::shells::{self, Choix};
@@ -59,6 +59,8 @@ const CLE_THEME: &str = "theme";
 const CLE_CONTRASTE: &str = "contraste";
 const CLE_POLICE: &str = "police";
 const CLE_SURVEILLANCE: &str = "surveillance";
+/// Refus dans `[raccourcis]` (valeur invalide, conflit) : message persistant.
+const CLE_RACCOURCIS: &str = "raccourcis";
 const CLE_FOND_ANCIEN: &str = "fond-ancien";
 const CLE_CONNEXIONS: &str = "connexions-invalides";
 /// Police embarquée, utilisée si celle demandée est introuvable.
@@ -374,6 +376,8 @@ pub struct Pupitre {
     socket: PathBuf,
     /// Configuration lue (dernière valide).
     config: RefCell<Config>,
+    /// Raccourcis en vigueur (défauts et `[raccourcis]`).
+    raccourcis: RefCell<TableRaccourcis>,
     /// Configuration appliquée (police de secours éventuelle).
     config_effective: RefCell<Config>,
     theme: RefCell<Theme>,
@@ -417,6 +421,7 @@ impl Pupitre {
             app: app.clone(),
             socket,
             config: RefCell::new(config.clone()),
+            raccourcis: RefCell::new(TableRaccourcis::defaut()),
             config_effective: RefCell::new(config.clone()),
             theme: RefCell::new(theme_sombre()),
             preference: Cell::new(Preference::SansPreference),
@@ -639,6 +644,11 @@ impl Pupitre {
             Ok(c) => {
                 self.poser_message(CLE_CONFIG, None);
                 self.disposition.definir_mode(c.bandeau_clavier);
+                // Une ligne refusée de `[raccourcis]` n'invalide pas le reste : défaut gardé
+                // pour l'action fautive, message persistant avec la ligne.
+                let (table, refus) = TableRaccourcis::depuis_reglages(&c.raccourcis);
+                *self.raccourcis.borrow_mut() = table;
+                self.poser_message(CLE_RACCOURCIS, (!refus.is_empty()).then(|| refus.join(" ")));
                 *self.config.borrow_mut() = c;
             }
             Err(e) => {
@@ -747,6 +757,7 @@ impl Pupitre {
         self.changer_theme(theme);
         for f in self.fenetres() {
             f.rafraichir_shells();
+            f.rafraichir_menu();
         }
     }
 
@@ -1296,6 +1307,8 @@ pub struct FenetreInterne {
     menu: gtk::MenuButton,
     /// Sous-menu « Nouvel onglet avec » (refait quand les réglages changent).
     sous_menu_shells: gio::Menu,
+    /// Raccourcis affichés dans le menu (refait quand ils changent).
+    raccourcis_du_menu: RefCell<TableRaccourcis>,
     /// Ne pas fermer la fenêtre quand son dernier onglet part (reconnexion en cours).
     garder_ouverte: Cell<bool>,
     fermee: Cell<bool>,
@@ -1327,7 +1340,8 @@ impl FenetrePupitre {
         // Ctrl+Tab met le focus sur le carnet lui-même : sans nom, Orca dirait seulement
         // « groupement ». Sa description donne l'onglet courant (voir `decrire_onglets`).
         carnet.update_property(&[gtk::accessible::Property::Label(&tr("onglets-nom"))]);
-        let (menu, sous_menu_shells) = bouton_menu();
+        let table = pupitre.raccourcis.borrow().clone();
+        let (menu, sous_menu_shells) = bouton_menu(&table);
         carnet.set_action_widget(&menu, gtk::PackType::End);
 
         let bandeau = BandeauMessages::new();
@@ -1346,6 +1360,7 @@ impl FenetrePupitre {
             recherche,
             menu,
             sous_menu_shells,
+            raccourcis_du_menu: RefCell::new(table),
             garder_ouverte: Cell::new(false),
             fermee: Cell::new(false),
             pupitre: Rc::downgrade(pupitre),
@@ -1524,6 +1539,20 @@ impl FenetrePupitre {
         }
     }
 
+    /// Refait le menu quand les raccourcis en vigueur ont changé (inchangés : laissé tel quel,
+    /// pour ne pas perdre la surbrillance d'un menu ouvert).
+    fn rafraichir_menu(&self) {
+        let Some(p) = self.pupitre() else { return };
+        let table = p.raccourcis.borrow().clone();
+        if *self.0.raccourcis_du_menu.borrow() == table {
+            return;
+        }
+        self.0
+            .menu
+            .set_menu_model(Some(&construire_menu(&table, &self.0.sous_menu_shells)));
+        *self.0.raccourcis_du_menu.borrow_mut() = table;
+    }
+
     /// Ouvre `argv` (une commande `ssh …`) dans un nouvel onglet de cette fenêtre. `titre`
     /// reste affiché tant que le programme n'en donne pas.
     pub fn ouvrir_connexion(&self, argv: Vec<String>, titre: String) {
@@ -1672,7 +1701,11 @@ impl FenetrePupitre {
 
     /// Exécute le raccourci de la touche, s'il y en a un ; vrai si la touche est consommée.
     pub fn traiter_touche(&self, touche: gdk::Key, code: u32, mods: gdk::ModifierType) -> bool {
-        match raccourci(touche, code, mods) {
+        let trouve = match self.pupitre() {
+            Some(p) => raccourci_dans(&p.raccourcis.borrow(), touche, code, mods),
+            None => raccourci(touche, code, mods),
+        };
+        match trouve {
             Some(r) => {
                 self.executer(r);
                 true
@@ -1831,6 +1864,31 @@ impl FenetrePupitre {
     /// Bouton du menu principal.
     pub fn bouton_menu(&self) -> gtk::MenuButton {
         self.0.menu.clone()
+    }
+
+    /// Entrées du menu principal (sans le sous-menu « Nouvel onglet avec ») avec leur
+    /// raccourci affiché : `(libellé, accélérateur GTK)`.
+    pub fn raccourcis_affiches_du_menu(&self) -> Vec<(String, Option<String>)> {
+        fn parcourir(m: &gio::MenuModel, sortie: &mut Vec<(String, Option<String>)>) {
+            let texte = |i: i32, attr: &str| {
+                m.item_attribute_value(i, attr, Some(glib::VariantTy::STRING))
+                    .and_then(|v| v.get::<String>())
+            };
+            for i in 0..m.n_items() {
+                if let Some(section) = m.item_link(i, "section") {
+                    parcourir(&section, sortie);
+                } else if let Some(libelle) = texte(i, "label") {
+                    if m.item_link(i, "submenu").is_none() {
+                        sortie.push((libelle, texte(i, "accel")));
+                    }
+                }
+            }
+        }
+        let mut sortie = Vec::new();
+        if let Some(m) = self.0.menu.menu_model() {
+            parcourir(&m, &mut sortie);
+        }
+        sortie
     }
 
     /// « Aucun résultat » si la dernière recherche n'a rien trouvé, sinon vide.
@@ -2234,11 +2292,12 @@ fn menu_onglet() -> gio::Menu {
 }
 
 /// Menu principal, à droite de la barre d'onglets.
-fn bouton_menu() -> (gtk::MenuButton, gio::Menu) {
+fn construire_menu(table: &TableRaccourcis, sous_menu_shells: &gio::Menu) -> gio::Menu {
     let m = gio::Menu::new();
-    let item = |libelle: &str, action: &str, accel: Option<&str>| {
+    // Les raccourcis affichés sont ceux en vigueur (défauts et `[raccourcis]`).
+    let item = |libelle: &str, action: &str, accel: Option<Raccourci>| {
         let i = gio::MenuItem::new(Some(libelle), Some(action));
-        if let Some(a) = accel {
+        if let Some(a) = accel.and_then(|r| table.accelerateur(r)) {
             i.set_attribute_value("accel", Some(&a.to_variant()));
         }
         i
@@ -2246,57 +2305,56 @@ fn bouton_menu() -> (gtk::MenuButton, gio::Menu) {
     m.append_item(&item(
         &tr("menu-nouvel-onglet"),
         "win.nouvel-onglet",
-        Some("<Control><Shift>t"),
+        Some(Raccourci::NouvelOnglet),
     ));
-    let sous_menu_shells = gio::Menu::new();
-    m.append_submenu(Some(&tr("menu-nouvel-onglet-avec")), &sous_menu_shells);
+    m.append_submenu(Some(&tr("menu-nouvel-onglet-avec")), sous_menu_shells);
     m.append_item(&item(
         &tr("menu-nouvelle-fenetre"),
         "win.nouvelle-fenetre",
-        Some("<Control><Shift>n"),
+        Some(Raccourci::NouvelleFenetre),
     ));
     m.append_item(&item(
         &tr("menu-connexions"),
         "win.connexions",
-        Some("<Control><Shift>o"),
+        Some(Raccourci::Connexions),
     ));
     let edition = gio::Menu::new();
     edition.append_item(&item(
         &tr("menu-copier"),
         "win.copier",
-        Some("<Control><Shift>c"),
+        Some(Raccourci::Copier),
     ));
     edition.append_item(&item(
         &tr("menu-coller"),
         "win.coller",
-        Some("<Control><Shift>v"),
+        Some(Raccourci::Coller),
     ));
     edition.append_item(&item(
         &tr("menu-rechercher"),
         "win.rechercher",
-        Some("<Control><Shift>f"),
+        Some(Raccourci::Rechercher),
     ));
     m.append_section(None, &edition);
     let affichage = gio::Menu::new();
     affichage.append_item(&item(
         &tr("menu-agrandir"),
         "win.zoom-plus",
-        Some("<Control>plus"),
+        Some(Raccourci::ZoomPlus),
     ));
     affichage.append_item(&item(
         &tr("menu-reduire"),
         "win.zoom-moins",
-        Some("<Control>minus"),
+        Some(Raccourci::ZoomMoins),
     ));
     affichage.append_item(&item(
         &tr("menu-taille-normale"),
         "win.zoom-normal",
-        Some("<Control>0"),
+        Some(Raccourci::ZoomNormal),
     ));
     affichage.append_item(&item(
         &tr("menu-plein-ecran"),
         "win.plein-ecran",
-        Some("F11"),
+        Some(Raccourci::PleinEcran),
     ));
     m.append_section(None, &affichage);
     let onglet = gio::Menu::new();
@@ -2313,7 +2371,7 @@ fn bouton_menu() -> (gtk::MenuButton, gio::Menu) {
     onglet.append_item(&item(
         &tr("menu-fermer-onglet"),
         "win.fermer-onglet",
-        Some("<Control><Shift>w"),
+        Some(Raccourci::FermerOnglet),
     ));
     m.append_section(None, &onglet);
     let preferences = gio::Menu::new();
@@ -2331,9 +2389,16 @@ fn bouton_menu() -> (gtk::MenuButton, gio::Menu) {
     aide.append_item(&item(
         &tr("menu-aide-pupitre"),
         "win.aide",
-        Some("<Control><Shift>h"),
+        Some(Raccourci::Aide),
     ));
     m.append_section(None, &aide);
+    m
+}
+
+/// Bouton du menu principal, à droite de la barre d'onglets.
+fn bouton_menu(table: &TableRaccourcis) -> (gtk::MenuButton, gio::Menu) {
+    let sous_menu_shells = gio::Menu::new();
+    let m = construire_menu(table, &sous_menu_shells);
     let b = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         // Pas de F10 : la touche reste aux programmes (mc, htop… quittent par F10).

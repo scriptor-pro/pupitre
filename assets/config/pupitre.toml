@@ -88,3 +88,31 @@ programme_bulle = true
 presse_papiers = true
 # La cloche sonne dans un onglet non affiché : ● sur l'onglet.
 cloche_onglet = true
+
+# Raccourcis clavier. Chaque ligne ci-dessous (sans le # du début) change le raccourci d'une
+# action ; une action absente garde son raccourci par défaut, indiqué ici.
+# Écriture : modificateurs Ctrl, Maj, Alt, Super joints par +, puis la touche : "Ctrl+Maj+T",
+# "Alt+Q", "F11", "Ctrl+Page suivante", "Ctrl+plus", "Ctrl+Maj+↑". "" supprime le raccourci.
+# Les raccourcis suivent la touche physique : ils marchent avec toutes les dispositions.
+# Un raccourci invalide, ou donné à deux actions, est signalé avec sa ligne et l'action garde
+# son raccourci par défaut. Non modifiables, toujours disponibles : Ctrl+Tab et Ctrl+Maj+Tab
+# (sortir du terminal), Alt+1 à Alt+9 (onglets), Ctrl+Page suivante et Ctrl+Page précédente.
+# Tab, F1 et F10 restent aux programmes et ne peuvent pas être pris. Sans Ctrl, Alt ni Super,
+# seules les touches de fonction (F2 à F24, sauf F10) sont acceptées.
+[raccourcis]
+# nouvel_onglet = "Ctrl+Maj+T"
+# fermer_onglet = "Ctrl+Maj+W"
+# nouvelle_fenetre = "Ctrl+Maj+N"
+# connexions = "Ctrl+Maj+O"
+# copier = "Ctrl+Maj+C"
+# coller = "Ctrl+Maj+V"
+# rechercher = "Ctrl+Maj+F"
+# onglet_suivant = "Ctrl+Page suivante"
+# onglet_precedent = "Ctrl+Page précédente"
+# plein_ecran = "F11"
+# zoom_plus = "Ctrl+plus"
+# zoom_moins = "Ctrl+moins"
+# zoom_normal = "Ctrl+0"
+# commande_precedente = "Ctrl+Maj+↑"
+# commande_suivante = "Ctrl+Maj+↓"
+# aide = "Ctrl+Maj+H"

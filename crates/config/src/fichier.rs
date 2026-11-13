@@ -69,6 +69,39 @@ pub struct Config {
     pub shells: Vec<ShellDeclare>,
     /// Section `[notifications]` : ce qui signale un événement, et par quel canal.
     pub notifications: ReglagesNotifications,
+    /// Section `[raccourcis]` : une entrée par action dont le raccourci est changé (texte brut ;
+    /// l'analyse et la validation se font dans Pupitre, qui garde le défaut en cas d'erreur).
+    #[serde(deserialize_with = "raccourcis_lus")]
+    pub raccourcis: Vec<ReglageRaccourci>,
+}
+
+/// Actions dont le raccourci se change dans `[raccourcis]`, dans l'ordre du fichier par défaut.
+pub const ACTIONS_RACCOURCIS: &[&str] = &[
+    "nouvel_onglet",
+    "fermer_onglet",
+    "nouvelle_fenetre",
+    "connexions",
+    "copier",
+    "coller",
+    "rechercher",
+    "onglet_suivant",
+    "onglet_precedent",
+    "plein_ecran",
+    "zoom_plus",
+    "zoom_moins",
+    "zoom_normal",
+    "commande_precedente",
+    "commande_suivante",
+    "aide",
+];
+
+/// Une ligne de `[raccourcis]` : l'action, la combinaison écrite (vide : aucun raccourci) et
+/// la ligne du fichier (absente si la configuration ne vient pas d'un fichier).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReglageRaccourci {
+    pub cle: String,
+    pub valeur: String,
+    pub ligne: Option<usize>,
 }
 
 /// Section `[notifications]` : chaque case est réglable, tout est actif par défaut.
@@ -157,6 +190,7 @@ impl Default for Config {
             bandeau_clavier: BandeauClavier::Nom,
             shells: Vec::new(),
             notifications: ReglagesNotifications::default(),
+            raccourcis: Vec::new(),
         }
     }
 }
@@ -188,7 +222,30 @@ impl std::error::Error for ErreurConfig {}
 /// Lit et valide le fichier. Ne panique jamais ; en cas d'erreur, l'appelant garde
 /// la configuration précédente (ou les défauts) et affiche le message.
 pub fn charger(chemin: &Path) -> Result<Config, ErreurConfig> {
-    lire_toml(chemin)
+    let texte = lire_texte(chemin)?;
+    let mut config: Config =
+        toml::from_str(&texte).map_err(|e| erreur_toml(&texte, &e, CLES_CONFIG))?;
+    for r in &mut config.raccourcis {
+        r.ligne = ligne_de_cle(&texte, "[raccourcis]", &r.cle);
+    }
+    Ok(config)
+}
+
+/// Ligne (à partir de 1) de la clé `cle` dans la table `section` (« [raccourcis] »).
+fn ligne_de_cle(texte: &str, section: &str, cle: &str) -> Option<usize> {
+    let mut courante = "";
+    for (i, l) in texte.lines().enumerate() {
+        let l = l.trim();
+        if l.starts_with('[') {
+            courante = l.split('#').next().unwrap_or(l).trim_end();
+        } else if courante == section
+            && l.strip_prefix(cle)
+                .is_some_and(|r| r.trim_start().starts_with('='))
+        {
+            return Some(i + 1);
+        }
+    }
+    None
 }
 
 /// Lit un fichier TOML (taille bornée, UTF-8) et le désérialise ; les erreurs portent le
@@ -408,6 +465,26 @@ impl<'de> Deserialize<'de> for ThemeChoix {
             ))),
         }
     }
+}
+
+/// Table `[raccourcis]` : clés et valeurs gardées telles quelles, sans rien refuser ici (une clé
+/// inconnue, une valeur invalide ou qui n'est pas du texte sont signalées avec leur ligne par
+/// Pupitre, sans invalider le reste ; un texte vide supprime le raccourci).
+fn raccourcis_lus<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<ReglageRaccourci>, D::Error> {
+    let table = std::collections::BTreeMap::<String, toml::Value>::deserialize(d)?;
+    let mut lus = Vec::new();
+    for (cle, v) in table {
+        let valeur = match v {
+            toml::Value::String(s) => s,
+            autre => autre.to_string(),
+        };
+        lus.push(ReglageRaccourci {
+            cle,
+            valeur,
+            ligne: None,
+        });
+    }
+    Ok(lus)
 }
 
 fn police_valide<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {

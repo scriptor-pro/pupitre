@@ -78,6 +78,37 @@ Touches laissées volontairement aux programmes :
 - **F1** et **F10** restent aux programmes (aide et sortie de mc, htop…) ;
 - **Ctrl+lettre** reste aux programmes.
 
+### Changer un raccourci
+
+Le tableau ci-dessus donne les raccourcis par défaut. Pour en changer un, ouvrez la
+configuration (menu ▸ Préférences ▸ « Modifier la configuration… ») et retirez le `#` de la
+ligne voulue dans la section `[raccourcis]`, puis écrivez la nouvelle combinaison :
+
+```toml
+[raccourcis]
+nouvel_onglet = "Ctrl+Maj+J"
+plein_ecran = "F9"
+aide = ""
+```
+
+- **Écriture** : les modificateurs `Ctrl`, `Maj`, `Alt` et `Super`, joints par `+`, puis la
+  touche ; la casse et l'ordre n'ont pas d'importance (`"maj+ctrl+t"` vaut `"Ctrl+Maj+T"`).
+  Les noms de touches sont ceux de ce tableau : `plus`, `moins`, `Page suivante`, `↑`, `F11`…
+- **Supprimer un raccourci** : une valeur vide, `""`. L'action reste dans le menu.
+- **Les clés** : `nouvel_onglet`, `fermer_onglet`, `nouvelle_fenetre`, `connexions`, `copier`,
+  `coller`, `rechercher`, `onglet_suivant`, `onglet_precedent`, `plein_ecran`, `zoom_plus`,
+  `zoom_moins`, `zoom_normal`, `commande_precedente`, `commande_suivante` et `aide`.
+- **Toujours disponibles** (non modifiables, pour que le clavier mène partout) : Ctrl+Tab et
+  Ctrl+Maj+Tab, Alt+1 à Alt+9, Ctrl+Page suivante et Ctrl+Page précédente.
+- **Réservées aux programmes** : Tab, F1 et F10 ne peuvent pas être prises. Sans Ctrl, Alt ni
+  Super, seules les touches de fonction (F2 à F24) sont acceptées, pour ne pas voler la
+  frappe au shell.
+- Les raccourcis suivent la touche, comme ci-dessus : ils marchent avec votre disposition.
+- **En cas d'erreur** (touche inconnue, combinaison refusée, même combinaison donnée à deux
+  actions), Pupitre affiche un message avec la ligne fautive ; les actions concernées gardent
+  leur raccourci par défaut et le reste de la configuration s'applique normalement.
+- Le menu affiche les raccourcis en vigueur. Le changement est appliqué dès l'enregistrement.
+
 ## 3. Onglets et fenêtres
 
 - **Ouvrir** : Ctrl+Maj+T ou menu ▸ « Nouvel onglet ». Le nouvel onglet reprend le shell de
@@ -406,6 +437,7 @@ un message avec le chemin complet du fichier, à ouvrir vous-même.
 | `copie_selection` | `true` | `true` ou `false` |
 | `bandeau_clavier` | `"nom"` | `"nom"`, `"code"` ou `"masque"` |
 | `[notifications]` | tout à `true` | voir ci-dessous |
+| `[raccourcis]` | aucun changement | voir « Changer un raccourci » (section 2) |
 | `langue` (à venir) | `""` (langue du système) | `"fr"`, `"en"`, `"es"`, `"it"`, `"de"`, `"nl"` ; appliqué au prochain lancement |
 
 La section `[notifications]` a six cases, chacune `true` (oui, par défaut) ou `false` (non) :
@@ -538,7 +570,6 @@ l'enregistrement ne laisse jamais un fichier à moitié écrit.
 ## 18. Prévu plus tard
 
 - Thèmes à contraste élevé (7:1), sombre et clair.
-- Raccourcis modifiables.
 - Fenêtre de réglages (police, taille, thème, shell, invite, annonces), accessible au
   clavier et avec Orca.
 - Paquet `.deb`.

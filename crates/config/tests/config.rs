@@ -460,3 +460,63 @@ fn cle_inconnue_refusee() -> R {
     assert!(!e.message.contains("police"), "{}", e.message);
     Ok(())
 }
+
+#[test]
+fn raccourcis_lus_avec_leur_ligne() -> R {
+    assert!(Config::default().raccourcis.is_empty());
+    let d = tempfile::tempdir()?;
+    let chemin = d.path().join("pupitre.toml");
+    std::fs::write(
+        &chemin,
+        "police = \"B612 Mono 11\"\n\n[raccourcis]\n# un commentaire\ncopier = \"Ctrl+Maj+X\"\ncoller = \"\"\nplein_ecran = 5\n",
+    )?;
+    let c = charger(&chemin).map_err(|e| e.message)?;
+    let lu = |cle: &str| c.raccourcis.iter().find(|r| r.cle == cle).cloned();
+    let copier = lu("copier").unwrap();
+    assert_eq!(
+        (copier.valeur.as_str(), copier.ligne),
+        ("Ctrl+Maj+X", Some(5))
+    );
+    let coller = lu("coller").unwrap();
+    assert_eq!((coller.valeur.as_str(), coller.ligne), ("", Some(6)));
+    // Une valeur qui n'est pas du texte n'invalide pas le fichier : elle sera refusée plus tard.
+    assert_eq!(lu("plein_ecran").unwrap().ligne, Some(7));
+    // Le reste de la configuration ne bouge pas.
+    assert_eq!(
+        Config {
+            raccourcis: Vec::new(),
+            ..c
+        },
+        Config::default()
+    );
+    Ok(())
+}
+
+#[test]
+fn raccourcis_cle_inconnue_gardee_avec_sa_ligne() -> R {
+    let d = tempfile::tempdir()?;
+    let chemin = d.path().join("pupitre.toml");
+    std::fs::write(&chemin, "[raccourcis]\ncopie = \"Ctrl+Maj+X\"\n")?;
+    // La configuration reste valide : c'est Pupitre qui signale la clé, avec sa ligne.
+    let c = charger(&chemin).map_err(|e| e.message)?;
+    assert_eq!(c.raccourcis.len(), 1);
+    assert_eq!(
+        (c.raccourcis[0].cle.as_str(), c.raccourcis[0].ligne),
+        ("copie", Some(2))
+    );
+    Ok(())
+}
+
+#[test]
+fn fichier_par_defaut_sans_raccourcis_actifs() -> R {
+    let c: Config = toml::from_str(CONFIG_DEFAUT)?;
+    assert_eq!(c, Config::default());
+    // Chaque action est listée (commentée) dans le fichier par défaut.
+    for cle in ACTIONS_RACCOURCIS {
+        assert!(
+            CONFIG_DEFAUT.contains(&format!("# {cle} = \"")),
+            "clé non documentée : {cle}"
+        );
+    }
+    Ok(())
+}
